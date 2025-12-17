@@ -8,6 +8,8 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+dotenv.config({path:path.join(__dirname, '.env')});
+
 // Get database setting from environment variable (default to 'cloud' for PostgreSQL)
 const DATABASE_SETTING = (process.env.DATABASE_SETTING || 'cloud').toLowerCase();
 
@@ -32,6 +34,7 @@ if (DATABASE_SETTING === 'local') {
   console.log('📦 Using SQLite database (local mode)');
   console.log(`📍 Database file: ${dbPath}`);
 } else {
+  console.log("~~~~~~~~~~~~~~~~~~~~~~~Database url~~~~~~~~~~~~~~~~~~~~~~~~~~~", process.env.DATABASE_URL);
   // PostgreSQL configuration for cloud database
   if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL is required when DATABASE_SETTING is "cloud"');
