@@ -114,7 +114,22 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
       // Check if WebHID API is available (requires HTTPS)
       if (navigator.hid) {
         try {
-          // Request access to HID devices
+          // First, check already connected devices (no user interaction needed)
+          const existingDevices = await navigator.hid.getDevices();
+          const bbposDevice = existingDevices.find(d => 
+            d.productName?.includes('BBPOS') || 
+            d.productName?.includes('Chipper') || 
+            d.productName?.includes('CHIPPER') ||
+            d.productName?.includes('CHB')
+          );
+          
+          if (bbposDevice) {
+            setUsbReaderConnected(true);
+            showToast('BBPOS Chipper 3X USB reader detected!', 'success', 2000);
+            return true;
+          }
+          
+          // If not found in existing devices, request access (requires user interaction)
           const devices = await navigator.hid.requestDevice({
             filters: [
               { vendorId: 0x0bda }, // Common USB device vendor IDs
@@ -125,9 +140,23 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
           });
           
           if (devices && devices.length > 0) {
-            setUsbReaderConnected(true);
-            showToast('USB card reader detected!', 'success', 2000);
-            return true;
+            // Check if any device is a BBPOS reader
+            const bbposFound = devices.some(d => 
+              d.productName?.includes('BBPOS') || 
+              d.productName?.includes('Chipper') || 
+              d.productName?.includes('CHIPPER') ||
+              d.productName?.includes('CHB')
+            );
+            
+            if (bbposFound) {
+              setUsbReaderConnected(true);
+              showToast('BBPOS Chipper 3X USB reader detected!', 'success', 2000);
+              return true;
+            } else {
+              setUsbReaderConnected(false);
+              showToast('USB device found, but not recognized as BBPOS Chipper 3X.', 'warning', 3000);
+              return false;
+            }
           } else {
             setUsbReaderConnected(false);
             showToast('No USB card reader detected. Please check connection.', 'error', 3000);
@@ -184,6 +213,7 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
             filters: [
               { namePrefix: 'BBPOS' },
               { namePrefix: 'Chipper' },
+              { namePrefix: 'CHIPPER' },
               { namePrefix: 'CHB' }
             ],
             optionalServices: ['battery_service']

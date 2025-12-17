@@ -1,7 +1,18 @@
-# USB Card Reader Guide
+# USB Card Reader Guide - BBPOS Chipper 3X
 
 ## Overview
-Your BBPOS Chipper 3X card reader is connected via **USB** instead of Bluetooth. USB card readers work differently and are often easier to set up!
+Your **BBPOS Chipper 3X** card reader is connected via **USB** instead of Bluetooth. USB card readers work differently and are often easier to set up!
+
+## Device Information
+
+**Model:** BBPOS CHIPPER tm 3X  
+**Configuration Version:** ANAU_G kernel_v2  
+**Serial Number:** CHB30D515005535 (example)  
+**Firmware Version:** 2.01.00.24
+
+The system automatically detects devices with:
+- Product name containing: "BBPOS", "Chipper", "CHIPPER", or "CHB"
+- Serial numbers starting with "CHB" (BBPOS Chipper series)
 
 ## How USB Card Readers Work
 

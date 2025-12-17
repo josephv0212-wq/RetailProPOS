@@ -174,31 +174,6 @@ sudo git clone https://github.com/josephv0212-wq/RetailProPOS.git RetailProPOS
 cd RetailProPOS
 ```
 
-### Option C: Using SCP via MobaXterm Terminal
-
-```bash
-# In MobaXterm terminal, from your local machine
-scp -r C:\Users\Admin\Documents\GitHub\RetailProPOSBackend\RetailProPOS root@72.62.80.188:/var/www/RetailProPOS
-```
-
-### Recommended Directory Structure
-
-```bash
-# Create application directory
-sudo mkdir -p /var/www/RetailProPOS
-sudo chown -R $USER:$USER /var/www/RetailProPOS
-
-# Move your files here (after transfer)
-# Your structure should be:
-# /var/www/RetailProPOS/
-#   ├── client/
-#   ├── server/
-#   ├── package.json
-#   └── ...
-```
-
----
-
 ## Install Dependencies
 
 ```bash
@@ -223,79 +198,6 @@ cd ..
 ---
 
 ## Configure Environment Variables
-
-### Step 1: Create `.env` file for Server
-
-```bash
-cd /var/www/RetailProPOS/server
-nano .env
-```
-
-### Step 2: Add Required Environment Variables
-
-```env
-# Required
-JWT_SECRET=your-super-secret-jwt-key-change-this-to-random-string
-NODE_ENV=production
-PORT=3000
-
-# Database Configuration
-# Option 1: Use PostgreSQL (Cloud)
-DATABASE_SETTING=cloud
-DATABASE_URL=postgresql://username:password@localhost:5432/retailpro_pos
-
-# Option 2: Use SQLite (Local)
-# DATABASE_SETTING=local
-# (No DATABASE_URL needed for SQLite)
-
-# Frontend URL (Your domain)
-FRONTEND_URL=https://subzerodryice-pos.com,https://www.subzerodryice-pos.com
-
-# Optional: Registration Security
-REGISTRATION_KEY=your-registration-secret-key
-
-# Optional: Zoho Integration
-ZOHO_CLIENT_ID=your-zoho-client-id
-ZOHO_CLIENT_SECRET=your-zoho-client-secret
-ZOHO_REFRESH_TOKEN=your-zoho-refresh-token
-ZOHO_ORGANIZATION_ID=your-zoho-org-id
-
-# Optional: Authorize.Net Payment Gateway
-AUTHORIZE_NET_API_LOGIN_ID=your-api-login-id
-AUTHORIZE_NET_TRANSACTION_KEY=your-transaction-key
-
-# Optional: PAX Terminal
-PAX_TERMINAL_IP=192.168.1.100
-PAX_TERMINAL_PORT=10009
-PAX_TERMINAL_TIMEOUT=30000
-
-# Optional: Printer IPs
-PRINTER_IP_LOC001=192.168.1.101
-PRINTER_IP_LOC002=192.168.1.102
-PRINTER_IP_LOC003=192.168.1.103
-PRINTER_IP_LOC004=192.168.1.104
-```
-
-**Important Notes:**
-- Replace `JWT_SECRET` with a strong random string (use: `openssl rand -base64 32`)
-- Replace `subzerodryice-pos.com` with your actual domain
-- For PostgreSQL, you'll need to install and setup PostgreSQL first (see below)
-
-### Step 3: Save and Exit
-
-Press `Ctrl+X`, then `Y`, then `Enter`
-
-### Step 4: Copy `.env` to App Root (for PM2 / dotenv)
-
-The backend loads environment variables from the *current working directory* when started with PM2.
-To ensure `.env` is picked up correctly, copy it to the app root:
-
-```bash
-cd /var/www/RetailProPOS
-cp server/.env .env
-```
-
-> If you later change `server/.env`, run `cp server/.env .env` again, then restart PM2.
 
 ### Step 5: Setup PostgreSQL (If using cloud database)
 
@@ -535,17 +437,10 @@ sudo systemctl reload nginx
 ### Step 1: Setup UFW (Uncomplicated Firewall)
 
 ```bash
-# Allow SSH (important - don't lock yourself out!)
 sudo ufw allow 22/tcp
-
-# Allow HTTP and HTTPS
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
-
-# Enable firewall
 sudo ufw enable
-
-# Check status
 sudo ufw status
 ```
 
@@ -740,6 +635,320 @@ htop
 
 # Disk usage
 df -h
+```
+
+---
+
+## Daily Development Workflow: Fix Code → Push → Deploy
+
+This section explains the simple workflow for making code changes locally, pushing to Git, and deploying to your VPS.
+
+### Overview
+
+1. **Fix code on your local PC** (Windows)
+2. **Commit and push to Git** (GitHub)
+3. **Pull changes on VPS** (via SSH)
+4. **Rebuild and redeploy** (on VPS)
+
+---
+
+### Step 1: Fix Code on Local PC
+
+Make your code changes on your local Windows machine:
+
+```bash
+# Navigate to your project
+cd C:\Users\Admin\Documents\GitHub\RetailProPOSBackend\RetailProPOS
+
+# Make your code changes using your editor (VS Code, etc.)
+# Edit files, test locally, etc.
+```
+
+**Important Notes:**
+- Test your changes locally before pushing
+- Don't commit `.env` files (they're in `.gitignore`)
+- Don't commit `node_modules` folders
+
+---
+
+### Step 2: Commit and Push to Git
+
+Once your changes are ready:
+
+```bash
+# Check what files changed
+git status
+
+# Add all changed files (or specific files)
+git add .
+
+# Or add specific files only:
+# git add client/src/components/PaymentModal.jsx
+# git add server/services/bbposService.js
+
+# Commit with a descriptive message
+git commit -m "Add BBPOS Chipper 3X card reader support"
+
+# Push to GitHub
+git push origin main
+```
+
+**If you get errors about `.env` files:**
+
+If Git complains about `.env` files, they might have been tracked before. Fix it:
+
+```bash
+# Remove .env files from Git tracking (but keep local copies)
+git rm --cached .env 2>/dev/null || true
+git rm --cached client/.env 2>/dev/null || true
+git rm --cached server/.env 2>/dev/null || true
+
+# Commit the removal
+git commit -m "Remove .env files from Git tracking"
+
+# Push
+git push origin main
+```
+
+---
+
+### Step 3: Pull Changes on VPS
+
+Connect to your VPS via SSH (using MobaXterm or any SSH client):
+
+```bash
+# Connect to VPS (replace with your VPS IP)
+ssh root@86.104.72.45
+
+# Navigate to your project directory
+cd /var/www/RetailProPOS
+
+# Backup your .env files first (IMPORTANT!)
+cp .env .env.backup 2>/dev/null || true
+cp client/.env client/.env.backup 2>/dev/null || true
+cp server/.env server/.env.backup 2>/dev/null || true
+
+# Stash any local changes (if you made changes directly on VPS)
+git stash push -m "VPS local changes" 2>/dev/null || true
+
+# Remove .env files from Git tracking (if they were tracked)
+git rm --cached .env 2>/dev/null || true
+git rm --cached client/.env 2>/dev/null || true
+git rm --cached server/.env 2>/dev/null || true
+
+# Pull latest changes from GitHub
+git pull origin main
+
+# Restore your .env files
+if [ -f .env.backup ]; then mv .env.backup .env; fi
+if [ -f client/.env.backup ]; then mv client/.env.backup client/.env; fi
+if [ -f server/.env.backup ]; then mv server/.env.backup server/.env; fi
+```
+
+**If you get merge conflicts:**
+
+```bash
+# If git pull shows conflicts, you can:
+# Option 1: Discard local changes and use remote version
+git reset --hard origin/main
+git pull
+
+# Option 2: Keep local changes and merge
+git stash
+git pull
+git stash pop
+# Then resolve conflicts manually
+```
+
+---
+
+### Step 4: Install Dependencies (if needed)
+
+If you added new packages or updated `package.json`:
+
+```bash
+# Install root dependencies
+npm install
+
+# Install server dependencies
+cd server
+npm install
+cd ..
+
+# Install client dependencies
+cd client
+npm install
+cd ..
+```
+
+---
+
+### Step 5: Rebuild Frontend
+
+Always rebuild the frontend after pulling changes:
+
+```bash
+cd /var/www/RetailProPOS/client
+
+# Build for production
+npm run build
+
+# Verify build was successful
+ls -la dist/
+```
+
+---
+
+### Step 6: Restart Application
+
+Restart the PM2 process to apply changes:
+
+```bash
+cd /var/www/RetailProPOS
+
+# Restart the server
+pm2 restart RetailProPOS-server
+
+# Check status
+pm2 status
+
+# View logs to verify it started correctly
+pm2 logs RetailProPOS-server --lines 20
+```
+
+---
+
+### Complete One-Line Workflow Script
+
+For convenience, you can create a script on your VPS to do all steps at once:
+
+```bash
+# Create deployment script
+nano /var/www/RetailProPOS/deploy.sh
+```
+
+Add this content:
+
+```bash
+#!/bin/bash
+# Quick deployment script for RetailPro POS
+
+echo "🚀 Starting deployment..."
+
+# Backup .env files
+echo "📦 Backing up .env files..."
+cp .env .env.backup 2>/dev/null || true
+cp client/.env client/.env.backup 2>/dev/null || true
+cp server/.env server/.env.backup 2>/dev/null || true
+
+# Stash local changes
+echo "💾 Stashing local changes..."
+git stash push -m "Auto-stash before pull" 2>/dev/null || true
+
+# Pull latest changes
+echo "⬇️  Pulling latest changes from Git..."
+git pull origin main
+
+# Restore .env files
+echo "🔧 Restoring .env files..."
+if [ -f .env.backup ]; then mv .env.backup .env; fi
+if [ -f client/.env.backup ]; then mv client/.env.backup client/.env; fi
+if [ -f server/.env.backup ]; then mv server/.env.backup server/.env; fi
+
+# Install dependencies
+echo "📦 Installing dependencies..."
+npm install
+cd server && npm install && cd ..
+cd client && npm install && cd ..
+
+# Rebuild frontend
+echo "🏗️  Rebuilding frontend..."
+cd client && npm run build && cd ..
+
+# Restart application
+echo "🔄 Restarting application..."
+pm2 restart RetailProPOS-server
+
+echo "✅ Deployment complete!"
+echo "📊 Checking status..."
+pm2 status
+
+echo ""
+echo "🎉 Done! Your application is updated."
+```
+
+Make it executable:
+
+```bash
+chmod +x /var/www/RetailProPOS/deploy.sh
+```
+
+Then you can simply run:
+
+```bash
+cd /var/www/RetailProPOS
+./deploy.sh
+```
+
+---
+
+### Quick Reference: Common Commands
+
+| Task | Command |
+|------|---------|
+| **Local: Check changes** | `git status` |
+| **Local: Commit changes** | `git add . && git commit -m "message"` |
+| **Local: Push to GitHub** | `git push origin main` |
+| **VPS: Pull changes** | `git pull origin main` |
+| **VPS: Rebuild frontend** | `cd client && npm run build && cd ..` |
+| **VPS: Restart app** | `pm2 restart RetailProPOS-server` |
+| **VPS: View logs** | `pm2 logs RetailProPOS-server` |
+| **VPS: Quick deploy** | `./deploy.sh` (if script created) |
+
+---
+
+### Troubleshooting Deployment
+
+**Problem: Git pull fails with .env conflicts**
+
+```bash
+# Solution: Remove .env from tracking and pull again
+git rm --cached .env client/.env server/.env
+git commit -m "Remove .env files"
+git pull
+```
+
+**Problem: Frontend build fails**
+
+```bash
+# Solution: Clean and rebuild
+cd client
+rm -rf node_modules dist
+npm install
+npm run build
+```
+
+**Problem: PM2 won't restart**
+
+```bash
+# Solution: Stop and start fresh
+pm2 stop RetailProPOS-server
+pm2 delete RetailProPOS-server
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+**Problem: Changes not showing after deployment**
+
+```bash
+# Solution: Clear browser cache and check logs
+# 1. Hard refresh browser (Ctrl+F5)
+# 2. Check PM2 logs
+pm2 logs RetailProPOS-server
+# 3. Verify frontend was rebuilt
+ls -la client/dist/
+# 4. Check Nginx is serving new files
+sudo systemctl reload nginx
 ```
 
 ---
