@@ -1,0 +1,23 @@
+{
+  "name": "retailpro-pos",
+  "version": "1.0.0",
+  "description": "Complete POS System with Frontend and Backend",
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install && cd client && npm install && cd ../server && npm install",
+    "dev": "npm run server && npm run frontend",
+    "server": "cd server && npm run dev",
+    "frontend": "cd client && npm run dev",
+    "setup-users": "cd server && npm run setup-users",
+    "test-backend": "cd server && npm run test",
+    "get-zoho-token": "cd server && npm run get-zoho-token",
+    "build:client": "cd client && npm run build"
+  },
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "keywords": ["pos", "retail", "point-of-sale", "zoho", "authorize-net"],
+  "author": "",
+  "license": "MIT"
+}
