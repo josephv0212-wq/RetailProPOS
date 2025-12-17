@@ -1,7 +1,7 @@
 # USB Card Reader Guide
 
 ## Overview
-Your BBPOS AWC Walker C3X card reader is connected via **USB** instead of Bluetooth. USB card readers work differently and are often easier to set up!
+Your BBPOS Chipper 3X card reader is connected via **USB** instead of Bluetooth. USB card readers work differently and are often easier to set up!
 
 ## How USB Card Readers Work
 

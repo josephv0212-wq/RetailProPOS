@@ -66,6 +66,10 @@ if (missingOptional.length > 0) {
 
 const app = express();
 
+// Trust proxy (required when behind Nginx reverse proxy)
+// Set to 1 to trust only the first proxy (Nginx) - more secure than 'true'
+app.set('trust proxy', 1);
+
 // Request ID middleware (must be first)
 app.use(requestIdMiddleware);
 

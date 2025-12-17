@@ -1,7 +1,7 @@
 # Bluetooth Card Reader Testing Guide
 
 ## Overview
-This guide will help you test the BBPOS AWC Walker C3X Bluetooth card reader integration with your RetailPro POS system.
+This guide will help you test the BBPOS Chipper 3X card reader (USB/Bluetooth) integration with your RetailPro POS system.
 
 ## Prerequisites
 

@@ -183,8 +183,8 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
           const device = await navigator.bluetooth.requestDevice({
             filters: [
               { namePrefix: 'BBPOS' },
-              { namePrefix: 'AWC' },
-              { namePrefix: 'Walker' }
+              { namePrefix: 'Chipper' },
+              { namePrefix: 'CHB' }
             ],
             optionalServices: ['battery_service']
           });
@@ -299,10 +299,26 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
     try {
       // Validation based on payment method
       if (paymentMethod === 'credit_card' || paymentMethod === 'debit_card') {
-        if (useBluetoothReader && !bluetoothPayload) {
-          setError('Bluetooth reader must be paired and card scanned before processing payment.');
-          setProcessing(false);
-          return;
+        if (useBluetoothReader) {
+          if (readerType === 'bluetooth' && !bluetoothPayload) {
+            setError('Bluetooth reader must be paired and card scanned before processing payment.');
+            setProcessing(false);
+            return;
+          }
+          if (readerType === 'usb') {
+            // For USB reader, validate card details (reader fills card number, user enters rest)
+            if (!cardDetails.cardNumber || cardDetails.cardNumber.length < 13) {
+              setError('Please swipe/insert card in the card reader to capture card number.');
+              setProcessing(false);
+              return;
+            }
+            const validationError = validateCardDetails();
+            if (validationError) {
+              setError(validationError);
+              setProcessing(false);
+              return;
+            }
+          }
         }
         if (useTerminal && !terminalStatus?.connected) {
           setError('Terminal must be connected before processing payment.');
@@ -759,7 +775,7 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
                       💳 Card Reader (USB/Bluetooth)
                     </p>
                     <p style={{ fontSize: '14px', color: '#059669' }}>
-                      Use BBPOS AWC Walker C3X card reader (USB or Bluetooth) for {paymentMethod === 'credit_card' ? 'credit' : 'debit'} card payment
+                      Use BBPOS Chipper 3X card reader (USB or Bluetooth) for {paymentMethod === 'credit_card' ? 'credit' : 'debit'} card payment
                     </p>
                     <div style={{ marginTop: '8px', fontSize: '12px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
@@ -943,6 +959,152 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
                           )}
                         </div>
                         
+                        {/* Card Input Fields for USB Reader */}
+                        {readerType === 'usb' && (
+                          <div style={{ marginTop: '20px' }}>
+                            <div className="mb-2">
+                              <label style={{ 
+                                display: 'block', 
+                                marginBottom: '10px', 
+                                fontWeight: '700',
+                                fontSize: '16px',
+                                color: 'var(--dark)'
+                              }}>
+                                Card Number (Swipe/Insert Card)
+                              </label>
+                              <input
+                                type="text"
+                                className="input"
+                                placeholder="Swipe or insert card here..."
+                                value={cardDetails.cardNumber}
+                                onChange={(e) => {
+                                  const value = e.target.value.replace(/\s/g, '');
+                                  setCardDetails({ 
+                                    ...cardDetails, 
+                                    cardNumber: value
+                                  });
+                                  if (value.length > 10 && usbReaderConnected === true) {
+                                    showToast('Card number captured!', 'success', 2000);
+                                  }
+                                }}
+                                onFocus={() => {
+                                  setCardInputFocused(true);
+                                  if (usbReaderConnected === true) {
+                                    showToast('Ready to read card. Swipe/Insert now.', 'info', 2000);
+                                  }
+                                }}
+                                maxLength="19"
+                                required
+                                autoFocus={usbReaderConnected === true}
+                                style={{
+                                  fontSize: '18px',
+                                  padding: '16px',
+                                  fontFamily: 'monospace',
+                                  border: (usbReaderConnected === true && cardInputFocused) ? '3px solid var(--success)' : undefined
+                                }}
+                              />
+                              {usbReaderConnected === true && (
+                                <p style={{
+                                  fontSize: '12px',
+                                  color: 'var(--success)',
+                                  marginTop: '4px',
+                                  fontWeight: '600'
+                                }}>
+                                  ✓ Click in field above, then swipe/insert your card
+                                </p>
+                              )}
+                            </div>
+                            
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px', marginTop: '16px' }}>
+                              <div>
+                                <label style={{ 
+                                  display: 'block', 
+                                  marginBottom: '10px', 
+                                  fontWeight: '700',
+                                  fontSize: '16px',
+                                  color: 'var(--dark)'
+                                }}>
+                                  Expiration (MM/YY)
+                                </label>
+                                <input
+                                  type="text"
+                                  className="input"
+                                  placeholder="12/25"
+                                  value={cardDetails.expirationDate}
+                                  onChange={(e) => {
+                                    let value = e.target.value.replace(/\D/g, '');
+                                    if (value.length >= 2) {
+                                      value = value.slice(0, 2) + '/' + value.slice(2, 4);
+                                    }
+                                    setCardDetails({ ...cardDetails, expirationDate: value });
+                                  }}
+                                  maxLength="5"
+                                  required
+                                  style={{
+                                    fontSize: '18px',
+                                    padding: '16px',
+                                    fontFamily: 'monospace'
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ 
+                                  display: 'block', 
+                                  marginBottom: '10px', 
+                                  fontWeight: '700',
+                                  fontSize: '16px',
+                                  color: 'var(--dark)'
+                                }}>
+                                  CVV
+                                </label>
+                                <input
+                                  type="text"
+                                  className="input"
+                                  placeholder="123"
+                                  value={cardDetails.cvv}
+                                  onChange={(e) => setCardDetails({ 
+                                    ...cardDetails, 
+                                    cvv: e.target.value.replace(/\D/g, '') 
+                                  })}
+                                  maxLength="4"
+                                  required
+                                  style={{
+                                    fontSize: '18px',
+                                    padding: '16px',
+                                    fontFamily: 'monospace'
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="mb-3">
+                              <label style={{ 
+                                display: 'block', 
+                                marginBottom: '10px', 
+                                fontWeight: '700',
+                                fontSize: '16px',
+                                color: 'var(--dark)'
+                              }}>
+                                ZIP Code
+                              </label>
+                              <input
+                                type="text"
+                                className="input"
+                                placeholder="12345"
+                                value={cardDetails.zip}
+                                onChange={(e) => setCardDetails({ 
+                                  ...cardDetails, 
+                                  zip: e.target.value.replace(/\D/g, '') 
+                                })}
+                                maxLength="10"
+                                style={{
+                                  fontSize: '18px',
+                                  padding: '16px'
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : !bluetoothPayload ? (
                       /* Bluetooth Reader Mode */
@@ -1106,7 +1268,7 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
                           marginTop: '8px',
                           textAlign: 'center'
                         }}>
-                          Click to pair with your BBPOS Bluetooth card reader. Then scan or insert the card.
+                          Click to pair with your BBPOS Chipper 3X Bluetooth card reader. Then scan or insert the card.
                         </p>
                       </div>
                     ) : (
@@ -1251,8 +1413,8 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
               </div>
               )}
 
-              {/* Regular Card Entry - Always shown when card reader and terminal are disabled */}
-              {(
+              {/* Regular Card Entry - Only shown when card reader and terminal are disabled */}
+              {!useBluetoothReader && !useTerminal && (
                 <>
                   <div className="mb-2">
                     <label style={{ 

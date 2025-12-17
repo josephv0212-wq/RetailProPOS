@@ -1,6 +1,6 @@
 /**
- * BBPOS Bluetooth Card Reader Service
- * Handles payment processing through BBPOS AWC Walker C3X Bluetooth card reader
+ * BBPOS Card Reader Service
+ * Handles payment processing through BBPOS Chipper 3X card reader (USB/Bluetooth)
  * 
  * The reader uses Authorize.Net's Accept Mobile SDK to capture card data
  * and returns encrypted opaqueData that is processed through Authorize.Net API

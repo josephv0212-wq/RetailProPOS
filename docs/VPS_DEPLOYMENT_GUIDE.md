@@ -25,9 +25,11 @@ Before starting, ensure you have:
 
 - ✅ VPS with Ubuntu 20.04+ or Debian 11+ (recommended)
 - ✅ Root or sudo access to your VPS
-- ✅ Domain name pointing to your VPS IP (for SSL certificate)
+- ✅ Domain name you control (e.g. `subzerodryice-pos.com`)
 - ✅ MobaXterm installed on your Windows machine
 - ✅ SSH credentials (IP address, username, password/key)
+
+> **Important:** Before you can get an HTTPS certificate, your domain must point to your VPS IP.
 
 ---
 
@@ -50,6 +52,34 @@ Before starting, ensure you have:
 sudo apt update
 sudo apt upgrade -y
 ```
+
+### Step 3: Configure DNS for Your Domain
+
+You must point your domain (e.g. `subzerodryice-pos.com`) to your VPS **before** requesting SSL.
+
+1. Log into your domain provider (e.g. **Hostinger**)
+2. Open **DNS Zone / Manage DNS** for `subzerodryice-pos.com`
+3. Create or update the following **A records** (replace `YOUR_VPS_IP`):
+
+   - **Name**: `@`  
+     **Type**: `A`  
+     **Value**: `YOUR_VPS_IP`  
+     **TTL**: 300 (or default)
+
+   - **Name**: `www`  
+     **Type**: `A`  
+     **Value**: `YOUR_VPS_IP`  
+     **TTL**: 300 (or default)
+
+4. Remove or disable any old A/CNAME records for `@` or `www` that point to parking/hosting pages.
+
+DNS changes can take 5–30 minutes (sometimes longer). You can test from the VPS:
+
+```bash
+curl http://subzerodryice-pos.com
+```
+
+When this returns your Nginx page instead of a registrar/parking page, DNS is correctly pointing to your VPS.
 
 ### Step 3: Install Node.js
 
@@ -140,27 +170,27 @@ sudo apt install -y git
 
 # Clone your repository
 cd /var/www
-sudo git clone <your-repository-url> retailpro-pos
-cd retailpro-pos
+sudo git clone https://github.com/josephv0212-wq/RetailProPOS.git RetailProPOS
+cd RetailProPOS
 ```
 
 ### Option C: Using SCP via MobaXterm Terminal
 
 ```bash
 # In MobaXterm terminal, from your local machine
-scp -r C:\Users\Admin\Documents\GitHub\RetailProPOSBackend\RetailProPOS root@YOUR_VPS_IP:/var/www/retailpro-pos
+scp -r C:\Users\Admin\Documents\GitHub\RetailProPOSBackend\RetailProPOS root@72.62.80.188:/var/www/RetailProPOS
 ```
 
 ### Recommended Directory Structure
 
 ```bash
 # Create application directory
-sudo mkdir -p /var/www/retailpro-pos
-sudo chown -R $USER:$USER /var/www/retailpro-pos
+sudo mkdir -p /var/www/RetailProPOS
+sudo chown -R $USER:$USER /var/www/RetailProPOS
 
 # Move your files here (after transfer)
 # Your structure should be:
-# /var/www/retailpro-pos/
+# /var/www/RetailProPOS/
 #   ├── client/
 #   ├── server/
 #   ├── package.json
@@ -173,7 +203,7 @@ sudo chown -R $USER:$USER /var/www/retailpro-pos
 
 ```bash
 # Navigate to project directory
-cd /var/www/retailpro-pos
+cd /var/www/RetailProPOS
 
 # Install root dependencies
 npm install
@@ -197,7 +227,7 @@ cd ..
 ### Step 1: Create `.env` file for Server
 
 ```bash
-cd /var/www/retailpro-pos/server
+cd /var/www/RetailProPOS/server
 nano .env
 ```
 
@@ -219,7 +249,7 @@ DATABASE_URL=postgresql://username:password@localhost:5432/retailpro_pos
 # (No DATABASE_URL needed for SQLite)
 
 # Frontend URL (Your domain)
-FRONTEND_URL=https://yourdomain.com,https://www.yourdomain.com
+FRONTEND_URL=https://subzerodryice-pos.com,https://www.subzerodryice-pos.com
 
 # Optional: Registration Security
 REGISTRATION_KEY=your-registration-secret-key
@@ -248,14 +278,26 @@ PRINTER_IP_LOC004=192.168.1.104
 
 **Important Notes:**
 - Replace `JWT_SECRET` with a strong random string (use: `openssl rand -base64 32`)
-- Replace `yourdomain.com` with your actual domain
+- Replace `subzerodryice-pos.com` with your actual domain
 - For PostgreSQL, you'll need to install and setup PostgreSQL first (see below)
 
 ### Step 3: Save and Exit
 
 Press `Ctrl+X`, then `Y`, then `Enter`
 
-### Step 4: Setup PostgreSQL (If using cloud database)
+### Step 4: Copy `.env` to App Root (for PM2 / dotenv)
+
+The backend loads environment variables from the *current working directory* when started with PM2.
+To ensure `.env` is picked up correctly, copy it to the app root:
+
+```bash
+cd /var/www/RetailProPOS
+cp server/.env .env
+```
+
+> If you later change `server/.env`, run `cp server/.env .env` again, then restart PM2.
+
+### Step 5: Setup PostgreSQL (If using cloud database)
 
 ```bash
 # Install PostgreSQL
@@ -268,18 +310,24 @@ sudo -u postgres psql
 CREATE DATABASE retailpro_pos;
 CREATE USER retailpro_user WITH PASSWORD 'your_secure_password';
 GRANT ALL PRIVILEGES ON DATABASE retailpro_pos TO retailpro_user;
+GRANT ALL ON SCHEMA public TO retailpro_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO retailpro_user;
 \q
 
 # Update DATABASE_URL in .env file
 # DATABASE_URL=postgresql://retailpro_user:your_secure_password@localhost:5432/retailpro_pos
 ```
 
+If you are using a managed Postgres provider (e.g. Neon, RDS), make sure the user in your
+`DATABASE_URL` has permission to create tables in the `public` schema. The equivalent of the
+`GRANT` commands above must be executed in that database.
+
 ---
 
 ## Build Frontend
 
 ```bash
-cd /var/www/retailpro-pos/client
+cd /var/www/RetailProPOS/client
 
 # Build for production
 npm run build
@@ -295,9 +343,12 @@ ls -la dist/
 
 ### Step 1: Create PM2 Ecosystem File
 
+Because the project uses ES modules (`"type": "module"` in `package.json`), PM2 config
+should be a CommonJS file with the `.cjs` extension.
+
 ```bash
-cd /var/www/retailpro-pos
-nano ecosystem.config.js
+cd /var/www/RetailProPOS
+nano ecosystem.config.cjs
 ```
 
 Add the following content:
@@ -305,9 +356,9 @@ Add the following content:
 ```javascript
 module.exports = {
   apps: [{
-    name: 'retailpro-pos-server',
+    name: 'RetailProPOS-server',
     script: './server/server.js',
-    cwd: '/var/www/retailpro-pos',
+    cwd: '/var/www/RetailProPOS',
     instances: 1,
     exec_mode: 'fork',
     env: {
@@ -328,14 +379,14 @@ module.exports = {
 ### Step 2: Create Logs Directory
 
 ```bash
-mkdir -p /var/www/retailpro-pos/logs
+mkdir -p /var/www/RetailProPOS/logs
 ```
 
 ### Step 3: Start Application with PM2
 
 ```bash
-cd /var/www/retailpro-pos
-pm2 start ecosystem.config.js
+cd /var/www/RetailProPOS
+pm2 start ecosystem.config.cjs
 
 # Save PM2 configuration
 pm2 save
@@ -349,62 +400,33 @@ pm2 startup
 
 ```bash
 pm2 status
-pm2 logs retailpro-pos-server
+pm2 logs RetailProPOS-server
 ```
 
 ---
 
 ## Configure Nginx Reverse Proxy
 
-### Step 1: Create Nginx Configuration
+### Step 1: Create Nginx Configuration (HTTP only first)
+
+Start with a simple HTTP-only configuration. This avoids errors about missing
+certificate files when you haven't obtained an SSL certificate yet.
 
 ```bash
-sudo nano /etc/nginx/sites-available/retailpro-pos
+sudo nano /etc/nginx/sites-available/RetailProPOS
 ```
 
 Add the following configuration:
 
 ```nginx
-# HTTP Server (will redirect to HTTPS)
 server {
     listen 80;
     listen [::]:80;
-    server_name yourdomain.com www.yourdomain.com;
-
-    # Redirect all HTTP to HTTPS
-    return 301 https://$server_name$request_uri;
-}
-
-# HTTPS Server
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name yourdomain.com www.yourdomain.com;
-
-    # SSL Configuration (will be updated by Certbot)
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-    
-    # SSL Security Settings
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
-
-    # Security Headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    server_name subzerodryice-pos.com www.subzerodryice-pos.com;
 
     # Root directory for frontend
-    root /var/www/retailpro-pos/client/dist;
+    root /var/www/RetailProPOS/client/dist;
     index index.html;
-
-    # Gzip Compression
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json;
 
     # API Proxy - Backend Server
     location /api {
@@ -442,13 +464,13 @@ server {
 }
 ```
 
-**Important**: Replace `yourdomain.com` with your actual domain name.
+**Important**: Replace `subzerodryice-pos.com` with your actual domain name.
 
 ### Step 2: Enable the Site
 
 ```bash
 # Create symbolic link
-sudo ln -s /etc/nginx/sites-available/retailpro-pos /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/RetailProPOS /etc/nginx/sites-enabled/
 
 # Remove default site (optional)
 sudo rm /etc/nginx/sites-enabled/default
@@ -466,21 +488,26 @@ sudo systemctl reload nginx
 
 ### Step 1: Obtain SSL Certificate with Let's Encrypt
 
-```bash
-# Make sure your domain points to this VPS IP
-# Run Certbot to get SSL certificate
-sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+Make sure:
+- Your domain `subzerodryice-pos.com` points to this VPS IP (DNS A record)
+- Port 80 is open in the firewall
+- Nginx is running and serving HTTP with the config above
 
-# Follow the prompts:
-# - Enter your email address
-# - Agree to terms of service
-# - Choose whether to redirect HTTP to HTTPS (recommended: Yes)
+Then run:
+
+```bash
+sudo certbot --nginx -d subzerodryice-pos.com -d www.subzerodryice-pos.com
 ```
 
-Certbot will automatically:
+Follow the prompts:
+- Enter your email address
+- Agree to terms of service
+- Choose whether to redirect HTTP to HTTPS (recommended: Yes)
+
+Certbot will:
 - Obtain the SSL certificate
-- Update your Nginx configuration
-- Setup auto-renewal
+- Create `/etc/letsencrypt/live/subzerodryice-pos.com/fullchain.pem` and `privkey.pem`
+- Update your Nginx configuration to use HTTPS
 
 ### Step 2: Test Auto-Renewal
 
@@ -546,7 +573,7 @@ sudo systemctl status nginx
 sudo systemctl status postgresql
 
 # Check application logs
-pm2 logs retailpro-pos-server --lines 50
+pm2 logs RetailProPOS-server --lines 50
 ```
 
 ### Step 2: Test Backend API
@@ -556,14 +583,14 @@ pm2 logs retailpro-pos-server --lines 50
 curl http://localhost:3000/health
 
 # Or from your local machine
-curl https://yourdomain.com/api/health
+curl https://subzerodryice-pos.com/api/health
 ```
 
 ### Step 3: Access Your Application
 
 Open your browser and navigate to:
 ```
-https://yourdomain.com
+https://subzerodryice-pos.com
 ```
 
 ---
@@ -574,16 +601,16 @@ https://yourdomain.com
 
 ```bash
 # Check PM2 logs
-pm2 logs retailpro-pos-server
+pm2 logs RetailProPOS-server
 
 # Check if port 3000 is in use
 sudo lsof -i :3000
 
 # Restart PM2
-pm2 restart retailpro-pos-server
+pm2 restart RetailProPOS-server
 
 # Check environment variables
-cd /var/www/retailpro-pos/server
+cd /var/www/RetailProPOS/server
 cat .env
 ```
 
@@ -624,7 +651,7 @@ sudo -u postgres psql -c "SELECT version();"
 psql -h localhost -U retailpro_user -d retailpro_pos
 
 # For SQLite
-cd /var/www/retailpro-pos/server
+cd /var/www/RetailProPOS/server
 ls -la database.sqlite
 ```
 
@@ -632,10 +659,10 @@ ls -la database.sqlite
 
 ```bash
 # Check if dist folder exists
-ls -la /var/www/retailpro-pos/client/dist
+ls -la /var/www/RetailProPOS/client/dist
 
 # Rebuild frontend
-cd /var/www/retailpro-pos/client
+cd /var/www/RetailProPOS/client
 npm run build
 
 # Check Nginx root directory
@@ -646,10 +673,10 @@ sudo nginx -T | grep root
 
 ```bash
 # Fix ownership
-sudo chown -R $USER:$USER /var/www/retailpro-pos
+sudo chown -R $USER:$USER /var/www/RetailProPOS
 
 # Fix permissions
-chmod -R 755 /var/www/retailpro-pos
+chmod -R 755 /var/www/RetailProPOS
 ```
 
 ### View All Logs
@@ -675,7 +702,7 @@ sudo journalctl -u nginx -f
 ### Update Application
 
 ```bash
-cd /var/www/retailpro-pos
+cd /var/www/RetailProPOS
 
 # Pull latest changes (if using Git)
 git pull
@@ -689,7 +716,7 @@ cd client && npm install && cd ..
 cd client && npm run build && cd ..
 
 # Restart application
-pm2 restart retailpro-pos-server
+pm2 restart RetailProPOS-server
 ```
 
 ### Backup Database
@@ -699,7 +726,7 @@ pm2 restart retailpro-pos-server
 pg_dump -U retailpro_user retailpro_pos > backup_$(date +%Y%m%d).sql
 
 # SQLite backup
-cp /var/www/retailpro-pos/server/database.sqlite /var/www/retailpro-pos/server/database.sqlite.backup
+cp /var/www/RetailProPOS/server/database.sqlite /var/www/RetailProPOS/server/database.sqlite.backup
 ```
 
 ### Monitor Application
@@ -736,10 +763,10 @@ df -h
 
 | Service | Command |
 |---------|---------|
-| Start PM2 app | `pm2 start retailpro-pos-server` |
-| Stop PM2 app | `pm2 stop retailpro-pos-server` |
-| Restart PM2 app | `pm2 restart retailpro-pos-server` |
-| View PM2 logs | `pm2 logs retailpro-pos-server` |
+| Start PM2 app | `pm2 start RetailProPOS-server` |
+| Stop PM2 app | `pm2 stop RetailProPOS-server` |
+| Restart PM2 app | `pm2 restart RetailProPOS-server` |
+| View PM2 logs | `pm2 logs RetailProPOS-server` |
 | Reload Nginx | `sudo systemctl reload nginx` |
 | Check Nginx status | `sudo systemctl status nginx` |
 | Renew SSL | `sudo certbot renew` |

@@ -1,7 +1,7 @@
 # Bluetooth Reader Integration Notes
 
 ## Device snapshot
-- **Model:** Authorize.net / BBPOS AWC Walker C3X Bluetooth card reader (Bluetooth 5.0, EMV/NFC capable).
+- **Model:** Authorize.net / BBPOS Chipper 3X card reader (USB/Bluetooth, EMV/NFC capable).
 - **Supported interfaces:** Bluetooth Low Energy (BLE), appears as HID/keyboard input to the host when used from native Accept Mobile apps. Tokenization is usually delivered via Authorize.Net’s Accept Mobile + Accept.js workflow.
 - **Typical flow:** mobile app pairs with the reader through Accept Mobile or similar SDK, reader captures card (magstripe/EMV/contactless), sends encrypted data (token, deviceSessionId, cardData) to Authorize.Net’s Accept Mobile endpoint, and the app receives a payment `opaqueData` payload (or a `cardData` token) that is safe to pass to backend for final settlement.
 

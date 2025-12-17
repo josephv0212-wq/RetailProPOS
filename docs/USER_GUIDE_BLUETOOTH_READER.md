@@ -1,7 +1,7 @@
 # User Guide: Using Bluetooth Card Reader with RetailPro POS
 
 ## Overview
-This guide is for end users who want to use the BBPOS AWC Walker C3X Bluetooth card reader with the RetailPro POS system.
+This guide is for end users who want to use the BBPOS Chipper 3X card reader (USB/Bluetooth) with the RetailPro POS system.
 
 ## Important: Browser Requirements
 
@@ -16,7 +16,7 @@ This guide is for end users who want to use the BBPOS AWC Walker C3X Bluetooth c
 
 ### Step 1: Prepare Your Card Reader
 
-1. **Power on your BBPOS AWC Walker C3X card reader**
+1. **Power on your BBPOS Chipper 3X card reader**
    - Make sure it's charged or plugged in
    - The LED should be blinking or solid (indicating it's on)
 
