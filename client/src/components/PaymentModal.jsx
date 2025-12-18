@@ -40,6 +40,8 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
   const [cardInputFocused, setCardInputFocused] = useState(false);
   const [usbReaderConnected, setUsbReaderConnected] = useState(null); // null = checking, true = connected, false = not connected
   const [checkingUsbReader, setCheckingUsbReader] = useState(false);
+  const [cardDataCaptured, setCardDataCaptured] = useState(false);
+  const [lastCardInputTime, setLastCardInputTime] = useState(0);
 
   useEffect(() => {
     const savedTerminalIP = localStorage.getItem('paxTerminalIP') || '';
@@ -196,6 +198,8 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
       setBluetoothPayload(null);
       setBluetoothStatus(null);
       setUsbReaderConnected(null);
+      setUsbReaderActive(false);
+      setCardDataCaptured(false);
     }
     
     setUseBluetoothReader(checked);
@@ -882,7 +886,7 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
                                 ⏳ Checking USB reader connection...
                               </p>
                             </div>
-                          ) : usbReaderConnected === true ? (
+                          ) : (usbReaderConnected === true || usbReaderActive) ? (
                             <div style={{
                               background: '#f0fdf4',
                               padding: '12px',
@@ -897,14 +901,14 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
                                 margin: 0,
                                 marginBottom: '8px'
                               }}>
-                                ✓ USB Reader Connected
+                                ✓ USB Reader Ready
                               </p>
                               <p style={{ 
                                 fontSize: '11px', 
                                 color: 'var(--gray-600)',
                                 margin: 0
                               }}>
-                                Your USB card reader is connected and ready. Click in the "Card Number" field below, then swipe/insert/tap your card. 
+                                Your BBPOS Chipper 3X USB reader is ready. Click in the "Card Number" field below, then swipe/insert/tap your card. 
                                 The card data will be captured automatically!
                               </p>
                             </div>
@@ -1008,40 +1012,97 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
                                 placeholder="Swipe or insert card here..."
                                 value={cardDetails.cardNumber}
                                 onChange={(e) => {
-                                  const value = e.target.value.replace(/\s/g, '');
+                                  const value = e.target.value.replace(/\s/g, '').replace(/[^\d]/g, '');
+                                  const now = Date.now();
+                                  
+                                  // Detect rapid input (card swipe) - if input is very fast, it's likely from reader
+                                  if (lastCardInputTime > 0) {
+                                    const timeDiff = now - lastCardInputTime;
+                                    if (timeDiff < 50 && value.length > cardDetails.cardNumber.length) {
+                                      // Rapid input detected - likely card swipe
+                                      setCardDataCaptured(true);
+                                    }
+                                  }
+                                  setLastCardInputTime(now);
+                                  
                                   setCardDetails({ 
                                     ...cardDetails, 
                                     cardNumber: value
                                   });
-                                  if (value.length > 10 && usbReaderConnected === true) {
-                                    showToast('Card number captured!', 'success', 2000);
+                                  
+                                  // Show success when valid card number length is reached
+                                  if (value.length >= 13 && value.length <= 19 && !cardDataCaptured) {
+                                    setCardDataCaptured(true);
+                                    showToast('✓ Card number captured!', 'success', 2000);
                                   }
                                 }}
                                 onFocus={() => {
                                   setCardInputFocused(true);
-                                  if (usbReaderConnected === true) {
+                                  setCardDataCaptured(false);
+                                  if (usbReaderConnected === true || usbReaderActive) {
                                     showToast('Ready to read card. Swipe/Insert now.', 'info', 2000);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  setCardInputFocused(false);
+                                }}
+                                onKeyDown={(e) => {
+                                  // Allow backspace, delete, arrow keys, tab
+                                  if (!['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.key)) {
+                                    // If typing manually (not from reader), reset capture flag
+                                    const now = Date.now();
+                                    if (now - lastCardInputTime > 200) {
+                                      setCardDataCaptured(false);
+                                    }
                                   }
                                 }}
                                 maxLength="19"
                                 required
-                                autoFocus={usbReaderConnected === true}
+                                autoFocus={usbReaderConnected === true || usbReaderActive}
                                 style={{
                                   fontSize: '18px',
                                   padding: '16px',
                                   fontFamily: 'monospace',
-                                  border: (usbReaderConnected === true && cardInputFocused) ? '3px solid var(--success)' : undefined
+                                  border: (usbReaderConnected === true || usbReaderActive) && cardInputFocused 
+                                    ? '3px solid var(--success)' 
+                                    : cardDataCaptured && cardDetails.cardNumber.length >= 13
+                                    ? '3px solid var(--success)'
+                                    : undefined,
+                                  background: cardDataCaptured && cardDetails.cardNumber.length >= 13 
+                                    ? '#f0fdf4' 
+                                    : undefined
                                 }}
                               />
-                              {usbReaderConnected === true && (
-                                <p style={{
-                                  fontSize: '12px',
-                                  color: 'var(--success)',
-                                  marginTop: '4px',
-                                  fontWeight: '600'
-                                }}>
-                                  ✓ Click in field above, then swipe/insert your card
-                                </p>
+                              {(usbReaderConnected === true || usbReaderActive) && (
+                                <div style={{ marginTop: '8px' }}>
+                                  {cardDataCaptured && cardDetails.cardNumber.length >= 13 ? (
+                                    <p style={{
+                                      fontSize: '12px',
+                                      color: 'var(--success)',
+                                      fontWeight: '700',
+                                      margin: 0,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '6px'
+                                    }}>
+                                      <span>✓</span>
+                                      <span>Card number captured! ({cardDetails.cardNumber.length} digits)</span>
+                                    </p>
+                                  ) : (
+                                    <p style={{
+                                      fontSize: '12px',
+                                      color: cardInputFocused ? 'var(--success)' : 'var(--gray-600)',
+                                      fontWeight: '600',
+                                      margin: 0,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '6px'
+                                    }}>
+                                      <span>{cardInputFocused ? '👆' : '💳'}</span>
+                                      <span>{cardInputFocused ? 'Ready! Swipe/Insert card now...' : 'Click in field above, then swipe/insert your card'}</span>
+                                    </p>
+                                  )}
+                                </div>
                               )}
                             </div>
                             
