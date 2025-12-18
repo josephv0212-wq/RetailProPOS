@@ -165,3 +165,28 @@ export const getItemsFromPricebook = async (req, res) => {
     return sendError(res, `Failed to fetch items from pricebook: ${err.message}`, 500, err);
   }
 };
+
+export const updateItemImage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { imageData } = req.body;
+
+    if (!imageData || typeof imageData !== 'string') {
+      return sendValidationError(res, 'imageData (base64 string) is required');
+    }
+
+    const item = await Item.findByPk(id);
+
+    if (!item) {
+      return sendNotFound(res, 'Item');
+    }
+
+    item.imageData = imageData;
+    await item.save();
+
+    return sendSuccess(res, { item }, 'Item image updated successfully');
+  } catch (err) {
+    console.error('Update item image error:', err);
+    return sendError(res, 'Failed to update item image', 500, err);
+  }
+};

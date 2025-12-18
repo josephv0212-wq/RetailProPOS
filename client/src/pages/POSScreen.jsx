@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { itemsAPI, customersAPI, salesAPI, zohoAPI, printerAPI } from '../services/api';
 import ItemSelector from '../components/ItemSelector';
@@ -31,6 +32,7 @@ const resolveUserTaxPercentage = (user) => {
 
 const POSScreen = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [cart, setCart] = useState([]);
@@ -46,9 +48,15 @@ const POSScreen = () => {
   const [printerStatus, setPrinterStatus] = useState('checking');
 
   useEffect(() => {
+    // If admin somehow hits POS route, redirect them to admin dashboard
+    if (user && user.role === 'admin') {
+      navigate('/admin', { replace: true });
+      return;
+    }
+
     loadData();
     checkPrinterStatus();
-  }, []);
+  }, [user]);
 
   const checkPrinterStatus = async () => {
     try {

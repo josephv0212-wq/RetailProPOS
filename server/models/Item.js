@@ -39,6 +39,10 @@ export const Item = sequelize.define('Item', {
   unit: {
     type: DataTypes.STRING
   },
+  imageData: {
+    type: DataTypes.TEXT, // Base64-encoded image for simple storage/serving
+    allowNull: true
+  },
   isActive: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

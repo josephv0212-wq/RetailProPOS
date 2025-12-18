@@ -40,167 +40,204 @@ const TopNavigation = ({ printerStatus, syncStatus, onSyncNow }) => {
           </h1>
 
           <nav style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={() => navigate('/sales')}
-              className="btn"
-              style={{
-                background: isActive('/sales') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
-                border: 'none',
-                color: 'white',
-                fontSize: '15px',
-                fontWeight: '600',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive('/sales')) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive('/sales')) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                }
-              }}
-            >
-              Sales
-            </button>
-            <button
-              onClick={() => navigate('/customers')}
-              className="btn"
-              style={{
-                background: isActive('/customers') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
-                border: 'none',
-                color: 'white',
-                fontSize: '15px',
-                fontWeight: '600',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive('/customers')) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive('/customers')) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                }
-              }}
-            >
-              Customers
-            </button>
-            <button
-              onClick={() => navigate('/reports')}
-              className="btn"
-              style={{
-                background: isActive('/reports') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
-                border: 'none',
-                color: 'white',
-                fontSize: '15px',
-                fontWeight: '600',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive('/reports')) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive('/reports')) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                }
-              }}
-            >
-              Reports
-            </button>
-            <button
-              onClick={() => navigate('/settings')}
-              className="btn"
-              style={{
-                background: isActive('/settings') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
-                border: 'none',
-                color: 'white',
-                fontSize: '15px',
-                fontWeight: '600',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive('/settings')) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive('/settings')) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                }
-              }}
-            >
-              Settings
-            </button>
+            {user?.role !== 'admin' && (
+              <>
+                <button
+                  onClick={() => navigate('/sales')}
+                  className="btn"
+                  style={{
+                    background: isActive('/sales') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                    border: 'none',
+                    color: 'white',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/sales')) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/sales')) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                    }
+                  }}
+                >
+                  Sales
+                </button>
+                <button
+                  onClick={() => navigate('/customers')}
+                  className="btn"
+                  style={{
+                    background: isActive('/customers') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                    border: 'none',
+                    color: 'white',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/customers')) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/customers')) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                    }
+                  }}
+                >
+                  Customers
+                </button>
+                <button
+                  onClick={() => navigate('/reports')}
+                  className="btn"
+                  style={{
+                    background: isActive('/reports') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                    border: 'none',
+                    color: 'white',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/reports')) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/reports')) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                    }
+                  }}
+                >
+                  Reports
+                </button>
+                <button
+                  onClick={() => navigate('/settings')}
+                  className="btn"
+                  style={{
+                    background: isActive('/settings') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                    border: 'none',
+                    color: 'white',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/settings')) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/settings')) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                    }
+                  }}
+                >
+                  Settings
+                </button>
+              </>
+            )}
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="btn"
+                style={{
+                  background: isActive('/admin') ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                  border: 'none',
+                  color: 'white',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive('/admin')) {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive('/admin')) {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  }
+                }}
+              >
+                Admin
+              </button>
+            )}
           </nav>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Location Badge */}
-          <div style={{
-            background: 'rgba(255,255,255,0.2)',
-            padding: '8px 16px',
-            borderRadius: '20px',
-            fontSize: '14px',
-            fontWeight: '600',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <span>📍</span>
-            {user?.locationName || user?.locationId || 'Location'}
-          </div>
-
-          {/* Printer Status */}
-          <div
-            title={`Printer ${printerStatus || 'unknown'}`}
-            aria-label={`Printer ${printerStatus || 'unknown'}`}
-            style={{
-              background: printerStatus === 'online' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-              padding: '8px 12px',
+          {/* Location Badge - hidden for admin */}
+          {user?.role !== 'admin' && (
+            <div style={{
+              background: 'rgba(255,255,255,0.2)',
+              padding: '8px 16px',
               borderRadius: '20px',
-              fontSize: '18px',
+              fontSize: '14px',
               fontWeight: '600',
               color: 'white',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative'
+              gap: '8px'
             }}>
-            🖨️
-            <span
+              <span>📍</span>
+              {user?.locationName || user?.locationId || 'Location'}
+            </div>
+          )}
+
+          {/* Printer Status */}
+          {user?.role !== 'admin' && (
+            <div
+              title={`Printer ${printerStatus || 'unknown'}`}
+              aria-label={`Printer ${printerStatus || 'unknown'}`}
               style={{
-                position: 'absolute',
-                width: '10px',
-                height: '10px',
-                borderRadius: '50%',
-                background: printerStatus === 'online' ? 'var(--success)' : 'var(--danger)',
-                border: '2px solid rgba(255,255,255,0.8)',
-                top: '6px',
-                right: '6px'
-              }}
-            />
-          </div>
+                background: printerStatus === 'online' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                padding: '8px 12px',
+                borderRadius: '20px',
+                fontSize: '18px',
+                fontWeight: '600',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative'
+              }}>
+              🖨️
+              <span
+                style={{
+                  position: 'absolute',
+                  width: '10px',
+                  height: '10px',
+                  borderRadius: '50%',
+                  background: printerStatus === 'online' ? 'var(--success)' : 'var(--danger)',
+                  border: '2px solid rgba(255,255,255,0.8)',
+                  top: '6px',
+                  right: '6px'
+                }}
+              />
+            </div>
+          )}
 
           {/* Sync Status */}
-          {syncStatus && (
+          {user?.role !== 'admin' && syncStatus && (
             <button
               onClick={onSyncNow}
               disabled={syncStatus === 'syncing'}

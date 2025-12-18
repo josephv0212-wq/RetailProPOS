@@ -94,12 +94,18 @@ export const authAPI = {
   login: (credentials) => api.post('/auth/login', credentials),
   register: (userData) => api.post('/auth/register', userData),
   getCurrentUser: () => api.get('/auth/me'),
+  getPendingUsers: () => api.get('/auth/users/pending'),
+  getAllUsers: () => api.get('/auth/users'),
+  updateUser: (id, data) => api.patch(`/auth/users/${id}`, data),
+  approveUser: (id) => api.patch(`/auth/users/${id}/approve`),
+  rejectUser: (id) => api.patch(`/auth/users/${id}/reject`),
 };
 
 export const itemsAPI = {
   getAll: (params) => api.get('/items', { params }),
   getById: (id) => api.get(`/items/${id}`),
   getFromPricebook: (pricebookName) => api.get('/items/pricebook', { params: { pricebookName } }),
+  updateImage: (id, imageData) => api.post(`/items/${id}/image`, { imageData }),
 };
 
 export const customersAPI = {

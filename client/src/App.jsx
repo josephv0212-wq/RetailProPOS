@@ -11,6 +11,7 @@ const POSScreen = lazy(() => import('./pages/POSScreen'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Settings = lazy(() => import('./pages/Settings'));
+const Admin = lazy(() => import('./pages/Admin'));
 
 // Loading component
 const LoadingSpinner = () => (
@@ -36,7 +37,12 @@ const PublicRoute = ({ children }) => {
     return <LoadingSpinner />;
   }
 
-  return user ? <Navigate to="/sales" replace /> : children;
+  if (user) {
+    // Admins go to admin dashboard, others to sales
+    return <Navigate to={user.role === 'admin' ? '/admin' : '/sales'} replace />;
+  }
+
+  return children;
 };
 
 const AppContent = () => {
@@ -91,11 +97,38 @@ const AppContent = () => {
             </PrivateRoute>
           }
         />
-        <Route path="/" element={<Navigate to="/sales" replace />} />
-        <Route path="*" element={<Navigate to="/sales" replace />} />
+        <Route
+          path="/admin"
+          element={
+            <PrivateRoute>
+              <Admin />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/"
+          element={
+            <PrivateRoute>
+              {/* Default landing: admins -> /admin, others -> /sales */}
+              <RoleBasedHome />
+            </PrivateRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
   );
+};
+
+// Helper component for deciding home route based on role
+const RoleBasedHome = () => {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <Navigate to={user.role === 'admin' ? '/admin' : '/sales'} replace />;
 };
 
 const App = () => {

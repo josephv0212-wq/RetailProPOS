@@ -335,27 +335,43 @@ const ItemSelector = ({ items, onSelectItem, onRefresh, disabled = false }) => {
                 }
               }}
             >
-              {/* Item Image Placeholder */}
-              <div style={{
-                width: '100%',
-                aspectRatio: '1',
-                background: 'var(--gray-100)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '12px',
-                border: '1px solid var(--border)',
-                position: 'relative',
-                overflow: 'hidden'
-              }}>
-                {/* Simple icon placeholder */}
-                <div style={{
-                  fontSize: '48px',
-                  color: 'var(--gray-400)',
-                  opacity: 0.6
-                }}>
-                  {item.name ? item.name.charAt(0).toUpperCase() : '📦'}
-                </div>
+              {/* Item Image */}
+              <div
+                style={{
+                  width: '100%',
+                  aspectRatio: '1',
+                  background: 'var(--gray-100)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border)',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}
+              >
+                {item.imageData ? (
+                  <img
+                    src={item.imageData}
+                    alt={item.name}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover'
+                    }}
+                  />
+                ) : (
+                  // Simple icon placeholder
+                  <div
+                    style={{
+                      fontSize: '48px',
+                      color: 'var(--gray-400)',
+                      opacity: 0.6
+                    }}
+                  >
+                    {item.name ? item.name.charAt(0).toUpperCase() : '📦'}
+                  </div>
+                )}
               </div>
 
               {/* Item Details */}

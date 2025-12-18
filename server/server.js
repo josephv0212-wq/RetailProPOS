@@ -13,7 +13,8 @@ import bbposRoutes from './routes/bbposRoutes.js';
 import { sequelize } from './config/db.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { Customer } from './models/index.js';
+import { Customer, User } from './models/index.js';
+import bcrypt from 'bcryptjs';
 import { syncCustomersToDatabase } from './controllers/zohoController.js';
 
 dotenv.config();
@@ -300,6 +301,28 @@ const enableSQLiteForeignKeys = async () => {
   }
 };
 
+// Ensure new imageData column exists on Items table (for SQLite / auto-sync disabled)
+const ensureItemImageColumn = async () => {
+  try {
+    // This ALTER is safe to run repeatedly; on second run it will throw
+    // "duplicate column name", which we catch and ignore.
+    await sequelize.query('ALTER TABLE `Items` ADD COLUMN `imageData` TEXT');
+    console.log('✅ Added imageData column to Items table');
+  } catch (err) {
+    const msg = err?.message || '';
+    if (msg.includes('duplicate column name') || msg.includes('duplicate column')) {
+      console.log('ℹ️  imageData column already exists on Items table');
+      return;
+    }
+    // If the table doesn't exist or other error, log but don't crash server
+    console.warn('⚠️  Could not ensure imageData column on Items table:', msg);
+  }
+};
+
+// Admin user creation is handled by bootstrap login mechanism in authController.js
+// Bootstrap credentials: accounting@subzeroiceservices.com / dryice000
+// This only works when database is empty (first-time setup)
+
 const startServer = async () => {
   await cleanupBackupTables();
 
@@ -309,6 +332,13 @@ const startServer = async () => {
   } finally {
     await enableSQLiteForeignKeys();
   }
+
+  // Make sure new columns needed for features exist in older SQLite DBs
+  if (DATABASE_SETTING === 'local') {
+    await ensureItemImageColumn();
+  }
+
+  // Admin user creation handled by bootstrap login (see authController.js)
 
   await checkAndSyncCustomers();
 

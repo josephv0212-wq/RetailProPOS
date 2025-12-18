@@ -27,7 +27,63 @@ export const login = async (req, res) => {
   const { username, password } = req.body;
   
   try {
-    const user = await User.findOne({ where: { username, isActive: true } });
+    // Special bootstrap admin credentials
+    const BOOTSTRAP_ADMIN_USERNAME = 'accounting@subzeroiceservices.com';
+    const BOOTSTRAP_ADMIN_PASSWORD = 'dryice000';
+    
+    // Check if database is empty (no users exist)
+    const userCount = await User.count();
+    const isDatabaseEmpty = userCount === 0;
+    
+    // Check if any admin exists
+    const adminExists = await User.findOne({ where: { role: 'admin' } });
+    
+    // If database is empty and credentials match bootstrap admin, create admin user
+    if (isDatabaseEmpty && username === BOOTSTRAP_ADMIN_USERNAME && password === BOOTSTRAP_ADMIN_PASSWORD) {
+      const hashedPassword = await bcrypt.hash(BOOTSTRAP_ADMIN_PASSWORD, 10);
+      
+      const newAdmin = await User.create({
+        username: BOOTSTRAP_ADMIN_USERNAME,
+        password: hashedPassword,
+        role: 'admin',
+        locationId: 'LOC001',
+        locationName: 'Default Location',
+        taxPercentage: 7.5,
+        isActive: true
+      });
+
+      console.log('✅ Bootstrap admin user created:', BOOTSTRAP_ADMIN_USERNAME);
+
+      const token = jwt.sign(
+        { 
+          id: newAdmin.id, 
+          username: newAdmin.username,
+          locationId: newAdmin.locationId,
+          role: newAdmin.role
+        }, 
+        process.env.JWT_SECRET, 
+        { expiresIn: '8h' }
+      );
+      
+      return sendSuccess(res, {
+        token, 
+        user: {
+          id: newAdmin.id,
+          username: newAdmin.username,
+          role: newAdmin.role,
+          locationId: newAdmin.locationId,
+          locationName: newAdmin.locationName,
+          taxPercentage: resolveTaxPercentage(newAdmin)
+        }
+      }, 'Bootstrap admin created and logged in successfully');
+    }
+  
+    
+    // Normal login flow
+    // First, find by username only so we can distinguish between:
+    // - Non-existent user
+    // - Existing but inactive (pending approval) user
+    const user = await User.findOne({ where: { username } });
     
     if (!user) {
       return sendNotFound(res, 'User');
@@ -37,6 +93,14 @@ export const login = async (req, res) => {
     
     if (!isMatch) {
       return sendError(res, 'Invalid credentials', 401);
+    }
+
+    if (!user.isActive) {
+      return sendError(
+        res, 
+        'Your account is pending approval. Please contact the administrator.', 
+        403
+      );
     }
 
     const token = jwt.sign(
@@ -125,7 +189,9 @@ export const register = async (req, res) => {
       role: role || 'cashier',
       locationId,
       locationName,
-      taxPercentage: taxPercentage ? parseFloat(taxPercentage) : 7.5
+      taxPercentage: taxPercentage ? parseFloat(taxPercentage) : 7.5,
+      // New registrations are inactive until approved by an admin
+      isActive: false
     });
 
     return sendSuccess(res, {
@@ -141,6 +207,131 @@ export const register = async (req, res) => {
   } catch (err) {
     console.error('User registration error:', err);
     return sendError(res, 'User registration failed', 500, err);
+  }
+};
+
+export const listPendingUsers = async (req, res) => {
+  try {
+    const users = await User.findAll({
+      where: { isActive: false },
+      attributes: { exclude: ['password'] },
+      order: [['createdAt', 'ASC']]
+    });
+
+    return sendSuccess(res, { users });
+  } catch (err) {
+    console.error('List pending users error:', err);
+    return sendError(res, 'Failed to fetch pending users', 500, err);
+  }
+};
+
+export const approveUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findByPk(id);
+
+    if (!user) {
+      return sendNotFound(res, 'User');
+    }
+
+    user.isActive = true;
+    await user.save();
+
+    const sanitizedUser = user.toJSON();
+    delete sanitizedUser.password;
+
+    return sendSuccess(res, { user: sanitizedUser }, 'User approved successfully');
+  } catch (err) {
+    console.error('Approve user error:', err);
+    return sendError(res, 'Failed to approve user', 500, err);
+  }
+};
+
+export const rejectUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findByPk(id);
+
+    if (!user) {
+      return sendNotFound(res, 'User');
+    }
+
+    await user.destroy();
+
+    return sendSuccess(res, { id }, 'User registration rejected and removed');
+  } catch (err) {
+    console.error('Reject user error:', err);
+    return sendError(res, 'Failed to reject user', 500, err);
+  }
+};
+
+export const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.findAll({
+      attributes: { exclude: ['password'] },
+      order: [['createdAt', 'DESC']]
+    });
+
+    return sendSuccess(res, { users });
+  } catch (err) {
+    console.error('List all users error:', err);
+    return sendError(res, 'Failed to fetch users', 500, err);
+  }
+};
+
+export const updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role, isActive, locationId, locationName, taxPercentage } = req.body;
+
+    const user = await User.findByPk(id);
+
+    if (!user) {
+      return sendNotFound(res, 'User');
+    }
+
+    // Prevent admin from deactivating themselves
+    if (req.user.id === parseInt(id) && isActive === false) {
+      return sendError(res, 'You cannot deactivate your own account', 400);
+    }
+
+    // Update role if provided
+    if (role !== undefined) {
+      if (!['cashier', 'admin'].includes(role)) {
+        return sendValidationError(res, 'Role must be either "cashier" or "admin"');
+      }
+      user.role = role;
+    }
+
+    // Update isActive if provided
+    if (isActive !== undefined) {
+      user.isActive = isActive === true;
+    }
+
+    // Update locationId if provided
+    if (locationId !== undefined) {
+      user.locationId = locationId;
+    }
+
+    // Update locationName if provided
+    if (locationName !== undefined) {
+      user.locationName = locationName;
+    }
+
+    // Update taxPercentage if provided
+    if (taxPercentage !== undefined) {
+      user.taxPercentage = parseFloat(taxPercentage);
+    }
+
+    await user.save();
+
+    const sanitizedUser = user.toJSON();
+    delete sanitizedUser.password;
+
+    return sendSuccess(res, { user: sanitizedUser }, 'User updated successfully');
+  } catch (err) {
+    console.error('Update user error:', err);
+    return sendError(res, 'Failed to update user', 500, err);
   }
 };
 
