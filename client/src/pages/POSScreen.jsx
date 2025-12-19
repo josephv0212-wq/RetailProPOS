@@ -48,12 +48,6 @@ const POSScreen = () => {
   const [printerStatus, setPrinterStatus] = useState('checking');
 
   useEffect(() => {
-    // If admin somehow hits POS route, redirect them to admin dashboard
-    if (user && user.role === 'admin') {
-      navigate('/admin', { replace: true });
-      return;
-    }
-
     loadData();
     checkPrinterStatus();
   }, [user]);

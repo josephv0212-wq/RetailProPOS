@@ -38,8 +38,8 @@ const PublicRoute = ({ children }) => {
   }
 
   if (user) {
-    // Admins go to admin dashboard, others to sales
-    return <Navigate to={user.role === 'admin' ? '/admin' : '/sales'} replace />;
+    // Redirect to sales page (admins can access all pages)
+    return <Navigate to="/sales" replace />;
   }
 
   return children;
@@ -120,7 +120,7 @@ const AppContent = () => {
   );
 };
 
-// Helper component for deciding home route based on role
+// Helper component for deciding home route
 const RoleBasedHome = () => {
   const { user } = useAuth();
 
@@ -128,7 +128,8 @@ const RoleBasedHome = () => {
     return <Navigate to="/login" replace />;
   }
 
-  return <Navigate to={user.role === 'admin' ? '/admin' : '/sales'} replace />;
+  // Default to sales page (admins can access all pages)
+  return <Navigate to="/sales" replace />;
 };
 
 const App = () => {
