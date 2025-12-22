@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { itemsAPI, customersAPI, salesAPI, zohoAPI, printerAPI, ordersAPI } from '../services/api';
+import { itemsAPI, customersAPI, salesAPI, zohoAPI, printerAPI } from '../services/api';
 import ItemSelector from '../components/ItemSelector';
 import Cart from '../components/Cart';
 import PaymentModal from '../components/PaymentModal';
-import PaymentReconciliation from '../components/PaymentReconciliation';
 import ReceiptScreen from '../components/ReceiptScreen';
 import TopNavigation from '../components/TopNavigation';
 import { showToast } from '../components/ToastContainer';
@@ -47,8 +46,6 @@ const POSScreen = () => {
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [printerStatus, setPrinterStatus] = useState('checking');
-  const [pendingOrder, setPendingOrder] = useState(null);
-  const [showPaymentReconciliation, setShowPaymentReconciliation] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -269,7 +266,7 @@ const POSScreen = () => {
     };
   }, [cart, customerTaxPreference, user]);
 
-  const handlePaymentComplete = async (saleResponse) => {
+  const handlePaymentComplete = (saleResponse) => {
     const saleData = saleResponse.data?.sale || saleResponse.sale;
     const zohoStatus = saleResponse.data?.zoho || null;
     const items = saleResponse.data?.items || saleData?.items || [];
@@ -309,99 +306,6 @@ const POSScreen = () => {
 
     clearCart();
     setShowPayment(false);
-    setPendingOrder(null);
-    setShowPaymentReconciliation(false);
-  };
-
-  /**
-   * Handle Authorize.net Windows App payment flow
-   * Creates an order first, then shows reconciliation component
-   */
-  const handleAuthorizeNetWindowsPayment = async () => {
-    if (cart.length === 0) {
-      showToast('Cart is empty', 'error', 3000);
-      return;
-    }
-
-    try {
-      const totals = calculateTotal;
-      const amount = parseFloat(totals.total);
-      const laneId = user?.locationId || 'LANE-01';
-
-      // Create order
-      const orderResponse = await ordersAPI.create({
-        amount: amount,
-        laneId: laneId,
-        notes: `POS Sale - ${selectedCustomer?.name || 'Walk-in Customer'}`
-      });
-
-      if (orderResponse.data.success) {
-        const order = orderResponse.data.data.order;
-        setPendingOrder({
-          orderId: order.id,
-          invoiceNumber: order.invoiceNumber,
-          amount: order.amount,
-          cart: cart,
-          customer: selectedCustomer,
-          customerTaxPreference: customerTaxPreference,
-          totals: totals
-        });
-        setShowPayment(false);
-        setShowPaymentReconciliation(true);
-        showToast(
-          `Order created! Invoice: ${order.invoiceNumber}`,
-          'success',
-          5000
-        );
-      } else {
-        throw new Error(orderResponse.data.message || 'Failed to create order');
-      }
-    } catch (error) {
-      const errorMsg = error.formattedMessage || 
-                      error.response?.data?.message || 
-                      error.message || 
-                      'Failed to create order';
-      showToast(errorMsg, 'error', 5000);
-    }
-  };
-
-  /**
-   * Handle payment reconciliation completion
-   * When payment is matched, create the sale
-   */
-  const handleReconciliationComplete = async (order) => {
-    if (!pendingOrder) {
-      showToast('No pending order found', 'error', 3000);
-      return;
-    }
-
-    try {
-      showToast('Payment confirmed! Creating sale...', 'info', 3000);
-
-      // Create sale with the same data as the order
-      const saleData = {
-        items: pendingOrder.cart.map(item => ({
-          itemId: item.id,
-          quantity: item.quantity
-        })),
-        customerId: pendingOrder.customer?.id || null,
-        customerTaxPreference: pendingOrder.customerTaxPreference || null,
-        paymentType: 'authorize_net_windows',
-        notes: `Sale at POS - Authorize.net Windows App - Invoice: ${pendingOrder.invoiceNumber} - ${new Date().toLocaleString()}`,
-        orderId: pendingOrder.orderId, // Link sale to order
-        invoiceNumber: pendingOrder.invoiceNumber
-      };
-
-      const response = await salesAPI.create(saleData);
-      await handlePaymentComplete(response.data);
-    } catch (error) {
-      const errorMsg = error.formattedMessage || 
-                      error.response?.data?.message || 
-                      error.message || 
-                      'Failed to create sale';
-      showToast(errorMsg, 'error', 5000);
-      console.error('Failed to create sale after payment reconciliation:', error);
-    }
   };
 
   const handleNewSale = () => {
@@ -533,20 +437,6 @@ const POSScreen = () => {
           totals={calculateTotal}
           onClose={() => setShowPayment(false)}
           onComplete={handlePaymentComplete}
-          onAuthorizeNetWindows={handleAuthorizeNetWindowsPayment}
-        />
-      )}
-
-      {/* Payment Reconciliation Modal */}
-      {showPaymentReconciliation && pendingOrder && (
-        <PaymentReconciliation
-          orderId={pendingOrder.orderId}
-          onPaymentComplete={handleReconciliationComplete}
-          onClose={() => {
-            setShowPaymentReconciliation(false);
-            // Optionally keep order pending or cancel it
-            // For now, we'll keep it pending so user can check status later
-          }}
         />
       )}
     </div>
