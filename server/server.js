@@ -10,10 +10,11 @@ import customerRoutes from './routes/customerRoutes.js';
 import printerRoutes from './routes/printerRoutes.js';
 import paxRoutes from './routes/paxRoutes.js';
 import bbposRoutes from './routes/bbposRoutes.js';
+import orderRoutes from './routes/orderRoutes.js';
 import { sequelize } from './config/db.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { Customer, User } from './models/index.js';
+import { Customer, User, Order, Payment } from './models/index.js';
 import bcrypt from 'bcryptjs';
 import { syncCustomersToDatabase } from './controllers/zohoController.js';
 
@@ -195,6 +196,7 @@ app.get('/', (req, res) => {
         printer: '/printer',
         pax: '/pax',
         bbpos: '/bbpos',
+        orders: '/orders',
         health: '/health'
       }
   });
@@ -208,6 +210,7 @@ app.use('/zoho', zohoRoutes);
 app.use('/printer', printerRoutes);
 app.use('/pax', paxRoutes);
 app.use('/bbpos', bbposRoutes);
+app.use('/orders', orderRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
@@ -342,6 +345,16 @@ const startServer = async () => {
 
   await checkAndSyncCustomers();
 
+  // Start reconciliation worker for payment matching
+  try {
+    const { startReconciliationWorker } = await import('./workers/reconciliationWorker.js');
+    startReconciliationWorker();
+    console.log('✅ Payment reconciliation worker started');
+  } catch (error) {
+    console.warn('⚠️  Failed to start reconciliation worker:', error.message);
+    console.warn('   Payment reconciliation will not work until this is resolved.');
+  }
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log('✅ RetailPro POS Backend running on port', PORT);
     console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -356,6 +369,10 @@ const startServer = async () => {
     console.log('   - GET  /items');
     console.log('   - GET  /customers');
     console.log('   - POST /zoho/sync/all');
+    console.log('   - POST /orders (create order)');
+    console.log('   - GET  /orders/:id/payment-status (poll payment status)');
+    console.log('   - POST /orders/:orderId/void (void transaction)');
+    console.log('   - POST /orders/:orderId/refund (refund transaction)');
     if (process.env.NODE_ENV === 'production') {
       console.log('⚠️  Database auto-sync is disabled. Use migrations for schema changes.');
     }

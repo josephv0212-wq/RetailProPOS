@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { salesAPI, paxAPI, bluetoothAPI } from '../services/api';
 import { showToast } from './ToastContainer';
 
-const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTaxPreference }) => {
+const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTaxPreference, onAuthorizeNetWindows }) => {
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash', 'credit_card', 'debit_card', 'zelle', or 'ach'
   const [cardDetails, setCardDetails] = useState({
     cardNumber: '',
@@ -331,6 +331,19 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
     setProcessing(true);
 
     try {
+      // Handle Authorize.net Windows App payment method
+      if (paymentMethod === 'authorize_net_windows') {
+        if (onAuthorizeNetWindows) {
+          onAuthorizeNetWindows();
+          setProcessing(false);
+          return;
+        } else {
+          setError('Authorize.net Windows App handler not configured');
+          setProcessing(false);
+          return;
+        }
+      }
+
       // Validation based on payment method
       if (paymentMethod === 'credit_card' || paymentMethod === 'debit_card') {
         if (useBluetoothReader) {
@@ -742,6 +755,39 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
                 fontWeight: '600'
               }}>
                 Bank account
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPaymentMethod('authorize_net_windows')}
+              style={{
+                padding: '16px 12px',
+                border: paymentMethod === 'authorize_net_windows' ? '3px solid var(--primary)' : '2px solid var(--border)',
+                borderRadius: '10px',
+                background: paymentMethod === 'authorize_net_windows' ? '#f0f9ff' : 'white',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                textAlign: 'center'
+              }}
+            >
+              <div style={{ fontSize: '28px', marginBottom: '6px' }}>💳</div>
+              <div style={{ 
+                fontWeight: '700', 
+                fontSize: '14px', 
+                color: 'var(--dark)',
+                fontFamily: 'var(--font-family)',
+                marginBottom: '4px'
+              }}>
+                Card (Windows App)
+              </div>
+              <div style={{ 
+                fontSize: '11px', 
+                color: 'var(--info)', 
+                fontFamily: 'var(--font-family)',
+                fontWeight: '600'
+              }}>
+                Chip/Tap/Swipe
               </div>
             </button>
           </div>
@@ -1732,6 +1778,80 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
           </div>
           )}
 
+          {/* Authorize.net Windows App Payment */}
+          {paymentMethod === 'authorize_net_windows' && (
+            <div style={{
+              background: '#eff6ff',
+              padding: '24px',
+              borderRadius: '12px',
+              border: '2px solid #3b82f6',
+              marginBottom: '20px',
+              textAlign: 'center'
+            }}>
+              <div style={{ fontSize: '64px', marginBottom: '16px' }}>💳</div>
+              <h3 style={{ 
+                fontWeight: '700', 
+                fontSize: '20px', 
+                marginBottom: '12px',
+                color: 'var(--dark)',
+                fontFamily: 'var(--font-family)'
+              }}>
+                Authorize.net Windows App Payment
+              </h3>
+              <p style={{
+                fontSize: '16px',
+                color: 'var(--gray-700)',
+                marginBottom: '16px',
+                fontFamily: 'var(--font-family)',
+                lineHeight: '1.5'
+              }}>
+                This will create an order with an invoice number. Enter the invoice number in the Authorize.net 2.0 Windows app to process the payment.
+              </p>
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '8px',
+                marginBottom: '16px',
+                border: '2px solid var(--border)'
+              }}>
+                <p style={{ 
+                  fontSize: '14px', 
+                  color: 'var(--gray-700)', 
+                  marginBottom: '12px',
+                  fontFamily: 'var(--font-family)',
+                  lineHeight: '1.5'
+                }}>
+                  <strong>Instructions:</strong>
+                </p>
+                <ol style={{ 
+                  fontSize: '14px', 
+                  color: 'var(--gray-700)', 
+                  paddingLeft: '20px',
+                  fontFamily: 'var(--font-family)',
+                  lineHeight: '1.6',
+                  textAlign: 'left'
+                }}>
+                  <li>Click "Create Order" below</li>
+                  <li>An invoice number will be displayed</li>
+                  <li>Enter the invoice number in Authorize.net 2.0 Windows app</li>
+                  <li>Process payment (chip/tap/swipe) in the Windows app</li>
+                  <li>Payment will be automatically reconciled</li>
+                </ol>
+              </div>
+              <div style={{
+                background: '#f0fdf4',
+                padding: '12px 20px',
+                borderRadius: '8px',
+                display: 'inline-block',
+                fontSize: '14px',
+                color: 'var(--success)',
+                fontWeight: '600'
+              }}>
+                ✅ Automatic reconciliation (checks every 60 seconds)
+              </div>
+            </div>
+          )}
+
           {/* Zelle Payment */}
           {paymentMethod === 'zelle' && (
             <div style={{
@@ -1843,6 +1963,8 @@ const PaymentModal = ({ cart, customer, totals, onClose, onComplete, customerTax
                 `Complete Cash Sale - $${grandTotal.toFixed(2)}`
               ) : paymentMethod === 'zelle' ? (
                 `Complete Zelle Payment - $${grandTotal.toFixed(2)}`
+              ) : paymentMethod === 'authorize_net_windows' ? (
+                `Create Order - $${grandTotal.toFixed(2)}`
               ) : paymentMethod === 'credit_card' ? (
                 `Pay $${finalTotal.toFixed(2)}`
               ) : (

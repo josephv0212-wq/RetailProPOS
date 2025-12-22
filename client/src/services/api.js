@@ -150,4 +150,11 @@ export const printerAPI = {
   // Manual reprint endpoint can be added to backend if needed
 };
 
+export const ordersAPI = {
+  create: (orderData) => api.post('/orders', orderData),
+  getPaymentStatus: (orderId) => api.get(`/orders/${orderId}/payment-status`, { params: { noCache: true } }),
+  voidPayment: (orderId) => api.post(`/orders/${orderId}/void`),
+  refundPayment: (orderId, amount) => api.post(`/orders/${orderId}/refund`, { amount }),
+};
+
 export default api;
