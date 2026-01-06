@@ -9,7 +9,8 @@
     "dev": "nodemon server.js",
     "setup-users": "node ../scripts/createUser.js",
     "test": "node ../scripts/testBackend.js",
-    "get-zoho-token": "node ../scripts/getZohoToken.js"
+    "get-zoho-token": "node ../scripts/getZohoToken.js",
+    "migrate:terminal-ip": "node scripts/addTerminalIPColumn.js"
   },
   "dependencies": {
     "axios": "^1.6.0",

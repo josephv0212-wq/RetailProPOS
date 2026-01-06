@@ -2,6 +2,7 @@ import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer } from '../models/index.js';
 import { processPayment, processAchPayment, calculateCreditCardFee } from '../services/authorizeNetService.js';
 import { processTerminalPayment } from '../services/paxTerminalService.js';
+import { processTerminalPayment as processEBizChargePayment } from '../services/ebizchargeTerminalService.js';
 import { processBluetoothPayment } from '../services/bbposService.js';
 import { createSalesReceipt, getCustomerById as getZohoCustomerById } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
@@ -29,7 +30,7 @@ const resolveTaxPercentage = (user) => {
 
 export const createSale = async (req, res) => {
   try {
-    const { items, customerId, paymentType, paymentDetails, notes, terminalIP, useTerminal, useBluetoothReader, bluetoothPayload, customerTaxPreference } = req.body;
+    const { items, customerId, paymentType, paymentDetails, notes, terminalIP, useTerminal, useEBizChargeTerminal, useBluetoothReader, bluetoothPayload, customerTaxPreference } = req.body;
     const userId = req.user.id;
     const locationId = req.user.locationId;
     const locationName = req.user.locationName;
@@ -96,6 +97,7 @@ export const createSale = async (req, res) => {
     
     let zohoContactType = customer?.contactType?.toLowerCase() || null;
     let zohoCustomerDetails = null;
+    let customerLocation = null; // Customer's location from Zoho (place_of_contact) - used to enforce correct tax rate
     if (customer?.zohoId) {
       try {
         zohoCustomerDetails = await getZohoCustomerById(customer.zohoId);
@@ -106,17 +108,41 @@ export const createSale = async (req, res) => {
             await customer.update({ contactType: fetchedContactType });
           }
         }
+        
+        // Extract customer's location (place_of_contact) from Zoho to enforce correct tax rate
+        // Zoho uses place_of_contact to determine which tax rate to apply
+        if (zohoCustomerDetails) {
+          // First check custom_fields for location
+          if (zohoCustomerDetails.custom_fields && Array.isArray(zohoCustomerDetails.custom_fields)) {
+            const locationField = zohoCustomerDetails.custom_fields.find(
+              field => field.label === 'location' || field.label === 'Location'
+            );
+            if (locationField?.value) {
+              customerLocation = locationField.value;
+            }
+          }
+          
+          // Fall back to place_of_contact if no custom field found
+          if (!customerLocation && zohoCustomerDetails.place_of_contact) {
+            customerLocation = zohoCustomerDetails.place_of_contact;
+          }
+          
+          if (customerLocation) {
+            console.log(`📍 Customer has location in Zoho: ${customerLocation} (will use for sales receipt to enforce correct tax rate)`);
+          }
+        }
       } catch (contactTypeError) {
         console.warn(`⚠️ Unable to verify contact type for Zoho customer ${customer?.id}:`, contactTypeError.message);
       }
     }
     
     const baseTotal = subtotal + taxAmount;
-    const creditCardProcessingFee = paymentType === 'credit_card'
+    // 3% convenience fee applies to all card payments (credit and debit)
+    const cardProcessingFee = (paymentType === 'credit_card' || paymentType === 'debit_card')
       ? calculateCreditCardFee(subtotal, taxAmount)
       : 0;
 
-    const total = baseTotal + creditCardProcessingFee;
+    const total = baseTotal + cardProcessingFee;
 
     let transactionId = null;
     let paymentResult = null;
@@ -142,6 +168,23 @@ export const createSale = async (req, res) => {
 
         if (!paymentResult.success) {
           return sendError(res, 'Bluetooth reader payment processing failed', 400, paymentResult.error);
+        }
+
+        transactionId = paymentResult.transactionId;
+      } else if (useEBizChargeTerminal) {
+        // EBizCharge Terminal mode - process through EBizCharge WiFi terminal
+        if (!terminalIP) {
+          return sendValidationError(res, 'Terminal IP address is required for EBizCharge terminal payments');
+        }
+        
+        paymentResult = await processEBizChargePayment({
+          amount: total,
+          invoiceNumber: `POS-${Date.now()}`,
+          description: `POS Sale - ${locationName}`
+        }, terminalIP);
+
+        if (!paymentResult.success) {
+          return sendError(res, 'EBizCharge terminal payment processing failed', 400, paymentResult.error);
         }
 
         transactionId = paymentResult.transactionId;
@@ -232,7 +275,7 @@ export const createSale = async (req, res) => {
       subtotal: subtotal.toFixed(2),
       taxAmount: taxAmount.toFixed(2),
       taxPercentage: userTaxPercentage,
-      ccFee: creditCardProcessingFee.toFixed(2), // Credit card processing fee (if applicable)
+      ccFee: cardProcessingFee.toFixed(2), // Card processing fee (3% convenience fee for credit/debit cards)
       total: total.toFixed(2),
       paymentType,
       locationId,
@@ -258,12 +301,14 @@ export const createSale = async (req, res) => {
     if (isZohoCustomer) {
       try {
         // For Zoho, ccFee is the credit card processing fee (if any)
+        // Pass customerLocation to enforce correct tax rate - Zoho uses place_of_contact to determine tax rate
         const zohoResult = await createSalesReceipt({
           customerId: customer.zohoId, // Using the customer's zohoId from Zoho Books
           date: new Date().toISOString().split('T')[0],
           lineItems: saleItemsData,
           locationId,
           locationName,
+          customerLocation, // Customer's location from Zoho - ensures correct tax rate is applied
           taxAmount: parseFloat(sale.taxAmount),
           ccFee: parseFloat(sale.ccFee), // Credit card processing fee
           total: parseFloat(sale.total),
@@ -465,12 +510,42 @@ export const retryZohoSync = async (req, res) => {
       taxId: item.taxId
     }));
 
+    // Fetch customer's location from Zoho to enforce correct tax rate
+    let customerLocation = null;
+    try {
+      const zohoCustomerDetails = await getZohoCustomerById(sale.customer.zohoId);
+      if (zohoCustomerDetails) {
+        // First check custom_fields for location
+        if (zohoCustomerDetails.custom_fields && Array.isArray(zohoCustomerDetails.custom_fields)) {
+          const locationField = zohoCustomerDetails.custom_fields.find(
+            field => field.label === 'location' || field.label === 'Location'
+          );
+          if (locationField?.value) {
+            customerLocation = locationField.value;
+          }
+        }
+        
+        // Fall back to place_of_contact if no custom field found
+        if (!customerLocation && zohoCustomerDetails.place_of_contact) {
+          customerLocation = zohoCustomerDetails.place_of_contact;
+        }
+        
+        if (customerLocation) {
+          console.log(`📍 Customer has location in Zoho: ${customerLocation} (will use for sales receipt to enforce correct tax rate)`);
+        }
+      }
+    } catch (locationError) {
+      console.warn(`⚠️ Unable to fetch customer location from Zoho for retry sync:`, locationError.message);
+      // Continue with sync even if location fetch fails
+    }
+
     const zohoResult = await createSalesReceipt({
       customerId: sale.customer.zohoId, // Using the customer's zohoId from Zoho Books
       date: sale.createdAt.toISOString().split('T')[0],
       lineItems: saleItemsData,
       locationId: sale.locationId,
       locationName: sale.locationName,
+      customerLocation, // Customer's location from Zoho - ensures correct tax rate is applied
       taxAmount: parseFloat(sale.taxAmount),
       ccFee: parseFloat(sale.ccFee),
       total: parseFloat(sale.total),

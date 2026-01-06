@@ -10,6 +10,7 @@ import customerRoutes from './routes/customerRoutes.js';
 import printerRoutes from './routes/printerRoutes.js';
 import paxRoutes from './routes/paxRoutes.js';
 import bbposRoutes from './routes/bbposRoutes.js';
+import ebizchargeRoutes from './routes/ebizchargeRoutes.js';
 import { sequelize } from './config/db.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -44,6 +45,13 @@ const optionalButRecommended = [
   'PAX_TERMINAL_IP',
   'PAX_TERMINAL_PORT',
   'PAX_TERMINAL_TIMEOUT',
+  'EBIZCHARGE_TERMINAL_IP',
+  'EBIZCHARGE_TERMINAL_PORT',
+  'EBIZCHARGE_TERMINAL_TIMEOUT',
+  'EBIZCHARGE_USER_ID',
+  'EBIZCHARGE_PASSWORD',
+  'EBIZCHARGE_SECURITY_ID',
+  'EBIZCHARGE_API_URL',
   'PRINTER_IP_LOC001',
   'PRINTER_IP_LOC002',
   'PRINTER_IP_LOC003',
@@ -85,7 +93,9 @@ const corsOptions = {
       'http://127.0.0.1:5173',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      'https://subzerodryice-pos.com'
+      'https://subzerodryice-pos.com',
+      'http://86.104.72.45:5000',
+      'http://localhost:5173'
     ];
     
     // Add custom FRONTEND_URL if set (supports comma-separated list)
@@ -208,6 +218,7 @@ app.use('/zoho', zohoRoutes);
 app.use('/printer', printerRoutes);
 app.use('/pax', paxRoutes);
 app.use('/bbpos', bbposRoutes);
+app.use('/ebizcharge', ebizchargeRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
@@ -319,6 +330,29 @@ const ensureItemImageColumn = async () => {
   }
 };
 
+// Ensure terminalIP column exists on Users table (for SQLite / auto-sync disabled)
+const ensureTerminalIPColumn = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      // SQLite syntax
+      await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalIP` VARCHAR(255) NULL');
+      console.log('✅ Added terminalIP column to Users table');
+    } else {
+      // PostgreSQL syntax
+      await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalIP" VARCHAR(255) NULL');
+      console.log('✅ Added terminalIP column to Users table');
+    }
+  } catch (err) {
+    const msg = err?.message || '';
+    if (msg.includes('duplicate column name') || msg.includes('duplicate column') || msg.includes('already exists')) {
+      console.log('ℹ️  terminalIP column already exists on Users table');
+      return;
+    }
+    // If the table doesn't exist or other error, log but don't crash server
+    console.warn('⚠️  Could not ensure terminalIP column on Users table:', msg);
+  }
+};
+
 // Admin user creation is handled by bootstrap login mechanism in authController.js
 // Bootstrap credentials: accounting@subzeroiceservices.com / dryice000
 // This only works when database is empty (first-time setup)
@@ -336,6 +370,10 @@ const startServer = async () => {
   // Make sure new columns needed for features exist in older SQLite DBs
   if (DATABASE_SETTING === 'local') {
     await ensureItemImageColumn();
+    await ensureTerminalIPColumn();
+  } else {
+    // For PostgreSQL, also ensure columns exist
+    await ensureTerminalIPColumn();
   }
 
   // Admin user creation handled by bootstrap login (see authController.js)

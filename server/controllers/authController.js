@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { User } from '../models/index.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
+import { getLocationById } from '../services/zohoService.js';
 
 // Normalize a user's tax percentage, falling back to numbers embedded in the
 // location name (e.g., "Miami Dade Sales Tax (7%)") before using the default.
@@ -122,7 +123,8 @@ export const login = async (req, res) => {
         role: user.role,
         locationId: user.locationId,
         locationName: user.locationName,
-        taxPercentage: resolveTaxPercentage(user)
+        taxPercentage: resolveTaxPercentage(user),
+        terminalIP: user.terminalIP
       }
     }, 'Login successful');
   } catch (err) {
@@ -181,14 +183,40 @@ export const register = async (req, res) => {
       return sendValidationError(res, 'Username already exists');
     }
 
+    // Fetch location information from Zoho Books API if locationId is provided
+    let finalLocationName = locationName;
+    let finalLocationId = locationId;
+    
+    if (locationId) {
+      try {
+        console.log(`📍 Fetching location details from Zoho for locationId: ${locationId}`);
+        const zohoLocation = await getLocationById(locationId);
+        
+        if (zohoLocation) {
+          // Use location name from Zoho if available, otherwise use provided name
+          finalLocationName = zohoLocation.location_name || zohoLocation.name || locationName;
+          finalLocationId = zohoLocation.location_id || zohoLocation.id || locationId;
+          
+          console.log(`✅ Retrieved location from Zoho: ${finalLocationName} (ID: ${finalLocationId})`);
+        } else {
+          console.warn(`⚠️ Location ${locationId} not found in Zoho, using provided locationName`);
+        }
+      } catch (zohoError) {
+        console.error(`❌ Failed to fetch location ${locationId} from Zoho:`, zohoError.message);
+        // Continue with registration using provided locationId and locationName
+        // Don't fail registration if Zoho API call fails
+        console.warn('⚠️ Continuing registration with provided location information');
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     
     const user = await User.create({
       username,
       password: hashedPassword,
       role: role || 'cashier',
-      locationId,
-      locationName,
+      locationId: finalLocationId,
+      locationName: finalLocationName,
       taxPercentage: taxPercentage ? parseFloat(taxPercentage) : 7.5,
       // New registrations are inactive until approved by an admin
       isActive: false
@@ -282,7 +310,7 @@ export const getAllUsers = async (req, res) => {
 export const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { role, isActive, locationId, locationName, taxPercentage } = req.body;
+    const { role, isActive, locationId, locationName, taxPercentage, terminalIP } = req.body;
 
     const user = await User.findByPk(id);
 
@@ -323,6 +351,11 @@ export const updateUser = async (req, res) => {
       user.taxPercentage = parseFloat(taxPercentage);
     }
 
+    // Update terminalIP if provided
+    if (terminalIP !== undefined) {
+      user.terminalIP = terminalIP && terminalIP.trim() !== '' ? terminalIP.trim() : null;
+    }
+
     await user.save();
 
     const sanitizedUser = user.toJSON();
@@ -350,5 +383,35 @@ export const getCurrentUser = async (req, res) => {
   } catch (err) {
     console.error('Get user error:', err);
     return sendError(res, 'Failed to get user', 500, err);
+  }
+};
+
+export const updateMyTerminalIP = async (req, res) => {
+  try {
+    const { terminalIP } = req.body;
+    const user = await User.findByPk(req.user.id);
+    
+    if (!user) {
+      return sendNotFound(res, 'User');
+    }
+
+    // Validate IP format if provided
+    if (terminalIP && terminalIP.trim() !== '') {
+      const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+      if (!ipRegex.test(terminalIP.trim())) {
+        return sendValidationError(res, 'Invalid IP address format. Please use format like 192.168.1.100');
+      }
+    }
+
+    user.terminalIP = terminalIP && terminalIP.trim() !== '' ? terminalIP.trim() : null;
+    await user.save();
+
+    const sanitizedUser = user.toJSON();
+    delete sanitizedUser.password;
+
+    return sendSuccess(res, { user: sanitizedUser }, 'Terminal IP updated successfully');
+  } catch (err) {
+    console.error('Update terminal IP error:', err);
+    return sendError(res, 'Failed to update terminal IP', 500, err);
   }
 };

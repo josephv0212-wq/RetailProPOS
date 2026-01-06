@@ -34,5 +34,10 @@ export const User = sequelize.define('User', {
   isActive: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
+  },
+  terminalIP: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'IP address of the EBizCharge WiFi terminal assigned to this user'
   }
 });

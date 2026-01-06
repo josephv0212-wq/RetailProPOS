@@ -282,6 +282,7 @@ export const createSalesReceipt = async (saleData) => {
     lineItems, 
     locationId,
     locationName,
+    customerLocation, // Customer's location from Zoho (place_of_contact) - used to enforce correct tax rate
     taxAmount,
     ccFee,
     total,
@@ -317,6 +318,11 @@ export const createSalesReceipt = async (saleData) => {
   const processingFee = parseFloat(ccFee || 0) || 0;
   const expectedTotal = parseFloat(total || 0);
 
+  // Use customer's location (place_of_contact) if available to enforce correct tax rate
+  // Zoho uses place_of_contact to determine which tax rate to apply
+  // If customer has a different assigned tax rate, we must use their location
+  const placeOfContact = customerLocation || locationName || locationId || null;
+
   const salesReceiptData = {
     customer_id: customerId, // Zoho Books customer ID (contact_id from Zoho)
     salesreceipt_number: `POS-${saleId}`,
@@ -347,6 +353,13 @@ export const createSalesReceipt = async (saleData) => {
     }),
     notes: notes || `Sale from POS - Location: ${locationName || locationId || 'Unknown'}`
   };
+
+  // Set place_of_contact to customer's location to enforce correct tax rate
+  // This ensures Zoho applies the tax rate associated with the customer's location
+  if (placeOfContact) {
+    salesReceiptData.place_of_contact = placeOfContact;
+    console.log(`📍 Using customer location for sales receipt: ${placeOfContact} (to enforce correct tax rate)`);
+  }
 
   // Keep Zoho total in sync with POS total (cc fee is an adjustment, not a line item)
   if (processingFee > 0) {
@@ -865,6 +878,69 @@ export const getTaxRates = async (options = {}) => {
     return mappedTaxes;
   } catch (error) {
     console.error('❌ Failed to fetch tax rates from Zoho:', error.message);
+    if (error.response) {
+      console.error('   Response status:', error.response.status);
+      console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    throw error;
+  }
+};
+
+/**
+ * Get all locations from Zoho Books
+ * @returns {Promise<Array>} Array of location objects
+ */
+export const getLocations = async () => {
+  try {
+    // First try to get locations with pagination support
+    try {
+      const locations = await fetchAllPages('/locations', {}, 'locations');
+      if (locations && locations.length > 0) {
+        return locations;
+      }
+    } catch (paginationError) {
+      // If pagination fails, try direct request (locations might not support pagination)
+      console.log('⚠️ Pagination not supported for locations, trying direct request');
+    }
+    
+    // Fallback to direct request if pagination doesn't work
+    const response = await makeZohoRequest('/locations', 'GET');
+    
+    if (response.code === 0) {
+      return response.locations || [];
+    } else {
+      const errorMsg = response.message || 'Failed to fetch locations';
+      console.error('❌ Failed to fetch locations:', errorMsg);
+      throw new Error(errorMsg);
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch locations from Zoho:', error.message);
+    if (error.response) {
+      console.error('   Response status:', error.response.status);
+      console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    throw error;
+  }
+};
+
+/**
+ * Get a specific location by ID from Zoho Books
+ * @param {string} locationId - The Zoho location ID
+ * @returns {Promise<Object>} Location object with details
+ */
+export const getLocationById = async (locationId) => {
+  try {
+    const response = await makeZohoRequest(`/locations/${locationId}`);
+    
+    if (response.code === 0) {
+      return response.location;
+    } else {
+      const errorMsg = response.message || 'Failed to fetch location';
+      console.error(`❌ Failed to fetch location ${locationId}:`, errorMsg);
+      throw new Error(errorMsg);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to fetch location ${locationId}:`, error.message);
     if (error.response) {
       console.error('   Response status:', error.response.status);
       console.error('   Response data:', JSON.stringify(error.response.data, null, 2));

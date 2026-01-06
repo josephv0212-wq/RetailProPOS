@@ -1,4 +1,4 @@
-import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates } from '../services/zohoService.js';
+import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations } from '../services/zohoService.js';
 import { Customer, Item } from '../models/index.js';
 
 const DEFAULT_CUSTOMERS = {
@@ -322,6 +322,46 @@ export const getTaxRatesList = async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: 'Failed to fetch tax rates',
+      ...(isDevelopment && { 
+        error: err.message,
+        details: err.response?.data 
+      })
+    });
+  }
+};
+
+export const getLocationsList = async (req, res) => {
+  try {
+    const locations = await getLocations();
+    
+    // Map locations to include only relevant fields for frontend
+    const mappedLocations = locations.map(location => ({
+      locationId: location.location_id || location.id,
+      locationName: location.location_name || location.name,
+      status: location.status || 'active',
+      isPrimary: location.is_primary || false,
+      type: location.type || null,
+      email: location.email || null,
+      phone: location.phone || null,
+      address: location.address || null
+    }));
+    
+    res.json({ 
+      success: true,
+      data: { locations: mappedLocations }
+    });
+  } catch (err) {
+    console.error('❌ Get locations error:', err);
+    console.error('   Error details:', {
+      message: err.message,
+      response: err.response?.data,
+      status: err.response?.status
+    });
+    
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch locations',
       ...(isDevelopment && { 
         error: err.message,
         details: err.response?.data 
