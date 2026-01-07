@@ -370,6 +370,19 @@ export const zohoAPI = {
       `/zoho/salesorders/${encodeURIComponent(salesorderId)}`
     );
   },
+
+  getCustomerInvoices: async (customerId: string, status?: string) => {
+    const statusParam = status ? `&status=${encodeURIComponent(status)}` : '';
+    return apiRequest<{ invoices: any[] }>(
+      `/zoho/invoices?customer_id=${encodeURIComponent(customerId)}${statusParam}`
+    );
+  },
+
+  getInvoiceDetails: async (invoiceId: string) => {
+    return apiRequest<{ invoice: any }>(
+      `/zoho/invoices/${encodeURIComponent(invoiceId)}`
+    );
+  },
 };
 
 // PAX Terminal API

@@ -1,4 +1,4 @@
-import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById } from '../services/zohoService.js';
+import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById } from '../services/zohoService.js';
 import { Customer, Item } from '../models/index.js';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
 
@@ -436,6 +436,84 @@ export const getSalesOrderDetails = async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: 'Failed to fetch sales order details',
+      ...(isDevelopment && { 
+        error: err.message,
+        details: err.response?.data 
+      })
+    });
+  }
+};
+
+export const getCustomerInvoicesList = async (req, res) => {
+  try {
+    const { customer_id, status } = req.query;
+    
+    if (!customer_id) {
+      return sendError(res, 'Customer ID (customer_id) is required', 400);
+    }
+    
+    // Default to 'unpaid' status if not specified
+    const invoiceStatus = status || 'unpaid';
+    
+    const invoices = await getCustomerInvoices(customer_id, invoiceStatus);
+    
+    // Map invoices to include only relevant fields for frontend
+    const mappedInvoices = invoices.map(inv => ({
+      invoice_id: inv.invoice_id || inv.id,
+      invoice_number: inv.invoice_number,
+      date: inv.date,
+      due_date: inv.due_date,
+      customer_id: inv.customer_id,
+      customer_name: inv.customer_name,
+      total: inv.total || 0,
+      balance: inv.balance || 0,
+      status: inv.status,
+      reference_number: inv.reference_number,
+      line_items_count: inv.line_items?.length || 0
+    }));
+    
+    res.json({ 
+      success: true,
+      data: { invoices: mappedInvoices }
+    });
+  } catch (err) {
+    console.error('❌ Get customer invoices error:', err);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch invoices',
+      ...(isDevelopment && { 
+        error: err.message,
+        details: err.response?.data 
+      })
+    });
+  }
+};
+
+export const getInvoiceDetails = async (req, res) => {
+  try {
+    const { invoice_id } = req.params;
+    
+    if (!invoice_id) {
+      return sendError(res, 'Invoice ID is required', 400);
+    }
+    
+    const invoice = await getInvoiceById(invoice_id);
+    
+    if (!invoice) {
+      return sendError(res, 'Invoice not found', 404);
+    }
+    
+    res.json({ 
+      success: true,
+      data: { invoice }
+    });
+  } catch (err) {
+    console.error('❌ Get invoice details error:', err);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch invoice details',
       ...(isDevelopment && { 
         error: err.message,
         details: err.response?.data 

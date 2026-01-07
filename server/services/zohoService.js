@@ -1032,3 +1032,78 @@ export const getSalesOrderById = async (salesorderId) => {
     throw error;
   }
 };
+
+/**
+ * Get invoices for a customer
+ * Uses Zoho Books API: GET /books/v3/invoices
+ * @param {string} customerId - The Zoho customer ID (contact_id)
+ * @param {string} status - Invoice status filter (e.g., 'unpaid', 'partially_paid', 'sent')
+ * @returns {Promise<Array>} Array of invoices
+ */
+export const getCustomerInvoices = async (customerId, status = 'unpaid') => {
+  try {
+    // According to Zoho API documentation:
+    // - customer_id: Filter invoices by specific customer identifier
+    // - status: Filter by status (unpaid, partially_paid, sent, etc.)
+    // - sort_column: 'date' to sort by date
+    const params = {
+      customer_id: customerId, // Filter by customer ID (required)
+      status: status, // Filter by status (unpaid, partially_paid, sent, etc.)
+      sort_column: 'date' // Sort by date
+    };
+    
+    console.log(`🔍 Fetching invoices for customer_id: ${customerId}, status: ${status}`);
+    console.log(`📋 API params:`, JSON.stringify(params, null, 2));
+    
+    // Fetch all pages of invoices for this customer
+    const invoices = await fetchAllPages('/invoices', params, 'invoices');
+    
+    console.log(`📦 API returned ${invoices.length} invoice(s) total`);
+    
+    // Filter to ensure customer_id matches (API should filter, but verify as safety)
+    const customerInvoices = invoices.filter(inv => {
+      const invCustomerId = inv.customer_id;
+      const customerMatches = invCustomerId === customerId || String(invCustomerId) === String(customerId);
+      
+      if (!customerMatches) {
+        console.warn(`⚠️ Invoice ${inv.invoice_number} has customer_id "${invCustomerId}" but expected "${customerId}"`);
+      }
+      
+      return customerMatches;
+    });
+    
+    console.log(`✅ Found ${customerInvoices.length} invoice(s) for customer ${customerId}`);
+    
+    return customerInvoices;
+  } catch (error) {
+    console.error(`❌ Failed to fetch invoices for customer ${customerId}:`, error.message);
+    throw error;
+  }
+};
+
+/**
+ * Get invoice details by ID
+ * Uses Zoho Books API: GET /books/v3/invoices/{invoice_id}
+ * @param {string} invoiceId - The Zoho invoice ID
+ * @returns {Promise<Object>} Invoice object with details
+ */
+export const getInvoiceById = async (invoiceId) => {
+  try {
+    const response = await makeZohoRequest(`/invoices/${invoiceId}`);
+    
+    if (response.code === 0) {
+      return response.invoice || response.invoices?.[0] || null;
+    } else {
+      const errorMsg = response.message || 'Failed to fetch invoice';
+      console.error(`❌ Failed to fetch invoice ${invoiceId}:`, errorMsg);
+      throw new Error(errorMsg);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to fetch invoice ${invoiceId}:`, error.message);
+    if (error.response) {
+      console.error('   Response status:', error.response.status);
+      console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    throw error;
+  }
+};
