@@ -17,8 +17,7 @@ import { useAuth } from './contexts/AuthContext';
 import { useAlert } from './contexts/AlertContext';
 import { Customer, Product, CartItem, PaymentDetails, Sale } from './types';
 import { itemsAPI, customersAPI, salesAPI, zohoAPI } from '../services/api';
-import { SalesOrderModal } from './components/SalesOrderModal';
-import { InvoiceModal } from './components/InvoiceModal';
+import { SalesOrderInvoiceModal } from './components/SalesOrderInvoiceModal';
 import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
 
@@ -55,11 +54,9 @@ function AppContent() {
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [error, setError] = useState('');
   const [openSalesOrders, setOpenSalesOrders] = useState<any[]>([]);
-  const [isSalesOrderModalOpen, setIsSalesOrderModalOpen] = useState(false);
-  const [loadingSalesOrders, setLoadingSalesOrders] = useState(false);
   const [invoices, setInvoices] = useState<any[]>([]);
-  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
-  const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [isOrderInvoiceModalOpen, setIsOrderInvoiceModalOpen] = useState(false);
+  const [loadingOrders, setLoadingOrders] = useState(false);
 
   // Constants from user data
   const TAX_RATE = user?.taxPercentage ? user.taxPercentage / 100 : 0.0825;
@@ -227,44 +224,32 @@ function AppContent() {
 
     // Check for open sales orders and invoices if customer has Zoho ID
     if (customer.zohoId) {
-      // Check for sales orders
       try {
-        setLoadingSalesOrders(true);
-        const soResponse = await zohoAPI.getCustomerOpenSalesOrders(customer.zohoId);
-        if (soResponse.success && soResponse.data?.salesOrders && soResponse.data.salesOrders.length > 0) {
-          setOpenSalesOrders(soResponse.data.salesOrders);
-          setIsSalesOrderModalOpen(true);
-          // Don't proceed with customer selection yet - wait for SO selection or cancel
-          setLoadingSalesOrders(false);
-          return;
-        } else {
-          setOpenSalesOrders([]);
-        }
-      } catch (err: any) {
-        console.error('Failed to check for open sales orders:', err);
-        setOpenSalesOrders([]);
-      } finally {
-        setLoadingSalesOrders(false);
-      }
+        setLoadingOrders(true);
+        // Check both sales orders and invoices in parallel
+        const [soResponse, invoiceResponse] = await Promise.all([
+          zohoAPI.getCustomerOpenSalesOrders(customer.zohoId).catch(() => ({ success: false, data: { salesOrders: [] } })),
+          zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid').catch(() => ({ success: false, data: { invoices: [] } }))
+        ]);
 
-      // Check for invoices (unpaid or partially_paid)
-      try {
-        setLoadingInvoices(true);
-        const invoiceResponse = await zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid');
-        if (invoiceResponse.success && invoiceResponse.data?.invoices && invoiceResponse.data.invoices.length > 0) {
-          setInvoices(invoiceResponse.data.invoices);
-          setIsInvoiceModalOpen(true);
-          // Don't proceed with customer selection yet - wait for invoice selection or cancel
-          setLoadingInvoices(false);
+        const salesOrders = soResponse.success && soResponse.data?.salesOrders ? soResponse.data.salesOrders : [];
+        const invoiceList = invoiceResponse.success && invoiceResponse.data?.invoices ? invoiceResponse.data.invoices : [];
+
+        setOpenSalesOrders(salesOrders);
+        setInvoices(invoiceList);
+
+        // Show modal if we have any sales orders or invoices
+        if (salesOrders.length > 0 || invoiceList.length > 0) {
+          setIsOrderInvoiceModalOpen(true);
+          setLoadingOrders(false);
           return;
-        } else {
-          setInvoices([]);
         }
       } catch (err: any) {
-        console.error('Failed to check for invoices:', err);
+        console.error('Failed to check for sales orders/invoices:', err);
+        setOpenSalesOrders([]);
         setInvoices([]);
       } finally {
-        setLoadingInvoices(false);
+        setLoadingOrders(false);
       }
     } else {
       setOpenSalesOrders([]);
@@ -325,185 +310,95 @@ function AppContent() {
     }
   };
 
-  // Handle invoice selection
-  const handleSelectInvoice = async (invoice: any) => {
+  // Handle selection of sales orders and/or invoices - load items and go to payment
+  const handleSelectOrdersInvoices = async (items: any[]) => {
+    if (items.length === 0) return;
+
     try {
-      // Get full invoice details
-      const response = await zohoAPI.getInvoiceDetails(invoice.invoice_id);
-      
-      if (!response.success || !response.data?.invoice) {
-        showToast('Failed to load invoice details', 'error', 4000);
-        return;
-      }
-
-      const inv = response.data.invoice;
-      const lineItems = inv.line_items || [];
-
-      if (lineItems.length === 0) {
-        showToast('Invoice has no items', 'warning', 4000);
-        return;
-      }
-
-      // Load all products to match invoice items
+      // Load all products first
       await loadProducts();
-      
-      // Wait a moment for state to update
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // Match invoice line items with products and add to cart
       const newCartItems: CartItem[] = [];
-      
-      for (const lineItem of lineItems) {
-        // Try to find product by Zoho item ID first
-        let product = products.find(p => p.zohoId === lineItem.item_id);
-        
-        // If not found, try to find by SKU or name
-        if (!product) {
-          product = products.find(p => 
-            p.sku === lineItem.sku || 
-            p.name.toLowerCase() === (lineItem.name || '').toLowerCase()
-          );
-        }
+      const itemDetails: any[] = [];
 
-        if (product) {
-          // Check if product already in cart
-          const existingItem = newCartItems.find(item => item.product.id === product!.id);
-          if (existingItem) {
-            existingItem.quantity += parseFloat(lineItem.quantity || 1);
-          } else {
-            newCartItems.push({
-              product,
-              quantity: parseFloat(lineItem.quantity || 1)
-            });
+      // Fetch details for all selected items
+      for (const item of items) {
+        try {
+          let lineItems: any[] = [];
+          
+          if (item.type === 'salesorder') {
+            const response = await zohoAPI.getSalesOrderDetails(item.salesorder_id);
+            if (response.success && response.data?.salesOrder) {
+              lineItems = response.data.salesOrder.line_items || [];
+              itemDetails.push({ ...item, lineItems, name: item.salesorder_number });
+            }
+          } else if (item.type === 'invoice') {
+            const response = await zohoAPI.getInvoiceDetails(item.invoice_id);
+            if (response.success && response.data?.invoice) {
+              lineItems = response.data.invoice.line_items || [];
+              itemDetails.push({ ...item, lineItems, name: item.invoice_number });
+            }
           }
-        } else {
-          console.warn(`Product not found for invoice item: ${lineItem.name || lineItem.sku}`);
-          showToast(`Warning: Item "${lineItem.name || lineItem.sku}" from invoice not found in products`, 'warning', 5000);
+
+          // Match line items with products and add to cart
+          for (const lineItem of lineItems) {
+            let product = products.find(p => p.zohoId === lineItem.item_id);
+            
+            if (!product) {
+              product = products.find(p => 
+                p.sku === lineItem.sku || 
+                p.name.toLowerCase() === (lineItem.name || '').toLowerCase()
+              );
+            }
+
+            if (product) {
+              const existingItem = newCartItems.find(item => item.product.id === product!.id);
+              if (existingItem) {
+                existingItem.quantity += parseFloat(lineItem.quantity || 1);
+              } else {
+                newCartItems.push({
+                  product,
+                  quantity: parseFloat(lineItem.quantity || 1)
+                });
+              }
+            } else {
+              console.warn(`Product not found for item: ${lineItem.name || lineItem.sku}`);
+            }
+          }
+        } catch (err: any) {
+          console.error(`Failed to load ${item.type}:`, err);
+          showToast(`Failed to load ${item.type === 'salesorder' ? 'sales order' : 'invoice'} ${item.type === 'salesorder' ? item.salesorder_number : item.invoice_number}`, 'error', 4000);
         }
       }
 
       if (newCartItems.length > 0) {
         // Clear existing cart and set new items
         setCartItems(newCartItems);
-        showToast(`Loaded ${newCartItems.length} item(s) from invoice ${invoice.invoice_number}`, 'success', 4000);
-      } else {
-        showToast('No matching products found for invoice items', 'warning', 4000);
-      }
-
-      // Close modal and continue with customer selection
-      setIsInvoiceModalOpen(false);
-      setInvoices([]);
-      
-      // Continue with normal customer selection flow
-      await continueCustomerSelection(selectedCustomer);
-    } catch (err: any) {
-      console.error('Failed to load invoice:', err);
-      showToast('Failed to load invoice items', 'error', 4000);
-    }
-  };
-
-  // Handle sales order selection
-  const handleSelectSalesOrder = async (salesOrder: any) => {
-    try {
-      // Get full sales order details
-      const response = await zohoAPI.getSalesOrderDetails(salesOrder.salesorder_id);
-      
-      if (!response.success || !response.data?.salesOrder) {
-        showToast('Failed to load sales order details', 'error', 4000);
-        return;
-      }
-
-      const so = response.data.salesOrder;
-      const lineItems = so.line_items || [];
-
-      if (lineItems.length === 0) {
-        showToast('Sales order has no items', 'warning', 4000);
-        return;
-      }
-
-      // Load all products to match SO items (wait for it to complete)
-      await loadProducts();
-      
-      // Wait a moment for state to update
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Match SO line items with products and add to cart
-      const newCartItems: CartItem[] = [];
-      
-      for (const lineItem of lineItems) {
-        // Try to find product by Zoho item ID first
-        let product = products.find(p => p.zohoId === lineItem.item_id);
+        const itemNames = itemDetails.map(d => d.name).join(', ');
+        showToast(`Loaded ${newCartItems.length} item(s) from ${items.length} selected order(s)`, 'success', 4000);
         
-        // If not found, try to find by SKU or name
-        if (!product) {
-          product = products.find(p => 
-            p.sku === lineItem.sku || 
-            p.name.toLowerCase() === (lineItem.name || '').toLowerCase()
-          );
-        }
-
-        if (product) {
-          // Check if product already in cart
-          const existingItem = newCartItems.find(item => item.product.id === product!.id);
-          if (existingItem) {
-            existingItem.quantity += parseFloat(lineItem.quantity || 1);
-          } else {
-            newCartItems.push({
-              product,
-              quantity: parseFloat(lineItem.quantity || 1)
-            });
-          }
-        } else {
-          console.warn(`Product not found for SO item: ${lineItem.name || lineItem.sku}`);
-          showToast(`Warning: Item "${lineItem.name || lineItem.sku}" from sales order not found in products`, 'warning', 5000);
-        }
-      }
-
-      if (newCartItems.length > 0) {
-        // Clear existing cart and set new items
-        setCartItems(newCartItems);
-        showToast(`Loaded ${newCartItems.length} item(s) from sales order ${salesOrder.salesorder_number}`, 'success', 4000);
-      } else {
-        showToast('No matching products found for sales order items', 'warning', 4000);
-      }
-
-      // Close modal and continue with customer selection
-      setIsSalesOrderModalOpen(false);
-      setOpenSalesOrders([]);
-      
-      // Continue with normal customer selection flow
-      await continueCustomerSelection(selectedCustomer);
-    } catch (err: any) {
-      console.error('Failed to load sales order:', err);
-      showToast('Failed to load sales order items', 'error', 4000);
-    }
-  };
-
-  // Check for invoices
-  const checkForInvoices = async (customer: Customer) => {
-    if (!customer.zohoId) return;
-
-    try {
-      setLoadingInvoices(true);
-      const invoiceResponse = await zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid');
-      if (invoiceResponse.success && invoiceResponse.data?.invoices && invoiceResponse.data.invoices.length > 0) {
-        setInvoices(invoiceResponse.data.invoices);
-        setIsInvoiceModalOpen(true);
-        setLoadingInvoices(false);
-        return;
-      } else {
+        // Close modal
+        setIsOrderInvoiceModalOpen(false);
+        setOpenSalesOrders([]);
         setInvoices([]);
+        
+        // Continue with customer selection to set up pricebook, then go to payment
+        await continueCustomerSelection(selectedCustomer);
+        
+        // Open payment modal directly
+        if (selectedCustomer && newCartItems.length > 0) {
+          setIsPaymentModalOpen(true);
+        }
+      } else {
+        showToast('No matching products found for selected items', 'warning', 4000);
       }
     } catch (err: any) {
-      console.error('Failed to check for invoices:', err);
-      setInvoices([]);
-    } finally {
-      setLoadingInvoices(false);
+      console.error('Failed to load selected items:', err);
+      showToast('Failed to load items from selected orders', 'error', 4000);
     }
-
-    // If no invoices found, continue with customer selection
-    await continueCustomerSelection(customer);
   };
+
 
   // Continue customer selection after SO/Invoice handling
   const continueCustomerSelection = async (customer: Customer | null) => {
@@ -937,43 +832,22 @@ function AppContent() {
         userTerminalIP={user?.terminalIP}
       />
 
-      {/* Sales Order Modal */}
+      {/* Unified Sales Order & Invoice Modal */}
       {selectedCustomer && (
-        <SalesOrderModal
-          isOpen={isSalesOrderModalOpen}
+        <SalesOrderInvoiceModal
+          isOpen={isOrderInvoiceModalOpen}
           onClose={() => {
-            setIsSalesOrderModalOpen(false);
+            setIsOrderInvoiceModalOpen(false);
             setOpenSalesOrders([]);
-            // Check for invoices after closing SO modal
-            if (selectedCustomer?.zohoId) {
-              checkForInvoices(selectedCustomer);
-            } else {
-              // Continue with customer selection if modal is closed without selecting
-              if (selectedCustomer) {
-                continueCustomerSelection(selectedCustomer);
-              }
-            }
-          }}
-          salesOrders={openSalesOrders}
-          onSelectSalesOrder={handleSelectSalesOrder}
-          customerName={selectedCustomer.name || selectedCustomer.contactName}
-        />
-      )}
-
-      {/* Invoice Modal */}
-      {selectedCustomer && (
-        <InvoiceModal
-          isOpen={isInvoiceModalOpen}
-          onClose={() => {
-            setIsInvoiceModalOpen(false);
             setInvoices([]);
             // Continue with customer selection if modal is closed without selecting
             if (selectedCustomer) {
               continueCustomerSelection(selectedCustomer);
             }
           }}
+          salesOrders={openSalesOrders}
           invoices={invoices}
-          onSelectInvoice={handleSelectInvoice}
+          onSelectItems={handleSelectOrdersInvoices}
           customerName={selectedCustomer.name || selectedCustomer.contactName}
         />
       )}
