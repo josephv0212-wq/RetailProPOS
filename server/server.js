@@ -79,60 +79,14 @@ app.set('trust proxy', 1);
 // Request ID middleware (must be first)
 app.use(requestIdMiddleware);
 
-// CORS configuration
+// CORS configuration - Allow all origins
 const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, Postman, curl, etc.)
-    if (!origin) return callback(null, true);
-    
-    // Build list of allowed origins
-    const allowedOrigins = [
-      'http://localhost:5000',
-      'http://127.0.0.1:5000',
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'https://subzerodryice-pos.com',
-      'http://86.104.72.45:5000',
-      'http://localhost:5173'
-    ];
-    
-    // Add custom FRONTEND_URL if set (supports comma-separated list)
-    if (process.env.FRONTEND_URL) {
-      const customOrigins = process.env.FRONTEND_URL.split(',').map(url => url.trim());
-      allowedOrigins.push(...customOrigins);
-    }
-    
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    // Allow localhost and 127.0.0.1 on any port
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      return callback(null, true);
-    }
-    
-    // In production with FRONTEND_URL set, be strict
-    if (process.env.NODE_ENV === 'production' && process.env.FRONTEND_URL) {
-      console.warn(`⚠️  CORS blocked request from: ${origin}`);
-      return callback(new Error('Not allowed by CORS'));
-    }
-    
-    // In development, allow all origins (for VPS testing)
-    if (process.env.NODE_ENV !== 'production') {
-      return callback(null, true);
-    }
-    
-    // Default: block
-    console.warn(`⚠️  CORS blocked request from: ${origin}`);
-    return callback(new Error('Not allowed by CORS'));
-  },
+  origin: true, // Allow all origins (when credentials: true, use true instead of '*')
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id']
 };
 app.use(cors(corsOptions));
 
@@ -159,15 +113,21 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true
 });
 
-// Apply rate limiting to all routes (except health check)
+// Apply rate limiting to all routes (except health check and OPTIONS preflight requests)
 app.use((req, res, next) => {
-  if (req.path === '/health') {
-    return next(); // Skip rate limiting for health check
+  if (req.path === '/health' || req.method === 'OPTIONS') {
+    return next(); // Skip rate limiting for health check and preflight requests
   }
   limiter(req, res, next);
 });
 
-app.use('/auth/login', authLimiter);
+// Apply auth rate limiting, but skip OPTIONS requests
+app.use('/auth/login', (req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    return next(); // Skip rate limiting for preflight requests
+  }
+  authLimiter(req, res, next);
+});
 
 app.use(express.json({ limit: '10mb' }));
 
