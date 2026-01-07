@@ -948,3 +948,87 @@ export const getLocationById = async (locationId) => {
     throw error;
   }
 };
+
+/**
+ * Get open sales orders for a customer
+ * @param {string} customerId - The Zoho customer ID (contact_id)
+ * @returns {Promise<Array>} Array of open sales orders
+ */
+export const getOpenSalesOrders = async (customerId) => {
+  try {
+    // According to Zoho API documentation:
+    // - customer_id: Filter sales orders by specific customer identifier
+    // - filter_by: Status.Open to get only open sales orders
+    // - sort_column: 'date' to sort by date
+    const params = {
+      customer_id: customerId, // Filter by customer ID (required for customer-specific orders)
+      filter_by: 'Status.Open', // Filter by open status
+      sort_column: 'date', // Sort by date
+      // Note: sort_order is not in the API docs, but we'll include it if supported
+      // If it causes issues, we can remove it and sort client-side
+    };
+    
+    console.log(`🔍 Fetching open sales orders for customer_id: ${customerId}`);
+    console.log(`📋 API params:`, JSON.stringify(params, null, 2));
+    
+    // Fetch all pages of sales orders for this customer
+    const salesOrders = await fetchAllPages('/salesorders', params, 'salesorders');
+    
+    console.log(`📦 API returned ${salesOrders.length} sales order(s) total`);
+    
+    // Additional client-side filtering as safety measure:
+    // 1. Ensure status is open (API should handle this, but double-check)
+    // 2. Verify customer_id matches (API should handle this, but double-check)
+    const openSalesOrders = salesOrders.filter(so => {
+      // Check status - should be 'open' according to API response format
+      const status = (so.status || '').toLowerCase();
+      const isOpen = status === 'open';
+      
+      // Verify customer_id matches (API should filter, but verify as safety)
+      const soCustomerId = so.customer_id;
+      const customerMatches = soCustomerId === customerId || String(soCustomerId) === String(customerId);
+      
+      if (!isOpen) {
+        console.warn(`⚠️ Sales order ${so.salesorder_number} has status "${so.status}" but should be "open"`);
+      }
+      if (!customerMatches) {
+        console.warn(`⚠️ Sales order ${so.salesorder_number} has customer_id "${soCustomerId}" but expected "${customerId}"`);
+      }
+      
+      return isOpen && customerMatches;
+    });
+    
+    console.log(`✅ Found ${openSalesOrders.length} open sales order(s) for customer ${customerId}`);
+    
+    return openSalesOrders;
+  } catch (error) {
+    console.error(`❌ Failed to fetch open sales orders for customer ${customerId}:`, error.message);
+    throw error;
+  }
+};
+
+/**
+ * Get sales order details by ID
+ * @param {string} salesorderId - The Zoho sales order ID
+ * @returns {Promise<Object>} Sales order object with details
+ */
+export const getSalesOrderById = async (salesorderId) => {
+  try {
+    const response = await makeZohoRequest(`/salesorders/${salesorderId}`);
+    
+    if (response.code === 0) {
+      return response.salesorder || response.salesorders?.[0] || null;
+    } else {
+      const errorMsg = response.message || 'Failed to fetch sales order';
+      console.error(`❌ Failed to fetch sales order ${salesorderId}:`, errorMsg);
+      throw new Error(errorMsg);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to fetch sales order ${salesorderId}:`, error.message);
+    if (error.response) {
+      console.error('   Response status:', error.response.status);
+      console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    throw error;
+  }
+};

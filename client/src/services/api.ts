@@ -358,6 +358,18 @@ export const zohoAPI = {
   getOrganization: async () => {
     return apiRequest<{ organizations: any[] }>('/zoho/organization');
   },
+
+  getCustomerOpenSalesOrders: async (customerId: string) => {
+    return apiRequest<{ salesOrders: any[] }>(
+      `/zoho/salesorders?customer_id=${encodeURIComponent(customerId)}`
+    );
+  },
+
+  getSalesOrderDetails: async (salesorderId: string) => {
+    return apiRequest<{ salesOrder: any }>(
+      `/zoho/salesorders/${encodeURIComponent(salesorderId)}`
+    );
+  },
 };
 
 // PAX Terminal API

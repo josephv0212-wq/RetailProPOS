@@ -1,5 +1,6 @@
-import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations } from '../services/zohoService.js';
+import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById } from '../services/zohoService.js';
 import { Customer, Item } from '../models/index.js';
+import { sendSuccess, sendError } from '../utils/responseHelper.js';
 
 const DEFAULT_CUSTOMERS = {
   'LOC001': 'MIA Dry Ice - WALK IN MIAMI',
@@ -370,3 +371,75 @@ export const getLocationsList = async (req, res) => {
   }
 };
 
+export const getCustomerOpenSalesOrders = async (req, res) => {
+  try {
+    const { customer_id } = req.query;
+    
+    if (!customer_id) {
+      return sendError(res, 'Customer ID (customer_id) is required', 400);
+    }
+    
+    const salesOrders = await getOpenSalesOrders(customer_id);
+    
+    // Map sales orders to include only relevant fields for frontend
+    const mappedSalesOrders = salesOrders.map(so => ({
+      salesorder_id: so.salesorder_id || so.id,
+      salesorder_number: so.salesorder_number || so.order_number,
+      date: so.date,
+      customer_id: so.customer_id,
+      customer_name: so.customer_name,
+      total: so.total || 0,
+      status: so.status || so.order_status,
+      reference_number: so.reference_number,
+      line_items_count: so.line_items?.length || 0
+    }));
+    
+    res.json({ 
+      success: true,
+      data: { salesOrders: mappedSalesOrders }
+    });
+  } catch (err) {
+    console.error('❌ Get customer open sales orders error:', err);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch open sales orders',
+      ...(isDevelopment && { 
+        error: err.message,
+        details: err.response?.data 
+      })
+    });
+  }
+};
+
+export const getSalesOrderDetails = async (req, res) => {
+  try {
+    const { salesorder_id } = req.params;
+    
+    if (!salesorder_id) {
+      return sendError(res, 'Sales order ID is required', 400);
+    }
+    
+    const salesOrder = await getSalesOrderById(salesorder_id);
+    
+    if (!salesOrder) {
+      return sendError(res, 'Sales order not found', 404);
+    }
+    
+    res.json({ 
+      success: true,
+      data: { salesOrder }
+    });
+  } catch (err) {
+    console.error('❌ Get sales order details error:', err);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch sales order details',
+      ...(isDevelopment && { 
+        error: err.message,
+        details: err.response?.data 
+      })
+    });
+  }
+};

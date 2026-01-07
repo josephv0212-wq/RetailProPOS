@@ -16,7 +16,8 @@ import { AlertProvider } from './contexts/AlertContext';
 import { useAuth } from './contexts/AuthContext';
 import { useAlert } from './contexts/AlertContext';
 import { Customer, Product, CartItem, PaymentDetails, Sale } from './types';
-import { itemsAPI, customersAPI, salesAPI } from '../services/api';
+import { itemsAPI, customersAPI, salesAPI, zohoAPI } from '../services/api';
+import { SalesOrderModal } from './components/SalesOrderModal';
 import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
 
@@ -52,6 +53,9 @@ function AppContent() {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [error, setError] = useState('');
+  const [openSalesOrders, setOpenSalesOrders] = useState<any[]>([]);
+  const [isSalesOrderModalOpen, setIsSalesOrderModalOpen] = useState(false);
+  const [loadingSalesOrders, setLoadingSalesOrders] = useState(false);
 
   // Constants from user data
   const TAX_RATE = user?.taxPercentage ? user.taxPercentage / 100 : 0.0825;
@@ -208,9 +212,172 @@ function AppContent() {
       setSelectedCustomer(null);
       setCustomerTaxPreference(null);
       setCustomerCards([]);
+      setOpenSalesOrders([]);
       await loadProducts(); // Load regular items
       return;
     }
+
+    // Set customer first (needed for SO modal and continuation)
+    setSelectedCustomer(customer);
+
+    // Check for open sales orders if customer has Zoho ID
+    if (customer.zohoId) {
+      try {
+        setLoadingSalesOrders(true);
+        const response = await zohoAPI.getCustomerOpenSalesOrders(customer.zohoId);
+        if (response.success && response.data?.salesOrders && response.data.salesOrders.length > 0) {
+          setOpenSalesOrders(response.data.salesOrders);
+          setIsSalesOrderModalOpen(true);
+          // Don't proceed with customer selection yet - wait for SO selection or cancel
+          setLoadingSalesOrders(false);
+          return;
+        } else {
+          setOpenSalesOrders([]);
+        }
+      } catch (err: any) {
+        console.error('Failed to check for open sales orders:', err);
+        // Continue with customer selection even if SO check fails
+        setOpenSalesOrders([]);
+      } finally {
+        setLoadingSalesOrders(false);
+      }
+    } else {
+      setOpenSalesOrders([]);
+    }
+
+    // Continue with customer selection (this will be called after SO check or if no SOs found)
+    await continueCustomerSelection(customer);
+  };
+
+  // Shopping cart functions
+  const handleAddToCart = (product: Product) => {
+    // Check if product price is $0
+    if (product.price === 0) {
+      showAlert({ message: 'Cannot add item with $0 price to cart.' });
+      return;
+    }
+    
+    const existingItem = cartItems.find(item => item.product.id === product.id);
+    
+    if (existingItem) {
+      setCartItems(cartItems.map(item =>
+        item.product.id === product.id
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      ));
+    } else {
+      setCartItems([...cartItems, { product, quantity: 1 }]);
+    }
+  };
+
+  const handleUpdateQuantity = (productId: number | string, quantity: number) => {
+    setCartItems(cartItems.map(item =>
+      String(item.product.id) === String(productId)
+        ? { ...item, quantity: Math.max(1, quantity) }
+        : item
+    ));
+  };
+
+  const handleRemoveItem = (productId: number | string) => {
+    setCartItems(cartItems.filter(item => String(item.product.id) !== String(productId)));
+  };
+
+  const handleClearCart = async () => {
+    if (cartItems.length > 0) {
+      const confirmed = await showConfirm({
+        message: 'Are you sure you want to clear the cart?',
+      });
+      if (confirmed) {
+        setCartItems([]);
+        setSelectedCustomer(null);
+        setCustomerTaxPreference(null);
+        setCustomerCards([]);
+        setOpenSalesOrders([]);
+        await loadProducts(); // Load regular items
+      }
+    }
+  };
+
+  // Handle sales order selection
+  const handleSelectSalesOrder = async (salesOrder: any) => {
+    try {
+      // Get full sales order details
+      const response = await zohoAPI.getSalesOrderDetails(salesOrder.salesorder_id);
+      
+      if (!response.success || !response.data?.salesOrder) {
+        showToast('Failed to load sales order details', 'error', 4000);
+        return;
+      }
+
+      const so = response.data.salesOrder;
+      const lineItems = so.line_items || [];
+
+      if (lineItems.length === 0) {
+        showToast('Sales order has no items', 'warning', 4000);
+        return;
+      }
+
+      // Load all products to match SO items (wait for it to complete)
+      await loadProducts();
+      
+      // Wait a moment for state to update
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Match SO line items with products and add to cart
+      const newCartItems: CartItem[] = [];
+      
+      for (const lineItem of lineItems) {
+        // Try to find product by Zoho item ID first
+        let product = products.find(p => p.zohoId === lineItem.item_id);
+        
+        // If not found, try to find by SKU or name
+        if (!product) {
+          product = products.find(p => 
+            p.sku === lineItem.sku || 
+            p.name.toLowerCase() === (lineItem.name || '').toLowerCase()
+          );
+        }
+
+        if (product) {
+          // Check if product already in cart
+          const existingItem = newCartItems.find(item => item.product.id === product!.id);
+          if (existingItem) {
+            existingItem.quantity += parseFloat(lineItem.quantity || 1);
+          } else {
+            newCartItems.push({
+              product,
+              quantity: parseFloat(lineItem.quantity || 1)
+            });
+          }
+        } else {
+          console.warn(`Product not found for SO item: ${lineItem.name || lineItem.sku}`);
+          showToast(`Warning: Item "${lineItem.name || lineItem.sku}" from sales order not found in products`, 'warning', 5000);
+        }
+      }
+
+      if (newCartItems.length > 0) {
+        // Clear existing cart and set new items
+        setCartItems(newCartItems);
+        showToast(`Loaded ${newCartItems.length} item(s) from sales order ${salesOrder.salesorder_number}`, 'success', 4000);
+      } else {
+        showToast('No matching products found for sales order items', 'warning', 4000);
+      }
+
+      // Close modal and continue with customer selection
+      setIsSalesOrderModalOpen(false);
+      setOpenSalesOrders([]);
+      
+      // Continue with normal customer selection flow
+      await continueCustomerSelection(selectedCustomer);
+    } catch (err: any) {
+      console.error('Failed to load sales order:', err);
+      showToast('Failed to load sales order items', 'error', 4000);
+    }
+  };
+
+  // Continue customer selection after SO handling
+  const continueCustomerSelection = async (customer: Customer | null) => {
+    if (!customer) return;
 
     // Fetch customer pricebook and items from pricebook
     if (customer.id) {
@@ -310,54 +477,6 @@ function AppContent() {
       setCustomerTaxPreference(null);
       setCustomerCards([]);
       await loadProducts();
-    }
-  };
-
-  // Shopping cart functions
-  const handleAddToCart = (product: Product) => {
-    // Check if product price is $0
-    if (product.price === 0) {
-      showAlert({ message: 'Cannot add item with $0 price to cart.' });
-      return;
-    }
-    
-    const existingItem = cartItems.find(item => item.product.id === product.id);
-    
-    if (existingItem) {
-      setCartItems(cartItems.map(item =>
-        item.product.id === product.id
-          ? { ...item, quantity: item.quantity + 1 }
-          : item
-      ));
-    } else {
-      setCartItems([...cartItems, { product, quantity: 1 }]);
-    }
-  };
-
-  const handleUpdateQuantity = (productId: number | string, quantity: number) => {
-    setCartItems(cartItems.map(item =>
-      String(item.product.id) === String(productId)
-        ? { ...item, quantity: Math.max(1, quantity) }
-        : item
-    ));
-  };
-
-  const handleRemoveItem = (productId: number | string) => {
-    setCartItems(cartItems.filter(item => String(item.product.id) !== String(productId)));
-  };
-
-  const handleClearCart = async () => {
-    if (cartItems.length > 0) {
-      const confirmed = await showConfirm({
-        message: 'Are you sure you want to clear the cart?',
-      });
-      if (confirmed) {
-        setCartItems([]);
-        setSelectedCustomer(null);
-        setCustomerTaxPreference(null);
-        setCustomerCards([]);
-        await loadProducts(); // Load regular items
-      }
     }
   };
 
@@ -687,6 +806,25 @@ function AppContent() {
         onConfirmPayment={handleConfirmPayment}
         userTerminalIP={user?.terminalIP}
       />
+
+      {/* Sales Order Modal */}
+      {selectedCustomer && (
+        <SalesOrderModal
+          isOpen={isSalesOrderModalOpen}
+          onClose={() => {
+            setIsSalesOrderModalOpen(false);
+            setOpenSalesOrders([]);
+            // Continue with customer selection if modal is closed without selecting
+            // selectedCustomer should already be set from handleSelectCustomer
+            if (selectedCustomer) {
+              continueCustomerSelection(selectedCustomer);
+            }
+          }}
+          salesOrders={openSalesOrders}
+          onSelectSalesOrder={handleSelectSalesOrder}
+          customerName={selectedCustomer.name || selectedCustomer.contactName}
+        />
+      )}
     </div>
   );
 }
