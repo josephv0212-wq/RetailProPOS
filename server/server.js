@@ -9,6 +9,7 @@ import itemRoutes from './routes/itemRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import printerRoutes from './routes/printerRoutes.js';
 import paxRoutes from './routes/paxRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
 import bbposRoutes from './routes/bbposRoutes.js';
 import ebizchargeRoutes from './routes/ebizchargeRoutes.js';
 import { sequelize } from './config/db.js';
@@ -177,6 +178,7 @@ app.use('/customers', customerRoutes);
 app.use('/zoho', zohoRoutes);
 app.use('/printer', printerRoutes);
 app.use('/pax', paxRoutes);
+app.use('/payment', paymentRoutes);
 app.use('/bbpos', bbposRoutes);
 app.use('/ebizcharge', ebizchargeRoutes);
 

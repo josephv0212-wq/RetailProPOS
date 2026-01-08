@@ -432,7 +432,7 @@ function AppContent() {
         
         // Set customer state once with all updated info
         setSelectedCustomer(updatedCustomer);
-        setCustomerTaxPreference(taxPreference || 'STANDARD');
+        setCustomerTaxPreference((taxPreference === 'SALES TAX EXCEPTION CERTIFICATE' ? 'SALES TAX EXCEPTION CERTIFICATE' : 'STANDARD') as 'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE');
         setCustomerCards(cards);
         
         if (pricebookName) {
@@ -511,7 +511,7 @@ function AppContent() {
     }
   };
 
-  const handleConfirmPayment = async (paymentDetails: PaymentDetails) => {
+  const handleConfirmPayment = async (paymentDetails: PaymentDetails): Promise<any> => {
     if (!user || !selectedCustomer) return;
 
     const subtotal = cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
@@ -583,7 +583,26 @@ function AppContent() {
         requestBody.bluetoothPayload = paymentDetails.bluetoothPayload;
       }
 
+      // Add useTerminal at root level if using PAX terminal
+      if (paymentDetails.useTerminal) {
+        requestBody.useTerminal = true;
+        requestBody.terminalIP = paymentDetails.terminalIP;
+        requestBody.terminalPort = paymentDetails.terminalPort;
+      }
+
       const response = await salesAPI.create(requestBody);
+
+      // Handle pending terminal payment (waiting for VP100 device)
+      if (response.success && response.pending && (response.data as any)?.transactionId) {
+        // Payment is pending - return to PaymentModal for polling
+        // PaymentModal will handle the polling and notifications
+        return {
+          success: true,
+          pending: true,
+          message: response.message || 'Payment request sent to terminal. Waiting for customer to complete payment on VP100 device.',
+          data: response.data
+        };
+      }
 
       if (response.success && response.data?.sale) {
         // Transform API sale to match UI format

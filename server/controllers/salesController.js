@@ -189,19 +189,39 @@ export const createSale = async (req, res) => {
 
         transactionId = paymentResult.transactionId;
       } else if (useTerminal) {
-        // PAX Terminal mode - process through physical terminal
-        const userTerminalPort = req.user.terminalPort || null;
-        const terminalPort = paymentDetails.terminalPort || userTerminalPort || undefined;
-        paymentResult = await processTerminalPayment({
+        // PAX Terminal mode - process through Authorize.Net (not direct terminal connection)
+        // Flow: App -> Authorize.Net -> VP100 Terminal -> Authorize.Net -> App (polling)
+        const { initiateTerminalPayment } = await import('../services/authorizeNetTerminalService.js');
+        
+        // Initiate payment request to Authorize.Net
+        // Authorize.Net will trigger popup on VP100 device
+        paymentResult = await initiateTerminalPayment({
           amount: total,
           invoiceNumber: `POS-${Date.now()}`,
           description: `POS Sale - ${locationName}`
-        }, terminalIP, terminalPort);
+        }, terminalIP); // terminalIP used as terminal identifier if needed
 
         if (!paymentResult.success) {
-          return sendError(res, 'Terminal payment processing failed', 400, paymentResult.error);
+          return sendError(res, 'Failed to initiate terminal payment', 400, paymentResult.error);
         }
 
+        // If payment is pending (waiting for terminal), return pending status
+        // Frontend will poll for status
+        if (paymentResult.pending) {
+          return res.status(202).json({
+            success: true,
+            pending: true,
+            message: paymentResult.message || 'Payment request sent to terminal. Waiting for customer to complete payment on VP100 device.',
+            data: {
+              transactionId: paymentResult.transactionId,
+              refId: paymentResult.refId,
+              status: 'pending',
+              sale: null // Sale will be created after payment confirmation
+            }
+          });
+        }
+
+        // If payment completed immediately (unlikely for terminal)
         transactionId = paymentResult.transactionId;
       } else {
         // Card-not-present mode - process through API

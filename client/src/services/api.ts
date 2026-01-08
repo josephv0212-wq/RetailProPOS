@@ -20,6 +20,7 @@ interface ApiResponse<T = any> {
   message?: string;
   data?: T;
   error?: string;
+  pending?: boolean; // For terminal payments
 }
 
 // Helper function to get token from storage (checks both localStorage and sessionStorage)
@@ -385,7 +386,31 @@ export const zohoAPI = {
   },
 };
 
-// PAX Terminal API
+// Payment Status API (for terminal payments)
+export const paymentAPI = {
+  checkStatus: async (transactionId: string) => {
+    return apiRequest<{
+      success: boolean;
+      pending: boolean;
+      declined: boolean;
+      data: any;
+    }>(`/payment/status/${transactionId}`);
+  },
+
+  pollStatus: async (transactionId: string, maxAttempts: number = 60, intervalMs: number = 2000) => {
+    return apiRequest<{
+      success: boolean;
+      pending: boolean;
+      declined: boolean;
+      data: any;
+    }>(`/payment/poll/${transactionId}`, {
+      method: 'POST',
+      body: JSON.stringify({ maxAttempts, intervalMs }),
+    }, true);
+  },
+};
+
+// PAX Terminal API (kept for discovery and testing)
 export const paxAPI = {
   discover: async () => {
     return apiRequest<{ terminals: Array<{ ip: string; port: number }> }>('/pax/discover', {
@@ -404,29 +429,6 @@ export const paxAPI = {
     return apiRequest<{ success: boolean; status: string; ip: string }>(
       `/pax/status?terminalIP=${encodeURIComponent(terminalIP)}`
     );
-  },
-
-  processPayment: async (data: {
-    amount: number;
-    invoiceNumber: string;
-    description: string;
-    terminalIP: string;
-  }) => {
-    return apiRequest<{
-      success: boolean;
-      transactionId: string;
-      amount: number;
-    }>('/pax/payment', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }, true);
-  },
-
-  voidTransaction: async (transactionId: string, terminalIP: string) => {
-    return apiRequest('/pax/void', {
-      method: 'POST',
-      body: JSON.stringify({ transactionId, terminalIP }),
-    }, true);
   },
 };
 

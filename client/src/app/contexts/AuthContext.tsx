@@ -9,6 +9,8 @@ interface User {
   locationName: string;
   taxPercentage: number;
   isActive?: boolean;
+  terminalIP?: string | null;
+  terminalPort?: number | string | null;
 }
 
 interface AuthContextType {

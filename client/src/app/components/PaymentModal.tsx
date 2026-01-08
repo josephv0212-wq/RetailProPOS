@@ -5,6 +5,8 @@ import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Bankn
 import { encryptCardData, loadAcceptJs, isAcceptJsAvailable } from '../../services/acceptJsService';
 import { connectAndReadCard, isWebSerialSupported } from '../../services/usbCardReaderService';
 import { TerminalDiscoveryDialog } from './TerminalDiscoveryDialog';
+import { pollPaymentStatus } from '../../services/paymentPollingService';
+import { useToast } from '../contexts/ToastContext';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -13,7 +15,7 @@ interface PaymentModalProps {
   subtotal: number;
   tax: number;
   cartItems: CartItem[];
-  onConfirmPayment: (details: PaymentDetails) => void;
+  onConfirmPayment: (details: PaymentDetails) => Promise<any> | void;
   userTerminalIP?: string | null;
   userTerminalPort?: number | string | null;
 }
@@ -27,6 +29,7 @@ const paymentMethods: PaymentMethod[] = [
 ];
 
 export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalIP, userTerminalPort }: PaymentModalProps) {
+  const { showToast } = useToast();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
@@ -299,8 +302,76 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
       };
     }
 
-    onConfirmPayment(paymentDetails);
-    setIsProcessing(false);
+    // For terminal payments, handle pending status and polling
+    if (cardPaymentMethod === 'pax_terminal' && paymentDetails.useTerminal) {
+      try {
+        // Call onConfirmPayment which will initiate payment and may return pending status
+        const result = await onConfirmPayment(paymentDetails);
+        
+        // If payment is pending, start polling
+        if (result?.pending && result?.data?.transactionId) {
+          setCardReaderStatus('processing');
+          setError('');
+          
+          // Show notification
+          showToast(
+            'Payment request sent to VP100 terminal. Waiting for customer to complete payment...',
+            'info',
+            5000
+          );
+          
+          // Start polling for payment status
+          const finalStatus = await pollPaymentStatus(
+            result.data.transactionId,
+            {
+              maxAttempts: 60, // 2 minutes max (60 * 2 seconds)
+              intervalMs: 2000, // Poll every 2 seconds
+              onStatusUpdate: (status, attempt) => {
+                // Update UI during polling
+                if (status.pending) {
+                  setCardReaderStatus('processing');
+                }
+              }
+            }
+          );
+          
+          // Payment completed (approved or declined)
+          if (!finalStatus.pending) {
+            if (finalStatus.success) {
+              // Payment approved - show success notification
+              showToast('Payment approved! Transaction completed.', 'success', 5000);
+              // Close modal - sale will be completed by App.tsx
+              setIsProcessing(false);
+              onClose();
+            } else {
+              // Payment declined
+              setError(finalStatus.message || finalStatus.error || 'Payment was declined. Please try again.');
+              setCardReaderStatus('ready');
+              setIsProcessing(false);
+              showToast('Payment declined. Please try again.', 'error', 5000);
+            }
+          } else {
+            // Timeout
+            setError('Payment timeout. Please check the terminal or try again.');
+            setCardReaderStatus('ready');
+            setIsProcessing(false);
+            showToast('Payment timeout. Please check terminal status.', 'error', 5000);
+          }
+        } else {
+          // Not pending - normal flow continues
+          setIsProcessing(false);
+        }
+      } catch (err: any) {
+        setError(err.message || 'Failed to process terminal payment');
+        setCardReaderStatus('ready');
+        setIsProcessing(false);
+        showToast('Payment processing error. Please try again.', 'error', 5000);
+      }
+    } else {
+      // Normal payment flow (non-terminal)
+      await onConfirmPayment(paymentDetails);
+      setIsProcessing(false);
+    }
   };
 
   return (
