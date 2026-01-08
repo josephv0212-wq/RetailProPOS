@@ -4,6 +4,7 @@ import { PaymentMethod, PaymentDetails, CartItem } from '../types';
 import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2, Wifi } from 'lucide-react';
 import { encryptCardData, loadAcceptJs, isAcceptJsAvailable } from '../../services/acceptJsService';
 import { connectAndReadCard, isWebSerialSupported } from '../../services/usbCardReaderService';
+import { TerminalDiscoveryDialog } from './TerminalDiscoveryDialog';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -43,6 +44,9 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [isProcessing, setIsProcessing] = useState(false);
   const [acceptJsReady, setAcceptJsReady] = useState(false);
   const [serialSupported, setSerialSupported] = useState(false);
+  const [showTerminalDiscovery, setShowTerminalDiscovery] = useState(false);
+  const [selectedTerminalIP, setSelectedTerminalIP] = useState<string | null>(userTerminalIP || null);
+  const [selectedTerminalPort, setSelectedTerminalPort] = useState<number | string | null>(userTerminalPort || null);
 
   // Load Accept.js on mount
   useEffect(() => {
@@ -60,6 +64,23 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     // Check Web Serial API support
     setSerialSupported(isWebSerialSupported());
   }, []);
+
+  // Update selected terminal when user settings change
+  useEffect(() => {
+    if (userTerminalIP) {
+      setSelectedTerminalIP(userTerminalIP);
+    }
+    if (userTerminalPort) {
+      setSelectedTerminalPort(userTerminalPort);
+    }
+  }, [userTerminalIP, userTerminalPort]);
+
+  // Handle terminal selection from discovery dialog
+  const handleTerminalSelected = (terminal: { ip: string; port: number }) => {
+    setSelectedTerminalIP(terminal.ip);
+    setSelectedTerminalPort(terminal.port);
+    setShowTerminalDiscovery(false);
+  };
 
   const convenienceFee = (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') ? total * 0.03 : 0;
   const finalTotal = total + convenienceFee;
@@ -111,11 +132,11 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
       if (cardPaymentMethod === 'pax_terminal') {
         // PAX WiFi Terminal mode
-        const terminalIP = userTerminalIP || '';
-        const terminalPort = userTerminalPort || 10009;
+        const terminalIP = selectedTerminalIP || userTerminalIP || '';
+        const terminalPort = selectedTerminalPort || userTerminalPort || 10009;
         
         if (!terminalIP || terminalIP.trim() === '') {
-          setError('PAX Terminal IP address is required. Please configure it in Settings.');
+          setError('PAX Terminal IP address is required. Please select a terminal or configure it in Settings.');
           setIsProcessing(false);
           return;
         }
@@ -492,15 +513,22 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         </p>
                         <div className="mt-3 text-left bg-gray-50 rounded-lg p-3">
                           <p className="text-xs text-gray-600 mb-1">
-                            <strong>Terminal IP:</strong> {userTerminalIP || 'Not configured'}
+                            <strong>Terminal IP:</strong> {selectedTerminalIP || userTerminalIP || 'Not selected'}
                           </p>
                           <p className="text-xs text-gray-600">
-                            <strong>Port:</strong> {userTerminalPort || '10009 (default)'}
+                            <strong>Port:</strong> {selectedTerminalPort || userTerminalPort || '10009 (default)'}
                           </p>
                         </div>
-                        {!userTerminalIP && (
+                        <button
+                          onClick={() => setShowTerminalDiscovery(true)}
+                          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2 mx-auto"
+                        >
+                          <Wifi className="w-4 h-4" />
+                          {selectedTerminalIP || userTerminalIP ? 'Change Terminal' : 'Select Terminal'}
+                        </button>
+                        {!selectedTerminalIP && !userTerminalIP && (
                           <p className="text-xs text-red-600 mt-2 font-medium">
-                            ⚠️ Please configure Terminal IP in Settings before using PAX terminal
+                            ⚠️ Please select a terminal or configure Terminal IP in Settings
                           </p>
                         )}
                       </div>
@@ -769,6 +797,15 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           </div>
         </div>
       </div>
+
+      {/* Terminal Discovery Dialog */}
+      <TerminalDiscoveryDialog
+        isOpen={showTerminalDiscovery}
+        onClose={() => setShowTerminalDiscovery(false)}
+        onSelectTerminal={handleTerminalSelected}
+        currentTerminalIP={userTerminalIP}
+        currentTerminalPort={userTerminalPort}
+      />
     </div>
   );
 }

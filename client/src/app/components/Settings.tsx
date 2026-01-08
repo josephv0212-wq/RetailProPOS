@@ -172,9 +172,21 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
             <h3 className="font-bold text-gray-900 dark:text-white mb-2">
               PAX Terminal Support (VP100)
             </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              PAX Valor VP100 terminal integration with Authorize.Net via WiFi or USB is available. Configure terminal IP address and port below or during payment processing to use the physical terminal for card payments.
-            </p>
+            <div className="text-gray-600 dark:text-gray-400 mb-4 space-y-2">
+              <p>
+                PAX Valor VP100 terminal integration with Authorize.Net via <strong>WiFi</strong> or USB is available. 
+                Configure terminal IP address and port below to use the physical terminal for card payments.
+              </p>
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                <p className="text-sm font-semibold text-yellow-900 dark:text-yellow-200 mb-1">
+                  ⚠️ Important for WiFi Connections:
+                </p>
+                <p className="text-xs text-yellow-800 dark:text-yellow-300">
+                  If your terminal is connected via <strong>WiFi</strong>, you must enter the terminal's <strong>network IP address</strong> 
+                  (e.g., 192.168.1.100), <strong>NOT localhost</strong>. Localhost is only for USB connections.
+                </p>
+              </div>
+            </div>
             <TerminalIPConfig />
           </div>
 
@@ -367,7 +379,7 @@ function TerminalIPConfig() {
           type="text"
           value={terminalIP}
           onChange={(e) => setTerminalIP(e.target.value)}
-          placeholder="192.168.1.100 or localhost"
+          placeholder="192.168.1.100 (WiFi) or localhost (USB only)"
           className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
             ipValid
               ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
@@ -380,9 +392,36 @@ function TerminalIPConfig() {
             Invalid IP address format. Use format like 192.168.1.100 or localhost
           </p>
         )}
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          For WiFi: Use terminal IP (e.g., 192.168.1.100). For USB: Use localhost or 127.0.0.1
-        </p>
+        <div className="mt-2 space-y-2">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+            <p className="text-xs font-semibold text-blue-900 dark:text-blue-200 mb-1">
+              📡 For WiFi Connection (PAX VP100 via WiFi):
+            </p>
+            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
+              • Enter the terminal's <strong>network IP address</strong> (e.g., 192.168.1.100)
+            </p>
+            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
+              • Terminal and computer must be on the <strong>same WiFi network</strong>
+            </p>
+            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
+              • Find IP in terminal settings or router admin panel
+            </p>
+            <p className="text-xs text-red-600 dark:text-red-400 font-medium mt-2 ml-2">
+              ⚠️ Do NOT use localhost for WiFi connections!
+            </p>
+          </div>
+          <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+              🔌 For USB Connection Only:
+            </p>
+            <p className="text-xs text-gray-600 dark:text-gray-400 ml-2">
+              • Use <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">localhost</code> or <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">127.0.0.1</code>
+            </p>
+            <p className="text-xs text-gray-600 dark:text-gray-400 ml-2">
+              • Port: 4430 (default for USB)
+            </p>
+          </div>
+        </div>
       </div>
       
       <div>
