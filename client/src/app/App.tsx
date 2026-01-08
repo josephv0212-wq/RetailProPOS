@@ -839,6 +839,8 @@ function AppContent() {
         tax={tax}
         cartItems={cartItems}
         onConfirmPayment={handleConfirmPayment}
+        userTerminalIP={user?.terminalIP}
+        userTerminalPort={user?.terminalPort}
       />
 
       {/* Unified Sales Order & Invoice Modal */}

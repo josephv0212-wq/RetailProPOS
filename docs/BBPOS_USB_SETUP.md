@@ -28,9 +28,14 @@ Unlike network-based terminals (like PAX), the BBPOS CHIPPER™ 3X connected via
    - Verify the reader is recognized by your operating system
 
 2. **USB Drivers** (if required):
-   - Windows: Usually auto-detected, but check Device Manager if needed
-   - Mac: Usually plug-and-play
-   - Linux: May need USB serial drivers - check BBPOS documentation
+   - **Windows**: Usually **plug-and-play** (no drivers needed). If not detected:
+     - Check Device Manager for "BBPOS" or "USB Serial Device"
+     - Download drivers from [BBPOS Support](https://www.bbpos.com/support) if needed
+     - Common drivers: CH340, FTDI, or CP210x (depending on reader model)
+   - **Mac**: Usually **plug-and-play** (no drivers needed)
+   - **Linux**: Usually **plug-and-play**, may need `usbserial` module
+   
+   **Important Note**: Even with drivers installed, BBPOS CHIPPER 3X may not work with Web Serial API because it doesn't use standard serial communication. The reader is designed to work with Authorize.Net's Accept Mobile SDK, not Web Serial API.
 
 3. **Authorize.Net Configuration**:
    - Reader must be configured in Authorize.Net (as shown in Authorize.net 2.0 app)

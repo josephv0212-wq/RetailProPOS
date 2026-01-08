@@ -1,6 +1,7 @@
+/// <reference types="vite/client" />
 import React, { useState, useEffect } from 'react';
 import { PaymentMethod, PaymentDetails, CartItem } from '../types';
-import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2 } from 'lucide-react';
+import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2, Wifi } from 'lucide-react';
 import { encryptCardData, loadAcceptJs, isAcceptJsAvailable } from '../../services/acceptJsService';
 import { connectAndReadCard, isWebSerialSupported } from '../../services/usbCardReaderService';
 
@@ -12,6 +13,8 @@ interface PaymentModalProps {
   tax: number;
   cartItems: CartItem[];
   onConfirmPayment: (details: PaymentDetails) => void;
+  userTerminalIP?: string | null;
+  userTerminalPort?: number | string | null;
 }
 
 const paymentMethods: PaymentMethod[] = [
@@ -22,7 +25,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalIP, userTerminalPort }: PaymentModalProps) {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
@@ -34,8 +37,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [achAccount, setAchAccount] = useState('');
   const [achAccountType, setAchAccountType] = useState<'checking' | 'savings'>('checking');
   const [achBankName, setAchBankName] = useState('');
-  const [useCardReader, setUseCardReader] = useState(true);
-  const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading'>('ready');
+  const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'manual'>('manual');
+  const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading' | 'processing'>('ready');
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [acceptJsReady, setAcceptJsReady] = useState(false);
@@ -69,7 +72,15 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
     // Validation
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
-      if (!useCardReader && (!cardNumber || !cardExpiry || !cardCvv || !cardZip)) {
+      if (cardPaymentMethod === 'pax_terminal') {
+        // PAX Terminal validation
+        const terminalIP = userTerminalIP || '';
+        if (!terminalIP || terminalIP.trim() === '') {
+          setError('PAX Terminal IP address is required. Please configure it in Settings.');
+          setIsProcessing(false);
+          return;
+        }
+      } else if (cardPaymentMethod === 'manual' && (!cardNumber || !cardExpiry || !cardCvv || !cardZip)) {
         setError('Please fill in all card details');
         setIsProcessing(false);
         return;
@@ -98,7 +109,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     };
 
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
-      if (useCardReader) {
+      if (cardPaymentMethod === 'pax_terminal') {
+        // PAX WiFi Terminal mode
+        const terminalIP = userTerminalIP || '';
+        const terminalPort = userTerminalPort || 10009;
+        
+        if (!terminalIP || terminalIP.trim() === '') {
+          setError('PAX Terminal IP address is required. Please configure it in Settings.');
+          setIsProcessing(false);
+          return;
+        }
+
+        paymentDetails.useTerminal = true;
+        paymentDetails.terminalIP = terminalIP.trim();
+        paymentDetails.terminalPort = typeof terminalPort === 'string' ? parseInt(terminalPort, 10) : terminalPort;
+        
+        // PAX terminal handles card reading on the device itself
+        // No card data needed - terminal will prompt customer
+        setCardReaderStatus('processing');
+      } else if (cardPaymentMethod === 'usb_reader') {
         // USB Card Reader mode (BBPOS CHIPPER 3X)
         try {
           setCardReaderStatus('connecting');
@@ -411,30 +440,79 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="grid grid-cols-3 gap-3">
                   <button
-                    onClick={() => setUseCardReader(true)}
-                    className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
-                      useCardReader
+                    onClick={() => setCardPaymentMethod('pax_terminal')}
+                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                      cardPaymentMethod === 'pax_terminal'
                         ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-300 bg-white text-gray-700'
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
                     }`}
                   >
-                    USB Card Reader
+                    <Wifi className="w-5 h-5" />
+                    <span className="text-xs font-medium">PAX WiFi Terminal</span>
                   </button>
                   <button
-                    onClick={() => setUseCardReader(false)}
-                    className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
-                      !useCardReader
+                    onClick={() => setCardPaymentMethod('usb_reader')}
+                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                      cardPaymentMethod === 'usb_reader'
                         ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-300 bg-white text-gray-700'
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
                     }`}
                   >
-                    Manual Entry
+                    <CreditCard className="w-5 h-5" />
+                    <span className="text-xs font-medium">USB Reader</span>
+                  </button>
+                  <button
+                    onClick={() => setCardPaymentMethod('manual')}
+                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                      cardPaymentMethod === 'manual'
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                    }`}
+                  >
+                    <CreditCard className="w-5 h-5" />
+                    <span className="text-xs font-medium">Manual Entry</span>
                   </button>
                 </div>
 
-                {useCardReader ? (
+                {cardPaymentMethod === 'pax_terminal' ? (
+                  <div className="space-y-4">
+                    {/* PAX WiFi Terminal Instructions */}
+                    <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
+                      <Wifi className="w-12 h-12 text-blue-400 mx-auto" />
+                      <div>
+                        <p className="font-medium text-gray-900 mb-1">
+                          {cardReaderStatus === 'ready' && 'PAX WiFi Terminal Ready'}
+                          {cardReaderStatus === 'processing' && 'Processing Payment...'}
+                        </p>
+                        <p className="text-sm text-gray-600 mb-2">
+                          {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to process payment on PAX terminal'}
+                          {cardReaderStatus === 'processing' && 'Customer will be prompted on the PAX terminal. Please wait...'}
+                        </p>
+                        <div className="mt-3 text-left bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-600 mb-1">
+                            <strong>Terminal IP:</strong> {userTerminalIP || 'Not configured'}
+                          </p>
+                          <p className="text-xs text-gray-600">
+                            <strong>Port:</strong> {userTerminalPort || '10009 (default)'}
+                          </p>
+                        </div>
+                        {!userTerminalIP && (
+                          <p className="text-xs text-red-600 mt-2 font-medium">
+                            ⚠️ Please configure Terminal IP in Settings before using PAX terminal
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-xs text-gray-600">
+                        <strong>How it works:</strong> When you click "Confirm Payment", the system will send the payment amount to your PAX VP100 terminal via WiFi. The customer will be prompted on the terminal to insert, swipe, or tap their card. The terminal processes the payment and returns the result.
+                      </p>
+                    </div>
+                  </div>
+                ) : cardPaymentMethod === 'usb_reader' ? (
                   <div className="space-y-4">
                     {/* USB Card Reader Instructions */}
                     <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
