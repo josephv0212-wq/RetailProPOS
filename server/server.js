@@ -290,26 +290,50 @@ const ensureItemImageColumn = async () => {
   }
 };
 
-// Ensure terminalIP column exists on Users table (for SQLite / auto-sync disabled)
-const ensureTerminalIPColumn = async () => {
+// Ensure terminalIP and terminalPort columns exist on Users table (for SQLite / auto-sync disabled)
+const ensureTerminalColumns = async () => {
   try {
     if (DATABASE_SETTING === 'local') {
-      // SQLite syntax
-      await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalIP` VARCHAR(255) NULL');
-      console.log('✅ Added terminalIP column to Users table');
+      // SQLite syntax - Add terminalIP column
+      try {
+        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalIP` VARCHAR(255) NULL');
+        console.log('✅ Added terminalIP column to Users table');
+      } catch (err) {
+        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
+          throw err;
+        }
+        console.log('ℹ️  terminalIP column already exists on Users table');
+      }
+      
+      // SQLite syntax - Add terminalPort column
+      try {
+        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalPort` INTEGER NULL');
+        console.log('✅ Added terminalPort column to Users table');
+      } catch (err) {
+        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
+          throw err;
+        }
+        console.log('ℹ️  terminalPort column already exists on Users table');
+      }
     } else {
-      // PostgreSQL syntax
-      await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalIP" VARCHAR(255) NULL');
-      console.log('✅ Added terminalIP column to Users table');
+      // PostgreSQL syntax - Add terminalIP column
+      try {
+        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalIP" VARCHAR(255) NULL');
+        console.log('✅ Added terminalIP column to Users table');
+      } catch (err) {
+        console.warn('⚠️  Could not ensure terminalIP column:', err.message);
+      }
+      
+      // PostgreSQL syntax - Add terminalPort column
+      try {
+        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalPort" INTEGER NULL');
+        console.log('✅ Added terminalPort column to Users table');
+      } catch (err) {
+        console.warn('⚠️  Could not ensure terminalPort column:', err.message);
+      }
     }
   } catch (err) {
-    const msg = err?.message || '';
-    if (msg.includes('duplicate column name') || msg.includes('duplicate column') || msg.includes('already exists')) {
-      console.log('ℹ️  terminalIP column already exists on Users table');
-      return;
-    }
-    // If the table doesn't exist or other error, log but don't crash server
-    console.warn('⚠️  Could not ensure terminalIP column on Users table:', msg);
+    console.warn('⚠️  Could not ensure terminal columns on Users table:', err.message);
   }
 };
 
@@ -330,10 +354,10 @@ const startServer = async () => {
   // Make sure new columns needed for features exist in older SQLite DBs
   if (DATABASE_SETTING === 'local') {
     await ensureItemImageColumn();
-    await ensureTerminalIPColumn();
+    await ensureTerminalColumns();
   } else {
     // For PostgreSQL, also ensure columns exist
-    await ensureTerminalIPColumn();
+    await ensureTerminalColumns();
   }
 
   // Admin user creation handled by bootstrap login (see authController.js)

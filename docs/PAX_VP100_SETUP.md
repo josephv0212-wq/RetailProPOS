@@ -5,19 +5,28 @@ This guide will help you set up and configure your PAX Valor VP100 payment termi
 ## Terminal Specifications
 
 - **Model**: PAX Valor VP100
-- **Connection Method**: WiFi
+- **Connection Methods**: 
+  - **WiFi**: Network IP address, Port 10009 (or as configured)
+  - **USB**: localhost (127.0.0.1), Port 4430 (or as configured)
 - **Payment Gateway**: Authorize.Net
-- **Default Port**: 10009
 - **Protocol**: PAXST (PAX Socket Transport) / JSON over TCP/IP
 
 ## Prerequisites
 
 1. PAX Valor VP100 terminal
 2. Authorize.Net merchant account with API credentials
-3. WiFi network access
-4. Terminal IP address (obtained from terminal settings)
+3. **For WiFi**: WiFi network access and terminal IP address
+4. **For USB**: USB cable and appropriate drivers (if required)
 
-## Step 1: Configure WiFi Connection on Terminal
+## Connection Methods
+
+### Option A: WiFi Connection (Recommended for Production)
+Use WiFi for wireless payment processing when the terminal is not physically connected.
+
+### Option B: USB Connection (For Development/Testing)
+Use USB for direct connection when the terminal is physically connected to your computer.
+
+## Step 1A: Configure WiFi Connection on Terminal (Optional)
 
 1. **Access Communication Settings**:
    - From the terminal home screen, tap the menu icon (three horizontal lines)
@@ -36,6 +45,30 @@ This guide will help you set up and configure your PAX Valor VP100 payment termi
    - The active connection will be highlighted in green
    - You should see a WiFi icon in the status bar
    - Note the terminal's IP address (found in network settings)
+
+## Step 1B: Configure USB Connection (Alternative)
+
+If connecting via USB instead of WiFi:
+
+1. **Connect Terminal to Computer**:
+   - Connect the PAX VP100 terminal to your laptop/computer using a USB cable
+   - Ensure the terminal is powered on
+   - The terminal should be recognized by the system
+
+2. **Configure Terminal for USB Mode**:
+   - On the terminal, check communication settings
+   - Select USB as the connection method (if available)
+   - Note: Some terminals may need drivers installed - check PAX documentation
+
+3. **USB Connection Settings**:
+   - Use IP address: `localhost` or `127.0.0.1`
+   - Port: Usually `4430` (check with terminal administrator or PAX documentation)
+   - Connection is direct via USB cable
+
+4. **Verify USB Connection**:
+   - Terminal should be recognized by your computer
+   - Check device manager (Windows) or system information (Mac) to verify connection
+   - Some terminals may require USB drivers to be installed first
 
 ## Step 2: Configure Authorize.Net on Terminal
 
@@ -63,8 +96,14 @@ This guide will help you set up and configure your PAX Valor VP100 payment termi
 
    ```env
    # PAX Terminal Configuration
+   # For WiFi Connection:
    PAX_TERMINAL_IP=192.168.1.100  # Replace with your terminal's IP address
-   PAX_TERMINAL_PORT=10009         # Default port for VP100
+   PAX_TERMINAL_PORT=10009         # Default port for WiFi
+   
+   # For USB Connection (use localhost):
+   # PAX_TERMINAL_IP=localhost     # or 127.0.0.1 for USB connection
+   # PAX_TERMINAL_PORT=4430        # Typical USB port (check with your terminal admin)
+   
    PAX_TERMINAL_TIMEOUT=120000    # 2 minutes timeout for transactions
    
    # Authorize.Net Credentials (for reference, terminal uses its own config)

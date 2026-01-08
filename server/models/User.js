@@ -38,6 +38,11 @@ export const User = sequelize.define('User', {
   terminalIP: {
     type: DataTypes.STRING,
     allowNull: true,
-    comment: 'IP address of the EBizCharge WiFi terminal assigned to this user'
+    comment: 'IP address of the PAX terminal assigned to this user (e.g., 192.168.1.100 or localhost)'
+  },
+  terminalPort: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Port number for the PAX terminal (e.g., 4430 for USB, 10009 for WiFi)'
   }
 });

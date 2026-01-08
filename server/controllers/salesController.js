@@ -190,11 +190,13 @@ export const createSale = async (req, res) => {
         transactionId = paymentResult.transactionId;
       } else if (useTerminal) {
         // PAX Terminal mode - process through physical terminal
+        const userTerminalPort = req.user.terminalPort || null;
+        const terminalPort = paymentDetails.terminalPort || userTerminalPort || undefined;
         paymentResult = await processTerminalPayment({
           amount: total,
           invoiceNumber: `POS-${Date.now()}`,
           description: `POS Sale - ${locationName}`
-        }, terminalIP);
+        }, terminalIP, terminalPort);
 
         if (!paymentResult.success) {
           return sendError(res, 'Terminal payment processing failed', 400, paymentResult.error);

@@ -11,6 +11,7 @@ interface PaymentModalProps {
   cartItems: CartItem[];
   onConfirmPayment: (details: PaymentDetails) => void;
   userTerminalIP?: string;
+  userTerminalPort?: number | string;
 }
 
 const paymentMethods: PaymentMethod[] = [
@@ -21,7 +22,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalIP }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalIP, userTerminalPort }: PaymentModalProps) {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
@@ -36,6 +37,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [useCardReader, setUseCardReader] = useState(true);
   const [useEBizChargeTerminal, setUseEBizChargeTerminal] = useState(true);
   const [terminalIP, setTerminalIP] = useState(userTerminalIP || '');
+  const [terminalPort, setTerminalPort] = useState(userTerminalPort ? userTerminalPort.toString() : '');
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading'>('ready');
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -89,6 +91,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           // PAX Terminal mode (legacy)
           paymentDetails.useTerminal = true;
           paymentDetails.terminalIP = terminalIP || undefined;
+          paymentDetails.terminalPort = terminalPort || undefined;
         }
       } else {
         paymentDetails.cardNumber = cardNumber;
@@ -328,17 +331,38 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         type="text"
                         value={terminalIP}
                         onChange={(e) => setTerminalIP(e.target.value)}
-                        placeholder="192.168.1.100"
+                        placeholder="192.168.1.100 or localhost"
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                       />
                       {!terminalIP && (
                         <p className="text-xs text-gray-500 mt-1">
                           {useEBizChargeTerminal 
                             ? 'Enter your EBizCharge terminal IP address (e.g., 192.168.1.100)'
-                            : 'Enter your PAX terminal IP address (e.g., 192.168.1.100). For VP100, ensure WiFi is connected.'}
+                            : 'Enter your PAX terminal IP (e.g., 192.168.1.100 for WiFi, localhost for USB)'}
                         </p>
                       )}
                     </div>
+
+                    {/* Terminal Port Input (only for PAX Terminal) */}
+                    {!useEBizChargeTerminal && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Terminal Port (Optional)
+                        </label>
+                        <input
+                          type="number"
+                          value={terminalPort}
+                          onChange={(e) => setTerminalPort(e.target.value)}
+                          placeholder="4430 (USB) or 10009 (WiFi)"
+                          min="1"
+                          max="65535"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Default: 4430 for USB, 10009 for WiFi. Leave empty to use default.
+                        </p>
+                      </div>
+                    )}
 
                     {/* Terminal Status */}
                     <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">

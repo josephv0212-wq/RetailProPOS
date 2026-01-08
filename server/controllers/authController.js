@@ -124,7 +124,8 @@ export const login = async (req, res) => {
         locationId: user.locationId,
         locationName: user.locationName,
         taxPercentage: resolveTaxPercentage(user),
-        terminalIP: user.terminalIP
+        terminalIP: user.terminalIP,
+        terminalPort: user.terminalPort
       }
     }, 'Login successful');
   } catch (err) {
@@ -388,30 +389,42 @@ export const getCurrentUser = async (req, res) => {
 
 export const updateMyTerminalIP = async (req, res) => {
   try {
-    const { terminalIP } = req.body;
+    const { terminalIP, terminalPort } = req.body;
     const user = await User.findByPk(req.user.id);
     
     if (!user) {
       return sendNotFound(res, 'User');
     }
 
-    // Validate IP format if provided
+    // Validate IP format if provided (allow localhost for USB connections)
     if (terminalIP && terminalIP.trim() !== '') {
+      const ipTrimmed = terminalIP.trim();
       const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-      if (!ipRegex.test(terminalIP.trim())) {
-        return sendValidationError(res, 'Invalid IP address format. Please use format like 192.168.1.100');
+      if (ipTrimmed !== 'localhost' && ipTrimmed !== '127.0.0.1' && !ipRegex.test(ipTrimmed)) {
+        return sendValidationError(res, 'Invalid IP address format. Please use format like 192.168.1.100 or localhost');
+      }
+    }
+
+    // Validate port if provided
+    if (terminalPort !== undefined && terminalPort !== null && terminalPort !== '') {
+      const portNum = parseInt(terminalPort, 10);
+      if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+        return sendValidationError(res, 'Invalid port number. Port must be between 1 and 65535');
       }
     }
 
     user.terminalIP = terminalIP && terminalIP.trim() !== '' ? terminalIP.trim() : null;
+    user.terminalPort = (terminalPort !== undefined && terminalPort !== null && terminalPort !== '') 
+      ? parseInt(terminalPort, 10) 
+      : null;
     await user.save();
 
     const sanitizedUser = user.toJSON();
     delete sanitizedUser.password;
 
-    return sendSuccess(res, { user: sanitizedUser }, 'Terminal IP updated successfully');
+    return sendSuccess(res, { user: sanitizedUser }, 'Terminal IP and Port updated successfully');
   } catch (err) {
-    console.error('Update terminal IP error:', err);
-    return sendError(res, 'Failed to update terminal IP', 500, err);
+    console.error('Update terminal IP/Port error:', err);
+    return sendError(res, 'Failed to update terminal IP and Port', 500, err);
   }
 };

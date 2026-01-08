@@ -7,15 +7,20 @@
  * 
  * Valor VP100 Specific:
  * - Model: PAX Valor VP100
- * - Connection: WiFi (TCP/IP)
+ * - Connection: WiFi (TCP/IP) or USB (localhost)
  * - Gateway: Authorize.Net
  * - Protocol: PAXST (PAX Socket Transport) / JSON over TCP/IP
- * - Default Port: 10009
+ * - Default Port: 10009 (WiFi) or 4430 (USB)
+ * 
+ * Connection Methods:
+ * - WiFi: Terminal IP address (e.g., 192.168.1.100), Port 10009
+ * - USB: localhost or 127.0.0.1, Port 4430 (or as configured)
  * 
  * Terminal Configuration:
  * - Terminal must be pre-configured with Authorize.Net credentials
- * - WiFi connection must be established on the terminal
- * - Terminal IP address must be accessible on the same network
+ * - For WiFi: WiFi connection must be established on the terminal
+ * - For USB: Terminal must be connected via USB cable, drivers may be required
+ * - Terminal IP/address must be accessible (WiFi: same network, USB: localhost)
  */
 
 import net from 'net';
@@ -94,6 +99,11 @@ export const discoverTerminals = async () => {
  * @returns {boolean} True if valid IP format
  */
 const isValidIP = (ip) => {
+  // Allow localhost for USB connections
+  if (ip === 'localhost' || ip === '127.0.0.1') {
+    return true;
+  }
+  
   const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
   if (!ipRegex.test(ip)) return false;
   const parts = ip.split('.');
@@ -105,20 +115,25 @@ const isValidIP = (ip) => {
 
 /**
  * Connect to a PAX terminal
- * @param {string} ip - Terminal IP address
- * @param {number} port - Terminal port (default 10009)
+ * Supports both WiFi (network IP) and USB (localhost) connections
+ * @param {string} ip - Terminal IP address (or 'localhost'/'127.0.0.1' for USB)
+ * @param {number} port - Terminal port (default 10009, or 4430 for USB)
  * @returns {Promise<Object>} Connection object
  */
 export const connectToTerminal = async (ip = PAX_TERMINAL_IP, port = PAX_TERMINAL_PORT) => {
-  // Validate IP address
+  // Validate IP address (allow localhost for USB connections)
   if (!ip || !isValidIP(ip)) {
-    throw new Error(`Invalid IP address format: ${ip || 'undefined'}. Please provide a valid IP address (e.g., 192.168.1.100)`);
+    throw new Error(`Invalid IP address format: ${ip || 'undefined'}. Please provide a valid IP address (e.g., 192.168.1.100) or 'localhost' for USB connection.`);
   }
   
   // Validate port range
   if (port < 1 || port > 65535) {
     throw new Error(`Invalid port number: ${port}. Must be between 1 and 65535.`);
   }
+  
+  // Resolve localhost to 127.0.0.1 for connection
+  const connectIP = (ip === 'localhost') ? '127.0.0.1' : ip;
+  const connectionType = (ip === 'localhost' || ip === '127.0.0.1') ? 'USB' : 'WiFi';
   
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
@@ -128,32 +143,43 @@ export const connectToTerminal = async (ip = PAX_TERMINAL_IP, port = PAX_TERMINA
       if (!socket.destroyed) {
         socket.destroy();
       }
-      reject(new Error(`Connection timeout: Could not connect to terminal at ${ip}:${port}. Please verify the terminal is powered on and on the same network.`));
+      const networkMsg = connectionType === 'USB' 
+        ? 'Please verify the terminal is connected via USB and the correct port (usually 4430) is configured.'
+        : 'Please verify the terminal is powered on and on the same network.';
+      reject(new Error(`Connection timeout: Could not connect to terminal at ${ip}:${port} via ${connectionType}. ${networkMsg}`));
     }, connectionTimeout);
     
     socket.setTimeout(connectionTimeout);
     
-    socket.connect(port, ip, () => {
+    socket.connect(port, connectIP, () => {
       clearTimeout(timeout);
       socket.setTimeout(0); // Disable timeout after connection
+      console.log(`✅ Connected to PAX terminal via ${connectionType} at ${ip}:${port}`);
       resolve({
         socket,
-        ip,
+        ip: connectIP,
         port,
-        connected: true
+        connected: true,
+        connectionType
       });
     });
     
     socket.on('error', (error) => {
       clearTimeout(timeout);
-      let errorMessage = `Failed to connect to terminal at ${ip}:${port}. `;
+      let errorMessage = `Failed to connect to terminal at ${ip}:${port} via ${connectionType}. `;
       
       if (error.code === 'ECONNREFUSED') {
-        errorMessage += 'Connection refused. Please verify the terminal is powered on and the IP address is correct.';
+        errorMessage += connectionType === 'USB'
+          ? 'Connection refused. Please verify: (1) Terminal is connected via USB, (2) USB drivers are installed, (3) Terminal is powered on, (4) Port number is correct (usually 4430).'
+          : 'Connection refused. Please verify the terminal is powered on and the IP address is correct.';
       } else if (error.code === 'ETIMEDOUT') {
-        errorMessage += 'Connection timed out. Please check network connectivity and firewall settings.';
+        errorMessage += connectionType === 'USB'
+          ? 'Connection timed out. Please check USB connection and port settings.'
+          : 'Connection timed out. Please check network connectivity and firewall settings.';
       } else if (error.code === 'EHOSTUNREACH' || error.code === 'ENETUNREACH') {
-        errorMessage += 'Host unreachable. Please verify the terminal is on the same network.';
+        errorMessage += connectionType === 'USB'
+          ? 'Host unreachable. Please check USB connection and ensure terminal is recognized by the system.'
+          : 'Host unreachable. Please verify the terminal is on the same network.';
       } else {
         errorMessage += `Error: ${error.message}`;
       }
@@ -164,7 +190,7 @@ export const connectToTerminal = async (ip = PAX_TERMINAL_IP, port = PAX_TERMINA
     socket.on('timeout', () => {
       socket.destroy();
       clearTimeout(timeout);
-      reject(new Error(`Connection timeout: Could not connect to terminal at ${ip}:${port} within ${connectionTimeout}ms`));
+      reject(new Error(`Connection timeout: Could not connect to terminal at ${ip}:${port} via ${connectionType} within ${connectionTimeout}ms`));
     });
   });
 };
@@ -323,7 +349,7 @@ const parseEJSResponse = (response) => {
  * @param {string} terminalIP - Terminal IP address
  * @returns {Promise<Object>} Payment result
  */
-export const processTerminalPayment = async (paymentData, terminalIP = PAX_TERMINAL_IP) => {
+export const processTerminalPayment = async (paymentData, terminalIP = PAX_TERMINAL_IP, terminalPort = PAX_TERMINAL_PORT) => {
   const { amount, invoiceNumber, description } = paymentData;
   let connection = null;
   
@@ -345,8 +371,9 @@ export const processTerminalPayment = async (paymentData, terminalIP = PAX_TERMI
       };
     }
     
-    // Connect to terminal
-    connection = await connectToTerminal(terminalIP);
+    // Connect to terminal (use provided port or default)
+    const port = terminalPort || PAX_TERMINAL_PORT;
+    connection = await connectToTerminal(terminalIP, port);
     
     // Build transaction request for VP100 with Authorize.Net
     // Note: Authorize.Net credentials should be pre-configured on the terminal
@@ -546,7 +573,7 @@ export const voidTerminalTransaction = async (transactionId, terminalIP = PAX_TE
  * @param {string} terminalIP - Terminal IP address
  * @returns {Promise<Object>} Test result
  */
-export const testTerminalConnection = async (terminalIP = PAX_TERMINAL_IP) => {
+export const testTerminalConnection = async (terminalIP = PAX_TERMINAL_IP, terminalPort = PAX_TERMINAL_PORT) => {
   let connection = null;
   
   try {
@@ -559,8 +586,9 @@ export const testTerminalConnection = async (terminalIP = PAX_TERMINAL_IP) => {
       };
     }
     
-    // Try to connect
-    connection = await connectToTerminal(terminalIP);
+    // Try to connect (use provided port or default)
+    const port = terminalPort || PAX_TERMINAL_PORT;
+    connection = await connectToTerminal(terminalIP, port);
     
     // Try to get status to verify terminal is responsive
     try {
@@ -575,6 +603,7 @@ export const testTerminalConnection = async (terminalIP = PAX_TERMINAL_IP) => {
         success: true,
         message: 'Terminal connection successful and responsive',
         ip: terminalIP,
+        port: port,
         status: statusResponse
       };
     } catch (statusError) {
@@ -587,6 +616,7 @@ export const testTerminalConnection = async (terminalIP = PAX_TERMINAL_IP) => {
         success: true,
         message: 'Terminal connection successful (status query unavailable)',
         ip: terminalIP,
+        port: port,
         warning: statusError.message
       };
     }
@@ -614,6 +644,7 @@ export const testTerminalConnection = async (terminalIP = PAX_TERMINAL_IP) => {
       success: false,
       error: errorMessage,
       ip: terminalIP,
+      port: terminalPort || PAX_TERMINAL_PORT,
       code: error.code
     };
   }

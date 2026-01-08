@@ -544,6 +544,7 @@ function AppContent() {
       } else if (paymentDetails.useTerminal) {
         apiPaymentDetails.useTerminal = true;
         apiPaymentDetails.terminalIP = paymentDetails.terminalIP;
+        apiPaymentDetails.terminalPort = paymentDetails.terminalPort;
       } else if (paymentDetails.useBluetoothReader) {
         apiPaymentDetails.useBluetoothReader = true;
         apiPaymentDetails.bluetoothPayload = paymentDetails.bluetoothPayload;
@@ -830,6 +831,7 @@ function AppContent() {
         cartItems={cartItems}
         onConfirmPayment={handleConfirmPayment}
         userTerminalIP={user?.terminalIP}
+        userTerminalPort={user?.terminalPort}
       />
 
       {/* Unified Sales Order & Invoice Modal */}

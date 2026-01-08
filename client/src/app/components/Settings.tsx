@@ -220,11 +220,12 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
   );
 }
 
-// Terminal IP Configuration Component
+// Terminal IP and Port Configuration Component
 function TerminalIPConfig() {
   const { user, refreshUser } = useAuth();
   const { showToast } = useToast();
   const [terminalIP, setTerminalIP] = useState(user?.terminalIP || '');
+  const [terminalPort, setTerminalPort] = useState(user?.terminalPort?.toString() || '');
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
 
@@ -232,7 +233,10 @@ function TerminalIPConfig() {
     if (user?.terminalIP) {
       setTerminalIP(user.terminalIP);
     }
-  }, [user?.terminalIP]);
+    if (user?.terminalPort) {
+      setTerminalPort(user.terminalPort.toString());
+    }
+  }, [user?.terminalIP, user?.terminalPort]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -244,22 +248,25 @@ function TerminalIPConfig() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ terminalIP: terminalIP.trim() || null })
+        body: JSON.stringify({ 
+          terminalIP: terminalIP.trim() || null,
+          terminalPort: terminalPort.trim() || null
+        })
       });
 
       const data = await response.json();
       
       if (data.success) {
-        showToast('Terminal IP address saved successfully', 'success', 3000);
+        showToast('Terminal IP and Port saved successfully', 'success', 3000);
         if (refreshUser) {
           await refreshUser();
         }
       } else {
-        showToast(data.message || 'Failed to save terminal IP', 'error', 4000);
+        showToast(data.message || 'Failed to save terminal settings', 'error', 4000);
       }
     } catch (error) {
-      console.error('Error saving terminal IP:', error);
-      showToast('Failed to save terminal IP address', 'error', 4000);
+      console.error('Error saving terminal settings:', error);
+      showToast('Failed to save terminal settings', 'error', 4000);
     } finally {
       setIsSaving(false);
     }
@@ -281,7 +288,10 @@ function TerminalIPConfig() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ terminalIP: terminalIP.trim() })
+        body: JSON.stringify({ 
+          terminalIP: terminalIP.trim(),
+          terminalPort: terminalPort.trim() || undefined
+        })
       });
 
       const data = await response.json();
@@ -300,6 +310,10 @@ function TerminalIPConfig() {
   };
 
   const isValidIP = (ip: string) => {
+    // Allow localhost for USB connections
+    if (ip === 'localhost' || ip === '127.0.0.1') {
+      return true;
+    }
     const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
     if (!ipRegex.test(ip)) return false;
     const parts = ip.split('.');
@@ -309,7 +323,15 @@ function TerminalIPConfig() {
     });
   };
 
+  const isValidPort = (port: string) => {
+    if (!port || port.trim() === '') return true; // Port is optional
+    const portNum = parseInt(port, 10);
+    return !isNaN(portNum) && portNum >= 1 && portNum <= 65535;
+  };
+
   const ipValid = terminalIP === '' || isValidIP(terminalIP);
+  const portValid = isValidPort(terminalPort);
+  const canSave = ipValid && portValid;
 
   return (
     <div className="space-y-4">
@@ -317,65 +339,98 @@ function TerminalIPConfig() {
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Terminal IP Address
         </label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={terminalIP}
-            onChange={(e) => setTerminalIP(e.target.value)}
-            placeholder="192.168.1.100"
-            className={`flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
-              ipValid
-                ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
-                : 'border-red-300 dark:border-red-600 focus:ring-red-500'
-            } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
-          />
-          <button
-            onClick={handleTest}
-            disabled={isTesting || !terminalIP || !ipValid}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-gray-900 dark:text-white bg-white dark:bg-gray-700 flex items-center gap-2"
-          >
-            {isTesting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Testing...</span>
-              </>
-            ) : (
-              <>
-                <CreditCard className="w-4 h-4" />
-                <span>Test</span>
-              </>
-            )}
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={isSaving || !ipValid}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Saving...</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Save</span>
-              </>
-            )}
-          </button>
-        </div>
+        <input
+          type="text"
+          value={terminalIP}
+          onChange={(e) => setTerminalIP(e.target.value)}
+          placeholder="192.168.1.100 or localhost"
+          className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+            ipValid
+              ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+              : 'border-red-300 dark:border-red-600 focus:ring-red-500'
+          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+        />
         {!ipValid && terminalIP !== '' && (
           <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
             <XCircle className="w-4 h-4" />
-            Invalid IP address format. Use format like 192.168.1.100
+            Invalid IP address format. Use format like 192.168.1.100 or localhost
           </p>
         )}
-        {terminalIP && ipValid && (
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Your terminal IP will be used automatically when processing payments.
-          </p>
-        )}
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          For WiFi: Use terminal IP (e.g., 192.168.1.100). For USB: Use localhost or 127.0.0.1
+        </p>
       </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Terminal Port
+        </label>
+        <input
+          type="number"
+          value={terminalPort}
+          onChange={(e) => setTerminalPort(e.target.value)}
+          placeholder="4430 (USB) or 10009 (WiFi)"
+          min="1"
+          max="65535"
+          className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+            portValid
+              ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+              : 'border-red-300 dark:border-red-600 focus:ring-red-500'
+          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+        />
+        {!portValid && terminalPort !== '' && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
+            <XCircle className="w-4 h-4" />
+            Invalid port number. Port must be between 1 and 65535
+          </p>
+        )}
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          Default: 4430 for USB, 10009 for WiFi. Leave empty to use default.
+        </p>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={handleTest}
+          disabled={isTesting || !terminalIP || !canSave}
+          className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-gray-900 dark:text-white bg-white dark:bg-gray-700 flex items-center justify-center gap-2"
+        >
+          {isTesting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Testing...</span>
+            </>
+          ) : (
+            <>
+              <CreditCard className="w-4 h-4" />
+              <span>Test Connection</span>
+            </>
+          )}
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={isSaving || !canSave}
+          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          {isSaving ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Saving...</span>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Save</span>
+            </>
+          )}
+        </button>
+      </div>
+      
+      {terminalIP && ipValid && (
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          Your terminal settings will be used automatically when processing payments.
+        </p>
+      )}
     </div>
   );
 }

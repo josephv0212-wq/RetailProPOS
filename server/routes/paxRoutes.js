@@ -42,20 +42,21 @@ router.post('/discover', async (req, res) => {
  */
 router.post('/test', async (req, res) => {
   try {
-    const { terminalIP } = req.body;
-    const result = await testTerminalConnection(terminalIP);
+    const { terminalIP, terminalPort } = req.body;
+    const port = terminalPort ? parseInt(terminalPort, 10) : undefined;
+    const result = await testTerminalConnection(terminalIP, port);
     
     if (result.success) {
       res.json({
         success: true,
         message: result.message,
-        data: { ip: result.ip }
+        data: { ip: result.ip, port: result.port }
       });
     } else {
       res.status(400).json({
         success: false,
         message: result.error || 'Connection test failed',
-        data: { ip: result.ip }
+        data: { ip: result.ip, port: result.port }
       });
     }
   } catch (error) {
@@ -106,7 +107,7 @@ router.get('/status', async (req, res) => {
  */
 router.post('/payment', async (req, res) => {
   try {
-    const { amount, invoiceNumber, description, terminalIP } = req.body;
+    const { amount, invoiceNumber, description, terminalIP, terminalPort } = req.body;
     
     if (!amount || parseFloat(amount) <= 0) {
       return res.status(400).json({
@@ -115,11 +116,12 @@ router.post('/payment', async (req, res) => {
       });
     }
     
+    const port = terminalPort ? parseInt(terminalPort, 10) : undefined;
     const paymentResult = await processTerminalPayment({
       amount,
       invoiceNumber,
       description
-    }, terminalIP);
+    }, terminalIP, port);
     
     if (paymentResult.success) {
       res.json({

@@ -81,6 +81,7 @@ export interface PaymentDetails {
   useTerminal?: boolean;
   useEBizChargeTerminal?: boolean;
   terminalIP?: string;
+  terminalPort?: number | string;
   useBluetoothReader?: boolean;
   bluetoothPayload?: {
     descriptor: string;
