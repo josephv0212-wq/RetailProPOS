@@ -172,7 +172,19 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           setCardReaderStatus('ready');
         } catch (readerError: any) {
           setCardReaderStatus('ready');
-          setError(readerError.message || 'Failed to read card from USB reader. Make sure the reader is connected and try again.');
+          const errorMessage = readerError.message || 'Failed to read card from USB reader.';
+          
+          // Provide helpful error message with fallback option
+          if (errorMessage.includes('No compatible') || errorMessage.includes('No compatible devices')) {
+            setError(
+              errorMessage + '\n\n' +
+              '💡 Tip: BBPOS CHIPPER 3X may not work directly with Web Serial API.\n' +
+              'Please use "Manual Entry" mode instead, or use the Authorize.Net 2.0 desktop app.'
+            );
+          } else {
+            setError(errorMessage);
+          }
+          
           setIsProcessing(false);
           return;
         }
@@ -452,10 +464,20 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     </div>
                     
                     {serialSupported ? (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                        <p className="text-xs text-gray-600">
-                          <strong>Note:</strong> When you click "Confirm Payment", you'll be asked to select the USB card reader from a device picker dialog. Then insert, swipe, or tap the card on the reader. Card data will be encrypted using Accept.js and processed securely through Authorize.Net.
-                        </p>
+                      <div className="space-y-3">
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <p className="text-xs text-gray-600 mb-2">
+                            <strong>Note:</strong> When you click "Confirm Payment", you'll be asked to select the USB card reader from a device picker dialog. Then insert, swipe, or tap the card on the reader.
+                          </p>
+                          <p className="text-xs text-gray-600">
+                            Card data will be encrypted using Accept.js and processed securely through Authorize.Net.
+                          </p>
+                        </div>
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                          <p className="text-xs text-gray-700">
+                            <strong>⚠️ Important:</strong> BBPOS CHIPPER 3X may not appear in the device picker if it doesn't use standard serial communication. If you see "No compatible devices found", please use <strong>Manual Entry</strong> mode instead, or use the Authorize.Net 2.0 desktop app as a bridge.
+                          </p>
+                        </div>
                       </div>
                     ) : (
                       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">

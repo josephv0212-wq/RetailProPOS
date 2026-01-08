@@ -24,6 +24,7 @@ export const isWebSerialSupported = (): boolean => {
 
 /**
  * Request access to USB serial device
+ * Note: BBPOS readers may not appear as standard serial devices
  */
 export const requestSerialPort = async (): Promise<SerialPort | null> => {
   if (!isWebSerialSupported()) {
@@ -31,14 +32,42 @@ export const requestSerialPort = async (): Promise<SerialPort | null> => {
   }
 
   try {
+    // Request port with filters to help find BBPOS devices
+    // Note: BBPOS CHIPPER 3X may use different USB vendor/product IDs
+    const filters = [
+      // Common BBPOS vendor IDs (may need to be adjusted)
+      { usbVendorId: 0x0BDA }, // Realtek (common for USB-to-serial adapters)
+      { usbVendorId: 0x0403 }, // FTDI
+      { usbVendorId: 0x1A86 }, // CH340
+    ];
+    
     // Request port - this will show a device picker dialog
-    const port = await (navigator as any).serial.requestPort();
+    // If no filters match, it will show all available serial devices
+    const port = await (navigator as any).serial.requestPort({ filters });
     return port;
   } catch (error: any) {
     if (error.name === 'NotFoundError') {
-      throw new Error('No USB device selected or device not found');
+      throw new Error(
+        'No compatible USB card reader found.\n\n' +
+        'Troubleshooting:\n' +
+        '1. Ensure BBPOS CHIPPER 3X is connected via USB\n' +
+        '2. Install USB drivers if needed\n' +
+        '3. Try unplugging and reconnecting the reader\n' +
+        '4. Check if reader appears in Device Manager (Windows) or System Information (Mac)\n' +
+        '5. The reader may not be compatible with Web Serial API - try Manual Entry instead'
+      );
     } else if (error.name === 'SecurityError') {
       throw new Error('Permission denied. Please grant permission to access the USB device.');
+    } else if (error.message && error.message.includes('No compatible devices')) {
+      throw new Error(
+        'No compatible devices found.\n\n' +
+        'BBPOS CHIPPER 3X may not appear as a standard serial device.\n\n' +
+        'Options:\n' +
+        '1. Use Manual Entry mode instead\n' +
+        '2. Use Authorize.Net 2.0 desktop app as a bridge\n' +
+        '3. Check if USB drivers are installed\n' +
+        '4. Try a different USB port or cable'
+      );
     }
     throw new Error(`Failed to request serial port: ${error.message}`);
   }
