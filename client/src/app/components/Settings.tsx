@@ -170,11 +170,12 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
           {/* PAX Terminal Support */}
           <div className="mt-6">
             <h3 className="font-bold text-gray-900 dark:text-white mb-2">
-              PAX Terminal Support
+              PAX Terminal Support (VP100)
             </h3>
-            <p className="text-gray-600 dark:text-gray-400">
-              PAX terminal integration is available. Configure terminal IP address during payment processing to use the physical terminal for card payments.
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              PAX Valor VP100 terminal integration with Authorize.Net via WiFi is available. Configure terminal IP address below or during payment processing to use the physical terminal for card payments.
             </p>
+            <TerminalIPConfig />
           </div>
         </div>
 
@@ -273,7 +274,8 @@ function TerminalIPConfig() {
     setIsTesting(true);
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-      const response = await fetch('/api/ebizcharge/test', {
+      // Test PAX terminal connection
+      const response = await fetch('/api/pax/test', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -285,9 +287,9 @@ function TerminalIPConfig() {
       const data = await response.json();
       
       if (data.success) {
-        showToast('Terminal connection test successful!', 'success', 4000);
+        showToast('PAX terminal connection test successful!', 'success', 4000);
       } else {
-        showToast(data.message || 'Terminal connection test failed', 'error', 4000);
+        showToast(data.message || 'PAX terminal connection test failed', 'error', 4000);
       }
     } catch (error) {
       console.error('Error testing terminal:', error);

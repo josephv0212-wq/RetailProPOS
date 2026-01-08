@@ -3,7 +3,19 @@
  * Handles communication with PAX payment terminals for in-person transactions
  * 
  * PAX Terminal Integration with Authorize.Net
- * Supports multiple PAX models: A920, A920 Pro, A80, S920, etc.
+ * Supports multiple PAX models: A920, A920 Pro, A80, S920, Valor VP100, etc.
+ * 
+ * Valor VP100 Specific:
+ * - Model: PAX Valor VP100
+ * - Connection: WiFi (TCP/IP)
+ * - Gateway: Authorize.Net
+ * - Protocol: PAXST (PAX Socket Transport) / JSON over TCP/IP
+ * - Default Port: 10009
+ * 
+ * Terminal Configuration:
+ * - Terminal must be pre-configured with Authorize.Net credentials
+ * - WiFi connection must be established on the terminal
+ * - Terminal IP address must be accessible on the same network
  */
 
 import net from 'net';
@@ -336,19 +348,24 @@ export const processTerminalPayment = async (paymentData, terminalIP = PAX_TERMI
     // Connect to terminal
     connection = await connectToTerminal(terminalIP);
     
-    // Build transaction request
+    // Build transaction request for VP100 with Authorize.Net
+    // Note: Authorize.Net credentials should be pre-configured on the terminal
+    // The terminal handles the actual gateway communication
     const transactionData = {
       amount: paymentAmount.toFixed(2),
       invoiceNumber: invoiceNumber || `POS-${Date.now()}`,
       description: description || 'POS Sale',
-      // Authorize.Net credentials (terminal should be pre-configured)
-      merchantId: process.env.AUTHORIZE_NET_API_LOGIN_ID,
-      transactionKey: process.env.AUTHORIZE_NET_TRANSACTION_KEY,
       // Transaction type
       transactionType: 'SALE',
+      // Gateway information (for reference, terminal uses pre-configured settings)
+      gateway: 'AUTHORIZE_NET',
       // Additional options
       allowDuplicates: false,
-      timeout: 120 // 2 minutes for customer to complete on terminal
+      timeout: 120, // 2 minutes for customer to complete on terminal
+      // VP100 specific options
+      cardEntryMethods: ['SWIPE', 'INSERT', 'TAP'], // Support all card entry methods
+      requireSignature: false, // Adjust based on amount threshold if needed
+      printReceipt: true
     };
     
     // Send sale request to terminal

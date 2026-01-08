@@ -333,7 +333,9 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                       />
                       {!terminalIP && (
                         <p className="text-xs text-gray-500 mt-1">
-                          Enter your EBizCharge terminal IP address (e.g., 192.168.1.100)
+                          {useEBizChargeTerminal 
+                            ? 'Enter your EBizCharge terminal IP address (e.g., 192.168.1.100)'
+                            : 'Enter your PAX terminal IP address (e.g., 192.168.1.100). For VP100, ensure WiFi is connected.'}
                         </p>
                       )}
                     </div>
@@ -348,8 +350,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           {cardReaderStatus === 'reading' && 'Processing card...'}
                         </p>
                         <p className="text-sm text-gray-600">
-                          {cardReaderStatus === 'ready' && 'Insert, swipe, or tap card on terminal'}
-                          {cardReaderStatus === 'connecting' && 'Connecting to terminal'}
+                          {cardReaderStatus === 'ready' && (useEBizChargeTerminal 
+                            ? 'Insert, swipe, or tap card on terminal'
+                            : 'Insert, swipe, or tap card on PAX terminal (VP100)')}
+                          {cardReaderStatus === 'connecting' && 'Connecting to terminal via WiFi...'}
                           {cardReaderStatus === 'reading' && 'Do not remove card'}
                         </p>
                         {terminalIP && (
