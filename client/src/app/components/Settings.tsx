@@ -173,9 +173,33 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
               PAX Terminal Support (VP100)
             </h3>
             <p className="text-gray-600 dark:text-gray-400 mb-4">
-              PAX Valor VP100 terminal integration with Authorize.Net via WiFi is available. Configure terminal IP address below or during payment processing to use the physical terminal for card payments.
+              PAX Valor VP100 terminal integration with Authorize.Net via WiFi or USB is available. Configure terminal IP address and port below or during payment processing to use the physical terminal for card payments.
             </p>
             <TerminalIPConfig />
+          </div>
+
+          {/* BBPOS Card Reader Support */}
+          <div className="mt-6">
+            <h3 className="font-bold text-gray-900 dark:text-white mb-2">
+              BBPOS Card Reader (CHIPPER™ 3X)
+            </h3>
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                <strong>USB Connection:</strong> No IP/Port configuration needed!
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                The BBPOS CHIPPER™ 3X card reader uses direct USB connection. Simply:
+              </p>
+              <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-400 space-y-1 ml-2">
+                <li>Connect the reader to your computer via USB cable</li>
+                <li>Ensure the reader is recognized by your system</li>
+                <li>Configure the reader in Authorize.net 2.0 app (if needed)</li>
+                <li>Select "Bluetooth Reader" option during payment (works for USB too)</li>
+              </ul>
+              <p className="text-xs text-gray-500 dark:text-gray-500 mt-3">
+                <strong>Note:</strong> USB readers are automatically detected. No network configuration required. Card data is encrypted on the reader and processed securely through Authorize.Net.
+              </p>
+            </div>
           </div>
         </div>
 

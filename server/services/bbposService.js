@@ -2,6 +2,20 @@
  * BBPOS Card Reader Service
  * Handles payment processing through BBPOS Chipper 3X card reader (USB/Bluetooth)
  * 
+ * Device Specifications:
+ * - Model: BBPOS CHIPPER™ 3X
+ * - Connection: USB (via USB cable) or Bluetooth
+ * - Configuration Version: ANAU_G kernel_v2
+ * - Supported via: Authorize.Net Accept Mobile SDK / Accept.js
+ * - Gateway: Authorize.Net
+ * 
+ * USB Connection:
+ * - USB connection is direct device-to-computer (no IP/Port needed)
+ * - Reader must be connected via USB cable and recognized by system
+ * - USB drivers may be required (check BBPOS documentation)
+ * - Card data capture happens client-side via Accept Mobile SDK or Web Serial API
+ * - The encrypted opaqueData is then sent to backend for Authorize.Net processing
+ * 
  * The reader uses Authorize.Net's Accept Mobile SDK to capture card data
  * and returns encrypted opaqueData that is processed through Authorize.Net API
  */
@@ -16,12 +30,15 @@ const AUTHORIZE_NET_ENDPOINT = process.env.NODE_ENV === 'production'
   : 'https://apitest.authorize.net/xml/v1/request.api';  // Sandbox endpoint (development)
 
 /**
- * Process payment using opaqueData from BBPOS Bluetooth reader
+ * Process payment using opaqueData from BBPOS card reader (USB or Bluetooth)
+ * Works with BBPOS CHIPPER™ 3X connected via USB or Bluetooth
+ * 
  * @param {Object} paymentData - Payment information with opaqueData
  * @param {string} paymentData.amount - Payment amount
- * @param {string} paymentData.opaqueData.descriptor - Data descriptor from reader
+ * @param {Object} paymentData.opaqueData - Encrypted card data from reader
+ * @param {string} paymentData.opaqueData.descriptor - Data descriptor from reader (e.g., 'COMMON.ACCEPT.INAPP.PAYMENT')
  * @param {string} paymentData.opaqueData.value - Encrypted data value from reader
- * @param {string} paymentData.deviceSessionId - Device session ID (optional)
+ * @param {string} paymentData.deviceSessionId - Device session ID (optional, for tracking)
  * @param {string} paymentData.invoiceNumber - Invoice number (optional)
  * @param {string} paymentData.description - Transaction description (optional)
  * @returns {Promise<Object>} Payment result
@@ -44,13 +61,13 @@ export const processBluetoothPayment = async (paymentData) => {
     };
   }
 
-  // Validate opaqueData
-  if (!opaqueData || !opaqueData.descriptor || !opaqueData.value) {
-    return {
-      success: false,
-      error: 'Invalid opaqueData. Both descriptor and value are required from the Bluetooth reader.'
-    };
-  }
+    // Validate opaqueData
+    if (!opaqueData || !opaqueData.descriptor || !opaqueData.value) {
+      return {
+        success: false,
+        error: 'Invalid opaqueData. Both descriptor and value are required from the card reader (USB or Bluetooth).'
+      };
+    }
 
   // Build Authorize.Net request with opaqueData
   const requestBody = {
@@ -69,8 +86,8 @@ export const processBluetoothPayment = async (paymentData) => {
           }
         },
         order: {
-          invoiceNumber: invoiceNumber || `POS-BT-${Date.now()}`,
-          description: description || 'POS Sale (Bluetooth Reader)'
+          invoiceNumber: invoiceNumber || `POS-BBPOS-${Date.now()}`,
+          description: description || 'POS Sale (BBPOS CHIPPER 3X)'
         }
       }
     }
@@ -111,13 +128,13 @@ export const processBluetoothPayment = async (paymentData) => {
       };
     }
   } catch (error) {
-    console.error('BBPOS Bluetooth Payment Error:', error.message);
+    console.error('BBPOS Payment Error:', error.message);
     return {
       success: false,
       error: error.response?.data?.message || 
              error.response?.data?.messages?.[0]?.text || 
              error.message || 
-             'Bluetooth reader payment processing failed'
+             'BBPOS card reader payment processing failed'
     };
   }
 };

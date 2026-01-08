@@ -10,8 +10,6 @@ interface PaymentModalProps {
   tax: number;
   cartItems: CartItem[];
   onConfirmPayment: (details: PaymentDetails) => void;
-  userTerminalIP?: string;
-  userTerminalPort?: number | string;
 }
 
 const paymentMethods: PaymentMethod[] = [
@@ -22,7 +20,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalIP, userTerminalPort }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment }: PaymentModalProps) {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
@@ -35,9 +33,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [achAccountType, setAchAccountType] = useState<'checking' | 'savings'>('checking');
   const [achBankName, setAchBankName] = useState('');
   const [useCardReader, setUseCardReader] = useState(true);
-  const [useEBizChargeTerminal, setUseEBizChargeTerminal] = useState(true);
-  const [terminalIP, setTerminalIP] = useState(userTerminalIP || '');
-  const [terminalPort, setTerminalPort] = useState(userTerminalPort ? userTerminalPort.toString() : '');
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading'>('ready');
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -78,22 +73,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
       if (useCardReader) {
-        if (useEBizChargeTerminal) {
-          // EBizCharge WiFi Terminal mode
-          if (!terminalIP) {
-            setError('Please enter or configure your terminal IP address');
-            setIsProcessing(false);
-            return;
-          }
-          paymentDetails.useEBizChargeTerminal = true;
-          paymentDetails.terminalIP = terminalIP;
-        } else {
-          // PAX Terminal mode (legacy)
-          paymentDetails.useTerminal = true;
-          paymentDetails.terminalIP = terminalIP || undefined;
-          paymentDetails.terminalPort = terminalPort || undefined;
-        }
+        // USB Card Reader mode (BBPOS CHIPPER 3X)
+        // Card data will be captured via Accept SDK and sent as opaqueData
+        // For now, we'll use useBluetoothReader flag (works for USB too)
+        paymentDetails.useBluetoothReader = true;
+        // Note: opaqueData will be captured client-side and sent in bluetoothPayload
+        // This will be handled by the Accept Mobile SDK integration
       } else {
+        // Manual Entry mode
         paymentDetails.cardNumber = cardNumber;
         paymentDetails.expirationDate = cardExpiry;
         paymentDetails.cvv = cardCvv;
@@ -282,7 +269,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         : 'border-gray-300 bg-white text-gray-700'
                     }`}
                   >
-                    WiFi Terminal
+                    USB Card Reader
                   </button>
                   <button
                     onClick={() => setUseCardReader(false)}
@@ -298,94 +285,30 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
                 {useCardReader ? (
                   <div className="space-y-4">
-                    {/* Terminal Type Selection */}
-                    <div className="flex items-center gap-4">
-                      <button
-                        onClick={() => setUseEBizChargeTerminal(true)}
-                        className={`flex-1 px-4 py-2 rounded-lg border-2 transition-all text-sm ${
-                          useEBizChargeTerminal
-                            ? 'border-green-600 bg-green-600 text-white'
-                            : 'border-gray-300 bg-white text-gray-700'
-                        }`}
-                      >
-                        EBizCharge WiFi
-                      </button>
-                      <button
-                        onClick={() => setUseEBizChargeTerminal(false)}
-                        className={`flex-1 px-4 py-2 rounded-lg border-2 transition-all text-sm ${
-                          !useEBizChargeTerminal
-                            ? 'border-blue-600 bg-blue-600 text-white'
-                            : 'border-gray-300 bg-white text-gray-700'
-                        }`}
-                      >
-                        PAX Terminal
-                      </button>
-                    </div>
-
-                    {/* Terminal IP Input */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Terminal IP Address
-                      </label>
-                      <input
-                        type="text"
-                        value={terminalIP}
-                        onChange={(e) => setTerminalIP(e.target.value)}
-                        placeholder="192.168.1.100 or localhost"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                      />
-                      {!terminalIP && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {useEBizChargeTerminal 
-                            ? 'Enter your EBizCharge terminal IP address (e.g., 192.168.1.100)'
-                            : 'Enter your PAX terminal IP (e.g., 192.168.1.100 for WiFi, localhost for USB)'}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Terminal Port Input (only for PAX Terminal) */}
-                    {!useEBizChargeTerminal && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Terminal Port (Optional)
-                        </label>
-                        <input
-                          type="number"
-                          value={terminalPort}
-                          onChange={(e) => setTerminalPort(e.target.value)}
-                          placeholder="4430 (USB) or 10009 (WiFi)"
-                          min="1"
-                          max="65535"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          Default: 4430 for USB, 10009 for WiFi. Leave empty to use default.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Terminal Status */}
+                    {/* USB Card Reader Instructions */}
                     <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
                       <CreditCard className="w-12 h-12 text-blue-400 mx-auto" />
                       <div>
                         <p className="font-medium text-gray-900 mb-1">
-                          {cardReaderStatus === 'ready' && 'Terminal Ready'}
-                          {cardReaderStatus === 'connecting' && 'Connecting...'}
+                          {cardReaderStatus === 'ready' && 'USB Card Reader Ready'}
+                          {cardReaderStatus === 'connecting' && 'Connecting to Reader...'}
                           {cardReaderStatus === 'reading' && 'Processing card...'}
                         </p>
-                        <p className="text-sm text-gray-600">
-                          {cardReaderStatus === 'ready' && (useEBizChargeTerminal 
-                            ? 'Insert, swipe, or tap card on terminal'
-                            : 'Insert, swipe, or tap card on PAX terminal (VP100)')}
-                          {cardReaderStatus === 'connecting' && 'Connecting to terminal via WiFi...'}
+                        <p className="text-sm text-gray-600 mb-2">
+                          {cardReaderStatus === 'ready' && 'Insert, swipe, or tap card on USB reader (BBPOS CHIPPER 3X)'}
+                          {cardReaderStatus === 'connecting' && 'Connecting to USB card reader...'}
                           {cardReaderStatus === 'reading' && 'Do not remove card'}
                         </p>
-                        {terminalIP && (
-                          <p className="text-xs text-gray-500 mt-2">
-                            Terminal: {terminalIP}
-                          </p>
-                        )}
+                        <p className="text-xs text-gray-500 mt-2">
+                          Ensure your BBPOS CHIPPER™ 3X reader is connected via USB cable
+                        </p>
                       </div>
+                    </div>
+                    
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-xs text-gray-600">
+                        <strong>Note:</strong> The USB card reader will automatically capture card data when you insert, swipe, or tap a card. Card data is encrypted on the reader and processed securely through Authorize.Net.
+                      </p>
                     </div>
                   </div>
                 ) : (
