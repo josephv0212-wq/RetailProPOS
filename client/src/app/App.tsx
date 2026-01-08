@@ -565,7 +565,8 @@ function AppContent() {
     }
 
     try {
-      const response = await salesAPI.create({
+      // Build request body - useBluetoothReader and bluetoothPayload need to be at root level
+      const requestBody: any = {
         items: cartItems.map(item => ({
           itemId: typeof item.product.id === 'number' ? item.product.id : parseInt(item.product.id),
           quantity: item.quantity,
@@ -574,7 +575,15 @@ function AppContent() {
         paymentType: paymentType as any,
         paymentDetails: apiPaymentDetails,
         customerTaxPreference,
-      });
+      };
+
+      // Add useBluetoothReader and bluetoothPayload at root level if using USB card reader
+      if (paymentDetails.useBluetoothReader) {
+        requestBody.useBluetoothReader = true;
+        requestBody.bluetoothPayload = paymentDetails.bluetoothPayload;
+      }
+
+      const response = await salesAPI.create(requestBody);
 
       if (response.success && response.data?.sale) {
         // Transform API sale to match UI format

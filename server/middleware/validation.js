@@ -32,20 +32,28 @@ export const validateSale = (req, res, next) => {
   // Validate payment details based on payment type
   if (paymentType === 'credit_card' || paymentType === 'debit_card') {
     const useTerminal = req.body.useTerminal;
+    const useBluetoothReader = req.body.useBluetoothReader;
+    const useEBizChargeTerminal = req.body.useEBizChargeTerminal;
     
-    if (useTerminal) {
-      // PAX Terminal mode - validate terminal IP instead of card details
+    if (useBluetoothReader) {
+      // USB Card Reader mode (BBPOS) - validate opaqueData/bluetoothPayload
+      if (!req.body.bluetoothPayload || !req.body.bluetoothPayload.descriptor || !req.body.bluetoothPayload.value) {
+        errors.push('USB card reader payment data is required. Please scan the card with the USB reader.');
+      }
+    } else if (useTerminal || useEBizChargeTerminal) {
+      // Network Terminal mode - validate terminal IP instead of card details
       if (!req.body.terminalIP) {
         errors.push('Terminal IP address is required for terminal payment');
       } else {
-        // Basic IP validation
+        // Basic IP validation (allow localhost for USB terminals)
+        const ipTrimmed = req.body.terminalIP.trim();
         const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-        if (!ipRegex.test(req.body.terminalIP)) {
+        if (ipTrimmed !== 'localhost' && ipTrimmed !== '127.0.0.1' && !ipRegex.test(ipTrimmed)) {
           errors.push('Invalid terminal IP address format');
         }
       }
     } else {
-      // Card-not-present mode - validate card details
+      // Manual Entry mode - validate card details
       if (!paymentDetails || !paymentDetails.cardNumber) {
         errors.push('Payment details required for card transactions');
       } else {

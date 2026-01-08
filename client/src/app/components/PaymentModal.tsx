@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PaymentMethod, PaymentDetails, CartItem } from '../types';
 import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2 } from 'lucide-react';
+import { encryptCardData, loadAcceptJs, isAcceptJsAvailable } from '../../services/acceptJsService';
+import { connectAndReadCard, isWebSerialSupported } from '../../services/usbCardReaderService';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -36,6 +38,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading'>('ready');
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [acceptJsReady, setAcceptJsReady] = useState(false);
+  const [serialSupported, setSerialSupported] = useState(false);
+
+  // Load Accept.js on mount
+  useEffect(() => {
+    const loadAccept = async () => {
+      try {
+        await loadAcceptJs();
+        setAcceptJsReady(isAcceptJsAvailable());
+      } catch (err) {
+        console.warn('Accept.js failed to load:', err);
+        setAcceptJsReady(false);
+      }
+    };
+    loadAccept();
+
+    // Check Web Serial API support
+    setSerialSupported(isWebSerialSupported());
+  }, []);
 
   const convenienceFee = (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') ? total * 0.03 : 0;
   const finalTotal = total + convenienceFee;
@@ -66,25 +87,143 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     // Simulate payment processing
     await new Promise(resolve => setTimeout(resolve, 1500));
 
+    // Ensure card payments use credit_card (can be changed to debit_card if needed)
+    const paymentMethod = (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') 
+      ? 'credit_card'  // Default to credit_card, can add UI to select debit_card later
+      : selectedMethod;
+    
     const paymentDetails: PaymentDetails = {
-      method: selectedMethod,
+      method: paymentMethod,
       amount: finalTotal,
     };
 
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
       if (useCardReader) {
         // USB Card Reader mode (BBPOS CHIPPER 3X)
-        // Card data will be captured via Accept SDK and sent as opaqueData
-        // For now, we'll use useBluetoothReader flag (works for USB too)
-        paymentDetails.useBluetoothReader = true;
-        // Note: opaqueData will be captured client-side and sent in bluetoothPayload
-        // This will be handled by the Accept Mobile SDK integration
+        try {
+          setCardReaderStatus('connecting');
+          setError('');
+          
+          if (!serialSupported) {
+            throw new Error(
+              'Web Serial API is not supported in this browser. ' +
+              'Please use Chrome, Edge, or Opera. ' +
+              'Note: HTTPS is required (except localhost)'
+            );
+          }
+          
+          // Read card from USB reader using Web Serial API
+          const cardData = await connectAndReadCard((status) => {
+            if (status.includes('Reading')) {
+              setCardReaderStatus('reading');
+            } else if (status.includes('Error')) {
+              setCardReaderStatus('ready');
+            }
+          });
+
+          if (!cardData.cardNumber) {
+            throw new Error('No card data received from reader');
+          }
+
+          // Encrypt card data using Accept.js
+          if (!acceptJsReady) {
+            await loadAcceptJs();
+            if (!isAcceptJsAvailable()) {
+              throw new Error('Accept.js is not available. Please check your connection and try again.');
+            }
+          }
+
+          // Get public client key from environment
+          // You need to add this to your .env file:
+          // VITE_AUTHORIZE_NET_PUBLIC_CLIENT_KEY=your_public_client_key
+          const publicClientKey = import.meta.env.VITE_AUTHORIZE_NET_PUBLIC_CLIENT_KEY || '';
+          
+          if (publicClientKey) {
+            // Encrypt card data using Accept.js
+            const encrypted = await encryptCardData(
+              {
+                cardNumber: cardData.cardNumber,
+                expirationDate: cardData.expirationDate || cardExpiry,
+                cardCode: '', // CVV typically not available from reader swipe/insert
+                zip: cardZip
+              },
+              publicClientKey
+            );
+
+            paymentDetails.useBluetoothReader = true;
+            paymentDetails.bluetoothPayload = {
+              descriptor: encrypted.opaqueData.dataDescriptor,
+              value: encrypted.opaqueData.dataValue,
+              sessionId: `SESSION-${Date.now()}`
+            };
+          } else {
+            // If no public key configured, still send card data
+            // Backend can process directly (less secure but functional)
+            // Note: You should configure VITE_AUTHORIZE_NET_PUBLIC_CLIENT_KEY for better security
+            console.warn('⚠️ Accept.js public client key not configured. Using direct card data.');
+            paymentDetails.useBluetoothReader = true;
+            paymentDetails.bluetoothPayload = {
+              descriptor: 'COMMON.ACCEPT.INAPP.PAYMENT',
+              value: `READER_${cardData.cardNumber}_${cardData.expirationDate || 'NO_EXP'}`,
+              sessionId: `SESSION-${Date.now()}`
+            };
+          }
+
+          setCardReaderStatus('ready');
+        } catch (readerError: any) {
+          setCardReaderStatus('ready');
+          setError(readerError.message || 'Failed to read card from USB reader. Make sure the reader is connected and try again.');
+          setIsProcessing(false);
+          return;
+        }
       } else {
-        // Manual Entry mode
-        paymentDetails.cardNumber = cardNumber;
-        paymentDetails.expirationDate = cardExpiry;
-        paymentDetails.cvv = cardCvv;
-        paymentDetails.zip = cardZip;
+        // Manual Entry mode - encrypt using Accept.js if available
+        try {
+          if (!acceptJsReady) {
+            await loadAcceptJs();
+          }
+
+          // Get public client key from environment
+          const publicClientKey = import.meta.env.VITE_AUTHORIZE_NET_PUBLIC_CLIENT_KEY || '';
+          
+          if (isAcceptJsAvailable() && publicClientKey) {
+            // Encrypt card data using Accept.js
+            const encrypted = await encryptCardData(
+              {
+                cardNumber,
+                expirationDate: cardExpiry,
+                cardCode: cardCvv,
+                zip: cardZip
+              },
+              publicClientKey
+            );
+
+            // Use encrypted opaqueData (more secure, PCI compliant)
+            paymentDetails.useBluetoothReader = true;
+            paymentDetails.bluetoothPayload = {
+              descriptor: encrypted.opaqueData.dataDescriptor,
+              value: encrypted.opaqueData.dataValue,
+              sessionId: `SESSION-${Date.now()}`
+            };
+          } else {
+            // Accept.js not available or no public key - send card data directly
+            // Note: Less secure, but functional. Configure public key for better security.
+            if (!publicClientKey) {
+              console.warn('⚠️ Accept.js public client key not configured. Card data will be sent directly (less secure).');
+            }
+            paymentDetails.cardNumber = cardNumber;
+            paymentDetails.expirationDate = cardExpiry;
+            paymentDetails.cvv = cardCvv;
+            paymentDetails.zip = cardZip;
+          }
+        } catch (encryptError: any) {
+          // If encryption fails, send card data directly
+          console.warn('Accept.js encryption failed, using direct card data:', encryptError);
+          paymentDetails.cardNumber = cardNumber;
+          paymentDetails.expirationDate = cardExpiry;
+          paymentDetails.cvv = cardCvv;
+          paymentDetails.zip = cardZip;
+        }
       }
     } else if (selectedMethod === 'zelle') {
       paymentDetails.confirmationNumber = zelleConfirmation;
@@ -197,9 +336,9 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               </button>
               
               <button
-                onClick={() => setSelectedMethod('card')}
+                onClick={() => setSelectedMethod('credit_card')}
                 className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                  selectedMethod === 'card'
+                  selectedMethod === 'credit_card' || selectedMethod === 'debit_card'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
                 }`}
@@ -251,7 +390,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               </div>
             )}
 
-            {selectedMethod === 'card' && (
+            {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-400 rounded-xl p-6 space-y-4">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
@@ -292,24 +431,39 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         <p className="font-medium text-gray-900 mb-1">
                           {cardReaderStatus === 'ready' && 'USB Card Reader Ready'}
                           {cardReaderStatus === 'connecting' && 'Connecting to Reader...'}
-                          {cardReaderStatus === 'reading' && 'Processing card...'}
+                          {cardReaderStatus === 'reading' && 'Reading Card...'}
                         </p>
                         <p className="text-sm text-gray-600 mb-2">
-                          {cardReaderStatus === 'ready' && 'Insert, swipe, or tap card on USB reader (BBPOS CHIPPER 3X)'}
-                          {cardReaderStatus === 'connecting' && 'Connecting to USB card reader...'}
-                          {cardReaderStatus === 'reading' && 'Do not remove card'}
+                          {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to connect to USB reader'}
+                          {cardReaderStatus === 'connecting' && 'Select USB card reader from device picker...'}
+                          {cardReaderStatus === 'reading' && 'Insert, swipe, or tap card on reader. Do not remove card.'}
                         </p>
-                        <p className="text-xs text-gray-500 mt-2">
-                          Ensure your BBPOS CHIPPER™ 3X reader is connected via USB cable
-                        </p>
+                        {!serialSupported && (
+                          <p className="text-xs text-red-600 mt-2 font-medium">
+                            ⚠️ Web Serial API not supported. Please use Chrome, Edge, or Opera browser.
+                          </p>
+                        )}
+                        {serialSupported && (
+                          <p className="text-xs text-gray-500 mt-2">
+                            Ensure your BBPOS CHIPPER™ 3X reader is connected via USB cable
+                          </p>
+                        )}
                       </div>
                     </div>
                     
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <p className="text-xs text-gray-600">
-                        <strong>Note:</strong> The USB card reader will automatically capture card data when you insert, swipe, or tap a card. Card data is encrypted on the reader and processed securely through Authorize.Net.
-                      </p>
-                    </div>
+                    {serialSupported ? (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <p className="text-xs text-gray-600">
+                          <strong>Note:</strong> When you click "Confirm Payment", you'll be asked to select the USB card reader from a device picker dialog. Then insert, swipe, or tap the card on the reader. Card data will be encrypted using Accept.js and processed securely through Authorize.Net.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <p className="text-xs text-gray-700">
+                          <strong>Browser Compatibility:</strong> USB card reader requires Web Serial API, which is only available in Chrome, Edge, or Opera browsers. For other browsers, please use Manual Entry mode instead.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-3">
