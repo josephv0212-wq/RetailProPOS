@@ -80,8 +80,9 @@ export interface PaymentDetails {
   // For card payments
   useTerminal?: boolean;
   useEBizChargeTerminal?: boolean;
-  terminalIP?: string;
-  terminalPort?: number | string;
+  terminalNumber?: string; // VP100 serial number for Valor Connect (cloud-to-cloud)
+  terminalIP?: string; // Legacy support for direct terminal connection
+  terminalPort?: number | string; // Legacy support for direct terminal connection
   useBluetoothReader?: boolean;
   bluetoothPayload?: {
     descriptor: string;

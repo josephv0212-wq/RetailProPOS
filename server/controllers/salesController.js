@@ -193,23 +193,28 @@ export const createSale = async (req, res) => {
         // Flow: App -> Authorize.Net -> VP100 Terminal (via Valor Connect) -> Authorize.Net -> App (polling)
         const { initiateTerminalPayment } = await import('../services/authorizeNetTerminalService.js');
         
-        // Get terminalId from user settings (VP100 serial number registered in Valor Portal/Authorize.Net)
-        const terminalId = req.user.terminalId;
+        // Get terminalNumber from user settings (VP100 serial number registered in Valor Portal/Authorize.Net)
+        const terminalNumber = req.user.terminalNumber;
         
-        if (!terminalId) {
-          return sendError(res, 'Terminal ID is required for PAX WiFi terminal payments. Please configure your VP100 serial number in Settings. The terminal must be registered in Valor Portal/Authorize.Net.', 400);
+        if (!terminalNumber) {
+          return sendError(res, 'Terminal number is required for PAX WiFi terminal payments. Please configure your VP100 serial number in Settings. The terminal must be registered in Valor Portal/Authorize.Net.', 400);
         }
         
-        // Initiate payment request to Authorize.Net with terminalId
+        // Initiate payment request to Authorize.Net with terminalNumber
         // Authorize.Net routes to VP100 via Valor Connect (WebSocket/TCP)
         paymentResult = await initiateTerminalPayment({
           amount: total,
           invoiceNumber: `POS-${Date.now()}`,
           description: `POS Sale - ${locationName}`
-        }, terminalId); // terminalId is the VP100 serial number
+        }, terminalNumber); // terminalNumber is the VP100 serial number
 
         if (!paymentResult.success) {
-          return sendError(res, 'Failed to initiate terminal payment', 400, paymentResult.error);
+          console.error('❌ Terminal payment initiation failed:', {
+            error: paymentResult.error,
+            errorCode: paymentResult.errorCode,
+            terminalNumber: terminalNumber
+          });
+          return sendError(res, paymentResult.error || 'Failed to initiate terminal payment', 400, paymentResult);
         }
 
         // If payment is pending (waiting for terminal), return pending status

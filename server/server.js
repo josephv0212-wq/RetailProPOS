@@ -292,7 +292,7 @@ const ensureItemImageColumn = async () => {
   }
 };
 
-// Ensure terminalIP, terminalPort, and terminalId columns exist on Users table (for SQLite / auto-sync disabled)
+// Ensure terminalIP, terminalPort, and terminalNumber columns exist on Users table (for SQLite / auto-sync disabled)
 const ensureTerminalColumns = async () => {
   try {
     if (DATABASE_SETTING === 'local') {
@@ -318,15 +318,15 @@ const ensureTerminalColumns = async () => {
         console.log('ℹ️  terminalPort column already exists on Users table');
       }
       
-      // SQLite syntax - Add terminalId column
+      // SQLite syntax - Add terminalNumber column
       try {
-        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalId` VARCHAR(255) NULL');
-        console.log('✅ Added terminalId column to Users table');
+        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalNumber` VARCHAR(255) NULL');
+        console.log('✅ Added terminalNumber column to Users table');
       } catch (err) {
         if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
           throw err;
         }
-        console.log('ℹ️  terminalId column already exists on Users table');
+        console.log('ℹ️  terminalNumber column already exists on Users table');
       }
     } else {
       // PostgreSQL syntax - Add terminalIP column
@@ -345,12 +345,12 @@ const ensureTerminalColumns = async () => {
         console.warn('⚠️  Could not ensure terminalPort column:', err.message);
       }
       
-      // PostgreSQL syntax - Add terminalId column
+      // PostgreSQL syntax - Add terminalNumber column
       try {
-        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalId" VARCHAR(255) NULL');
-        console.log('✅ Added terminalId column to Users table');
+        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalNumber" VARCHAR(255) NULL');
+        console.log('✅ Added terminalNumber column to Users table');
       } catch (err) {
-        console.warn('⚠️  Could not ensure terminalId column:', err.message);
+        console.warn('⚠️  Could not ensure terminalNumber column:', err.message);
       }
     }
   } catch (err) {

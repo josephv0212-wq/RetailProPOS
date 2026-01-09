@@ -4,7 +4,7 @@ import { PaymentMethod, PaymentDetails, CartItem } from '../types';
 import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2, Wifi } from 'lucide-react';
 import { encryptCardData, loadAcceptJs, isAcceptJsAvailable } from '../../services/acceptJsService';
 import { connectAndReadCard, isWebSerialSupported } from '../../services/usbCardReaderService';
-import { TerminalDiscoveryDialog } from './TerminalDiscoveryDialog';
+// TerminalDiscoveryDialog removed - not needed for Valor Connect (only Terminal number required)
 import { pollPaymentStatus } from '../../services/paymentPollingService';
 import { useToast } from '../contexts/ToastContext';
 
@@ -16,6 +16,7 @@ interface PaymentModalProps {
   tax: number;
   cartItems: CartItem[];
   onConfirmPayment: (details: PaymentDetails) => Promise<any> | void;
+  userTerminalNumber?: string | null;
   userTerminalIP?: string | null;
   userTerminalPort?: number | string | null;
 }
@@ -28,7 +29,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalIP, userTerminalPort }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalNumber, userTerminalIP, userTerminalPort }: PaymentModalProps) {
   const { showToast } = useToast();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
@@ -47,7 +48,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [isProcessing, setIsProcessing] = useState(false);
   const [acceptJsReady, setAcceptJsReady] = useState(false);
   const [serialSupported, setSerialSupported] = useState(false);
-  const [showTerminalDiscovery, setShowTerminalDiscovery] = useState(false);
+  // Terminal discovery removed - not needed for Valor Connect
+  const [selectedTerminalNumber, setSelectedTerminalNumber] = useState<string | null>(userTerminalNumber || null);
   const [selectedTerminalIP, setSelectedTerminalIP] = useState<string | null>(userTerminalIP || null);
   const [selectedTerminalPort, setSelectedTerminalPort] = useState<number | string | null>(userTerminalPort || null);
 
@@ -70,20 +72,18 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
   // Update selected terminal when user settings change
   useEffect(() => {
+    if (userTerminalNumber) {
+      setSelectedTerminalNumber(userTerminalNumber);
+    }
     if (userTerminalIP) {
       setSelectedTerminalIP(userTerminalIP);
     }
     if (userTerminalPort) {
       setSelectedTerminalPort(userTerminalPort);
     }
-  }, [userTerminalIP, userTerminalPort]);
+  }, [userTerminalNumber, userTerminalIP, userTerminalPort]);
 
-  // Handle terminal selection from discovery dialog
-  const handleTerminalSelected = (terminal: { ip: string; port: number }) => {
-    setSelectedTerminalIP(terminal.ip);
-    setSelectedTerminalPort(terminal.port);
-    setShowTerminalDiscovery(false);
-  };
+  // Terminal discovery removed - Valor Connect only needs Terminal number (configured in Settings)
 
   const convenienceFee = (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') ? total * 0.03 : 0;
   const finalTotal = total + convenienceFee;
@@ -97,10 +97,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     // Validation
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
       if (cardPaymentMethod === 'pax_terminal') {
-        // PAX Terminal validation
-        const terminalIP = userTerminalIP || '';
-        if (!terminalIP || terminalIP.trim() === '') {
-          setError('PAX Terminal IP address is required. Please configure it in Settings.');
+        // PAX Terminal validation - Terminal number is required for Valor Connect
+        const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
+        if (!terminalNumber || terminalNumber.trim() === '') {
+          setError('PAX Terminal number is required. Please configure your VP100 serial number in Settings.');
           setIsProcessing(false);
           return;
         }
@@ -134,21 +134,20 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
       if (cardPaymentMethod === 'pax_terminal') {
-        // PAX WiFi Terminal mode
-        const terminalIP = selectedTerminalIP || userTerminalIP || '';
-        const terminalPort = selectedTerminalPort || userTerminalPort || 10009;
+        // PAX WiFi Terminal mode (Valor Connect - cloud-to-cloud)
+        const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
         
-        if (!terminalIP || terminalIP.trim() === '') {
-          setError('PAX Terminal IP address is required. Please select a terminal or configure it in Settings.');
+        if (!terminalNumber || terminalNumber.trim() === '') {
+          setError('PAX Terminal number is required. Please configure your VP100 serial number in Settings.');
           setIsProcessing(false);
           return;
         }
 
         paymentDetails.useTerminal = true;
-        paymentDetails.terminalIP = terminalIP.trim();
-        paymentDetails.terminalPort = typeof terminalPort === 'string' ? parseInt(terminalPort, 10) : terminalPort;
+        paymentDetails.terminalNumber = terminalNumber.trim();
         
-        // PAX terminal handles card reading on the device itself
+        // PAX terminal handles card reading on the device itself via Valor Connect
+        // Payment request is sent to Authorize.Net, which routes to VP100 terminal
         // No card data needed - terminal will prompt customer
         setCardReaderStatus('processing');
       } else if (cardPaymentMethod === 'usb_reader') {
@@ -583,23 +582,13 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           {cardReaderStatus === 'processing' && 'Customer will be prompted on the PAX terminal. Please wait...'}
                         </p>
                         <div className="mt-3 text-left bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs text-gray-600 mb-1">
-                            <strong>Terminal IP:</strong> {selectedTerminalIP || userTerminalIP || 'Not selected'}
-                          </p>
                           <p className="text-xs text-gray-600">
-                            <strong>Port:</strong> {selectedTerminalPort || userTerminalPort || '10009 (default)'}
+                            <strong>Terminal Number:</strong> {selectedTerminalNumber || userTerminalNumber || 'Not configured'}
                           </p>
                         </div>
-                        <button
-                          onClick={() => setShowTerminalDiscovery(true)}
-                          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2 mx-auto"
-                        >
-                          <Wifi className="w-4 h-4" />
-                          {selectedTerminalIP || userTerminalIP ? 'Change Terminal' : 'Select Terminal'}
-                        </button>
-                        {!selectedTerminalIP && !userTerminalIP && (
+                        {!selectedTerminalNumber && !userTerminalNumber && (
                           <p className="text-xs text-red-600 mt-2 font-medium">
-                            ⚠️ Please select a terminal or configure Terminal IP in Settings
+                            ⚠️ Please configure Terminal number (VP100 serial number) in Settings
                           </p>
                         )}
                       </div>
@@ -607,7 +596,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <p className="text-xs text-gray-600">
-                        <strong>How it works:</strong> When you click "Confirm Payment", the system will send the payment amount to your PAX VP100 terminal via WiFi. The customer will be prompted on the terminal to insert, swipe, or tap their card. The terminal processes the payment and returns the result.
+                        <strong>How it works (Valor Connect):</strong> When you click "Confirm Payment", the system sends the payment request to Authorize.Net with your Terminal number. Authorize.Net routes the request to your VP100 terminal via Valor Connect (cloud-to-cloud). The customer will be prompted on the terminal to insert, swipe, or tap their card. The terminal processes the payment and returns the result.
                       </p>
                     </div>
                   </div>
@@ -869,14 +858,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         </div>
       </div>
 
-      {/* Terminal Discovery Dialog */}
-      <TerminalDiscoveryDialog
-        isOpen={showTerminalDiscovery}
-        onClose={() => setShowTerminalDiscovery(false)}
-        onSelectTerminal={handleTerminalSelected}
-        currentTerminalIP={userTerminalIP}
-        currentTerminalPort={userTerminalPort}
-      />
+      {/* Terminal Discovery Dialog - Removed for Valor Connect (only Terminal number needed) */}
     </div>
   );
 }

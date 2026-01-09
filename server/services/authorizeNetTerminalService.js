@@ -3,7 +3,7 @@
  * Handles cloud-to-cloud payment processing through Authorize.Net with VP100 terminal integration
  * 
  * Flow:
- * 1. App sends payment request to Authorize.Net with terminalId
+ * 1. App sends payment request to Authorize.Net with terminalNumber
  * 2. Authorize.Net routes to VP100 via Valor Connect (WebSocket/TCP)
  * 3. VP100 displays payment prompt to customer
  * 4. Customer completes payment on VP100 device
@@ -35,32 +35,37 @@ if (!global.AUTHORIZE_NET_ENDPOINT_LOGGED) {
  * Initiates a terminal payment request with Authorize.Net (Valor Connect).
  * The VP100 terminal must be registered in Valor Portal/Authorize.Net merchant interface.
  * @param {Object} paymentData - Payment information
- * @param {string} terminalId - VP100 serial number or terminal ID (REQUIRED for Valor Connect)
+ * @param {string} terminalNumber - VP100 serial number or terminal number (REQUIRED for Valor Connect)
  * @returns {Promise<Object>} Payment result with pending status
  */
-export const initiateTerminalPayment = async (paymentData, terminalId) => {
+export const initiateTerminalPayment = async (paymentData, terminalNumber) => {
   const { amount, invoiceNumber, description } = paymentData;
 
-  // Validate terminal ID - REQUIRED for Valor Connect
-  if (!terminalId || terminalId.trim() === '') {
+  // Validate terminal number - REQUIRED for Valor Connect
+  if (!terminalNumber || terminalNumber.trim() === '') {
     return {
       success: false,
-      error: 'Terminal ID is required. Please configure your VP100 serial number in Settings. The terminal must be registered in Valor Portal/Authorize.Net.'
+      error: 'Terminal number is required. Please configure your VP100 serial number in Settings. The terminal must be registered in Valor Portal/Authorize.Net.'
     };
   }
 
+  // Note: Authorize.Net API structure for terminal payments
+  // The terminalNumber may need to be in a different location or format
+  // Based on Valor Connect documentation, we use terminalNumber in transactionRequest
   const requestBody = {
     createTransactionRequest: {
       merchantAuthentication: {
         name: process.env.AUTHORIZE_NET_API_LOGIN_ID,
         transactionKey: process.env.AUTHORIZE_NET_TRANSACTION_KEY
       },
+      refId: `TERMINAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       transactionRequest: {
         transactionType: 'authCaptureTransaction',
         amount: parseFloat(amount).toFixed(2),
-        // Terminal ID for Valor Connect - routes payment to VP100 device
+        // Terminal number for Valor Connect - routes payment to VP100 device
         // This is the VP100 serial number registered in Valor Portal/Authorize.Net
-        terminalId: terminalId.trim(),
+        // Note: If this field is not recognized, we may need to use a different API structure
+        terminalNumber: terminalNumber.trim(),
         order: {
           invoiceNumber: invoiceNumber || `POS-${Date.now()}`,
           description: description || 'POS Sale - Terminal Payment'
@@ -82,11 +87,19 @@ export const initiateTerminalPayment = async (paymentData, terminalId) => {
   };
 
   try {
+    console.log('📤 Sending terminal payment request to Authorize.Net:', {
+      endpoint: AUTHORIZE_NET_ENDPOINT,
+      terminalNumber: terminalNumber.trim(),
+      amount: parseFloat(amount).toFixed(2)
+    });
+
     const response = await axios.post(AUTHORIZE_NET_ENDPOINT, requestBody, {
       headers: {
         'Content-Type': 'application/json'
       }
     });
+
+    console.log('📥 Authorize.Net response:', JSON.stringify(response.data, null, 2));
 
     const result = response.data.transactionResponse;
 
@@ -115,22 +128,74 @@ export const initiateTerminalPayment = async (paymentData, terminalId) => {
         message: 'Payment request sent to terminal. Please complete payment on VP100 device.',
         status: 'pending'
       };
-    } else {
-      const errorMessage = result?.errors?.[0]?.errorText || result?.messages?.[0]?.description || 'Transaction failed';
+    } else if (result && result.responseCode === '2') {
+      // Transaction declined
+      const errorMessage = result?.errors?.[0]?.errorText || 
+                          result?.messages?.message?.[0]?.text || 
+                          result?.messages?.[0]?.description || 
+                          'Transaction declined';
+      const errorCode = result?.errors?.[0]?.errorCode || result?.messages?.message?.[0]?.code;
+      
+      console.error('❌ Authorize.Net transaction declined:', {
+        responseCode: result?.responseCode,
+        errorCode: errorCode,
+        errorMessage: errorMessage
+      });
+
       return {
         success: false,
         error: errorMessage,
-        errorCode: result?.errors?.[0]?.errorCode
+        errorCode: errorCode
+      };
+    } else {
+      // Handle error response or invalid structure
+      // Check if there's a messages array at the root level (API-level errors)
+      const rootMessages = response.data?.messages;
+      const rootErrors = response.data?.messages?.message;
+      
+      const errorMessage = result?.errors?.[0]?.errorText || 
+                          (Array.isArray(rootErrors) ? rootErrors[0]?.text : rootErrors?.text) ||
+                          rootMessages?.message?.text ||
+                          result?.messages?.message?.[0]?.text || 
+                          result?.messages?.[0]?.description || 
+                          'Transaction failed';
+      const errorCode = result?.errors?.[0]?.errorCode || 
+                       (Array.isArray(rootErrors) ? rootErrors[0]?.code : rootErrors?.code) ||
+                       rootMessages?.message?.code ||
+                       result?.messages?.message?.[0]?.code;
+      
+      console.error('❌ Authorize.Net transaction error:', {
+        responseCode: result?.responseCode,
+        errorCode: errorCode,
+        errorMessage: errorMessage,
+        fullResponse: response.data,
+        transactionResponse: result
+      });
+
+      return {
+        success: false,
+        error: errorMessage,
+        errorCode: errorCode
       };
     }
   } catch (error) {
-    console.error('Authorize.Net Terminal Payment Error:', error.message);
+    console.error('❌ Authorize.Net Terminal Payment Error:', error.message);
     if (error.response?.data) {
-      console.error('Error response:', JSON.stringify(error.response.data, null, 2));
+      console.error('Error response data:', JSON.stringify(error.response.data, null, 2));
     }
+    if (error.response?.status) {
+      console.error('Error status:', error.response.status);
+    }
+    if (error.request) {
+      console.error('Request that failed:', JSON.stringify(requestBody, null, 2));
+    }
+    
     return {
       success: false,
-      error: error.response?.data?.message || error.message
+      error: error.response?.data?.message || 
+             error.response?.data?.messages?.message?.[0]?.text ||
+             error.message ||
+             'Failed to connect to Authorize.Net'
     };
   }
 };

@@ -144,6 +144,17 @@ export const authAPI = {
     return apiRequest<{ user: any }>('/auth/me');
   },
 
+  updateTerminalSettings: async (terminalNumber?: string | null, terminalIP?: string | null, terminalPort?: number | string | null) => {
+    return apiRequest<{ user: any }>('/auth/me/terminal', {
+      method: 'PATCH',
+      body: JSON.stringify({ 
+        terminalNumber: terminalNumber?.trim() || null,
+        terminalIP: terminalIP?.trim() || null,
+        terminalPort: terminalPort?.toString().trim() || null
+      }),
+    }, true);
+  },
+
   getPendingUsers: async () => {
     return apiRequest<{ users: any[] }>('/auth/users/pending');
   },

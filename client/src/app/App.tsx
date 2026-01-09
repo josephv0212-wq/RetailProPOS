@@ -542,9 +542,9 @@ function AppContent() {
         apiPaymentDetails.useEBizChargeTerminal = true;
         apiPaymentDetails.terminalIP = paymentDetails.terminalIP;
       } else if (paymentDetails.useTerminal) {
+        // PAX Terminal (Valor Connect) - uses terminalNumber, not terminalIP/terminalPort
         apiPaymentDetails.useTerminal = true;
-        apiPaymentDetails.terminalIP = paymentDetails.terminalIP;
-        apiPaymentDetails.terminalPort = paymentDetails.terminalPort;
+        apiPaymentDetails.terminalNumber = paymentDetails.terminalNumber;
       } else if (paymentDetails.useBluetoothReader) {
         apiPaymentDetails.useBluetoothReader = true;
         apiPaymentDetails.bluetoothPayload = paymentDetails.bluetoothPayload;
@@ -583,11 +583,10 @@ function AppContent() {
         requestBody.bluetoothPayload = paymentDetails.bluetoothPayload;
       }
 
-      // Add useTerminal at root level if using PAX terminal
+      // Add useTerminal at root level if using PAX terminal (Valor Connect)
       if (paymentDetails.useTerminal) {
         requestBody.useTerminal = true;
-        requestBody.terminalIP = paymentDetails.terminalIP;
-        requestBody.terminalPort = paymentDetails.terminalPort;
+        requestBody.terminalNumber = paymentDetails.terminalNumber;
       }
 
       const response = await salesAPI.create(requestBody);
@@ -858,6 +857,7 @@ function AppContent() {
         tax={tax}
         cartItems={cartItems}
         onConfirmPayment={handleConfirmPayment}
+        userTerminalNumber={user?.terminalNumber}
         userTerminalIP={user?.terminalIP}
         userTerminalPort={user?.terminalPort}
       />

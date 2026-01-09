@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Printer, Loader2, CreditCard, CheckCircle2, XCircle } from 'lucide-react';
 import { useAlert } from '../contexts/AlertContext';
-import { printerAPI } from '../../services/api';
+import { printerAPI, authAPI } from '../../services/api';
 import { DatabaseSettings } from './DatabaseSettings';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -139,87 +139,53 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
           </h2>
 
           {/* Authorize.Net Configuration */}
-          <div className="mb-6">
-            <h3 className="font-bold text-gray-900 dark:text-white mb-2">
-              Authorize.Net Configuration
+          <div className="mb-8 pb-8 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+              Authorize.Net
             </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Payment gateway is configured on the backend. Card and mobile payments will be processed through Authorize.Net with a 3% processing fee.
+            <p className="text-gray-600 dark:text-gray-400 mb-3">
+              All card payments are processed through Authorize.Net. Configuration is handled on the backend.
             </p>
-            <div className="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg p-4">
-              <p className="font-bold text-gray-900 dark:text-white mb-2">
-                Payment Processing Fees:
+            <div className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
+              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                Processing Fee: 3% for credit/debit cards
               </p>
-              <ul className="list-disc list-inside text-gray-700 dark:text-gray-300">
-                <li>Credit Card: 3% fee</li>
-              </ul>
             </div>
           </div>
 
-          {/* EBizCharge WiFi Terminal Configuration */}
-          <div className="mt-6">
-            <h3 className="font-bold text-gray-900 dark:text-white mb-2">
+          {/* PAX Terminal Support - Main Configuration */}
+          <div className="mb-8 pb-8 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+              PAX VP100 Terminal (Valor Connect)
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Cloud-to-cloud payment integration. Only Terminal number is required. IP and Port are not needed for Valor Connect.
+            </p>
+            <PAXTerminalConfig />
+          </div>
+
+          {/* EBizCharge Terminal Configuration */}
+          <div className="mb-8 pb-8 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
               EBizCharge WiFi Terminal
             </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Configure your EBizCharge WiFi terminal IP address. This will be used automatically when processing card payments.
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Configure your EBizCharge terminal IP address and port.
             </p>
-            <TerminalIPConfig />
-          </div>
-
-          {/* PAX Terminal Support */}
-          <div className="mt-6">
-            <h3 className="font-bold text-gray-900 dark:text-white mb-2">
-              PAX Terminal Support (VP100) - Valor Connect
-            </h3>
-            <div className="text-gray-600 dark:text-gray-400 mb-4 space-y-2">
-              <p>
-                PAX Valor VP100 terminal integration with Authorize.Net via <strong>Valor Connect</strong> (cloud-to-cloud). 
-                Configure terminal IP address, port, and Terminal ID below to use the physical terminal for card payments.
-              </p>
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                <p className="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-1">
-                  ℹ️ Valor Connect (Cloud-to-Cloud):
-                </p>
-                <p className="text-xs text-blue-800 dark:text-blue-300">
-                  The VP100 terminal uses <strong>Valor Connect</strong> for cloud-to-cloud payments. 
-                  Your app sends payment requests to Authorize.Net, which routes to your VP100 device via WebSocket/TCP. 
-                  The terminal must be registered in Valor Portal/Authorize.Net with your Terminal ID (serial number).
-                </p>
-              </div>
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-                <p className="text-sm font-semibold text-yellow-900 dark:text-yellow-200 mb-1">
-                  ⚠️ Important for WiFi Connections:
-                </p>
-                <p className="text-xs text-yellow-800 dark:text-yellow-300">
-                  If your terminal is connected via <strong>WiFi</strong>, you must enter the terminal's <strong>network IP address</strong> 
-                  (e.g., 192.168.1.100), <strong>NOT localhost</strong>. Localhost is only for USB connections.
-                </p>
-              </div>
-            </div>
-            <TerminalIPConfig />
+            <EBizChargeTerminalConfig />
           </div>
 
           {/* BBPOS Card Reader Support */}
-          <div className="mt-6">
-            <h3 className="font-bold text-gray-900 dark:text-white mb-2">
-              BBPOS Card Reader (CHIPPER™ 3X)
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+              BBPOS Card Reader (USB)
             </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+              USB-connected card reader. No configuration needed.
+            </p>
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
-                <strong>USB Connection:</strong> No IP/Port configuration needed!
-              </p>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                The BBPOS CHIPPER™ 3X card reader uses direct USB connection. Simply:
-              </p>
-              <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-400 space-y-1 ml-2">
-                <li>Connect the reader to your computer via USB cable</li>
-                <li>Ensure the reader is recognized by your system</li>
-                <li>Configure the reader in Authorize.net 2.0 app (if needed)</li>
-                <li>Select "Bluetooth Reader" option during payment (works for USB too)</li>
-              </ul>
-              <p className="text-xs text-gray-500 dark:text-gray-500 mt-3">
-                <strong>Note:</strong> USB readers are automatically detected. No network configuration required. Card data is encrypted on the reader and processed securely through Authorize.Net.
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Simply connect the BBPOS CHIPPER™ 3X reader via USB. The device is automatically detected during payment. Select "USB Card Reader" option in the payment modal.
               </p>
             </div>
           </div>
@@ -266,15 +232,128 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
   );
 }
 
-// Terminal IP and Port Configuration Component
-function TerminalIPConfig() {
+// PAX Terminal Configuration Component (Valor Connect)
+function PAXTerminalConfig() {
+  const { user, refreshUser } = useAuth();
+  const { showToast } = useToast();
+  const [terminalNumber, setTerminalNumber] = useState(user?.terminalNumber || '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (user?.terminalNumber) {
+      setTerminalNumber(user.terminalNumber);
+    }
+  }, [user?.terminalNumber]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const response = await authAPI.updateTerminalSettings(terminalNumber);
+      
+      if (response.success) {
+        showToast('PAX terminal settings saved successfully', 'success', 3000);
+        if (refreshUser) {
+          await refreshUser();
+        }
+      } else {
+        showToast(response.message || 'Failed to save terminal settings', 'error', 4000);
+      }
+    } catch (error: any) {
+      console.error('Error saving terminal settings:', error);
+      showToast(error.message || 'Failed to save terminal settings', 'error', 4000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Test connection removed - not applicable for Valor Connect (cloud-to-cloud)
+
+  const isValidTerminalNumber = (num: string) => {
+    if (!num || num.trim() === '') return false; // Terminal number is REQUIRED
+    return /^[A-Za-z0-9\-_]+$/.test(num.trim());
+  };
+
+  const terminalNumberValid = isValidTerminalNumber(terminalNumber);
+  const canSave = terminalNumberValid && terminalNumber.trim() !== '';
+
+  return (
+    <div className="space-y-4">
+      {/* Terminal Number - Required for Valor Connect */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Terminal Number (Serial Number) <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={terminalNumber}
+          onChange={(e) => setTerminalNumber(e.target.value)}
+          placeholder="VP100-123456"
+          required
+          className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+            terminalNumber && terminalNumberValid
+              ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+              : terminalNumber && !terminalNumberValid
+              ? 'border-red-300 dark:border-red-600 focus:ring-red-500'
+              : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+        />
+        {!terminalNumberValid && terminalNumber !== '' && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
+            <XCircle className="w-4 h-4" />
+            Invalid format. Use alphanumeric characters, dashes, or underscores.
+          </p>
+        )}
+        {!terminalNumber && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+            ⚠️ Terminal number is required for Valor Connect payments. Enter your VP100 serial number.
+          </p>
+        )}
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          Find it on the device label or in Valor Portal/Authorize.Net
+        </p>
+      </div>
+
+      {/* Info Box - IP/Port Not Needed */}
+      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+        <p className="text-sm text-blue-900 dark:text-blue-200 font-medium mb-1">
+          ℹ️ Valor Connect (Cloud-to-Cloud)
+        </p>
+        <p className="text-xs text-blue-800 dark:text-blue-300">
+          IP Address and Port are <strong>not required</strong> for Valor Connect. The terminal communicates through Authorize.Net's cloud infrastructure. Only Terminal number is needed.
+        </p>
+      </div>
+
+      {/* Action Button */}
+      <div className="pt-2">
+        <button
+          onClick={handleSave}
+          disabled={isSaving || !terminalNumber || !terminalNumberValid}
+          className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          {isSaving ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Saving...</span>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Save Terminal Number</span>
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// EBizCharge Terminal Configuration Component
+function EBizChargeTerminalConfig() {
   const { user, refreshUser } = useAuth();
   const { showToast } = useToast();
   const [terminalIP, setTerminalIP] = useState(user?.terminalIP || '');
   const [terminalPort, setTerminalPort] = useState(user?.terminalPort?.toString() || '');
-  const [terminalId, setTerminalId] = useState(user?.terminalId || '');
   const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
 
   useEffect(() => {
     if (user?.terminalIP) {
@@ -283,88 +362,31 @@ function TerminalIPConfig() {
     if (user?.terminalPort) {
       setTerminalPort(user.terminalPort.toString());
     }
-    if (user?.terminalId) {
-      setTerminalId(user.terminalId);
-    }
-  }, [user?.terminalIP, user?.terminalPort, user?.terminalId]);
+  }, [user?.terminalIP, user?.terminalPort]);
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-      const response = await fetch('/api/auth/me/terminal', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ 
-          terminalIP: terminalIP.trim() || null,
-          terminalPort: terminalPort.trim() || null,
-          terminalId: terminalId.trim() || null
-        })
-      });
-
-      const data = await response.json();
+      const response = await authAPI.updateTerminalSettings(null, terminalIP, terminalPort);
       
-      if (data.success) {
-        showToast('Terminal settings saved successfully', 'success', 3000);
+      if (response.success) {
+        showToast('EBizCharge terminal settings saved successfully', 'success', 3000);
         if (refreshUser) {
           await refreshUser();
         }
       } else {
-        showToast(data.message || 'Failed to save terminal settings', 'error', 4000);
+        showToast(response.message || 'Failed to save terminal settings', 'error', 4000);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving terminal settings:', error);
-      showToast('Failed to save terminal settings', 'error', 4000);
+      showToast(error.message || 'Failed to save terminal settings', 'error', 4000);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleTest = async () => {
-    if (!terminalIP || terminalIP.trim() === '') {
-      showToast('Please enter a terminal IP address first', 'warning', 3000);
-      return;
-    }
-
-    setIsTesting(true);
-    try {
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-      // Test PAX terminal connection
-      const response = await fetch('/api/pax/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ 
-          terminalIP: terminalIP.trim(),
-          terminalPort: terminalPort.trim() || undefined
-        })
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        showToast('PAX terminal connection test successful!', 'success', 4000);
-      } else {
-        showToast(data.message || 'PAX terminal connection test failed', 'error', 4000);
-      }
-    } catch (error) {
-      console.error('Error testing terminal:', error);
-      showToast('Failed to test terminal connection', 'error', 4000);
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
   const isValidIP = (ip: string) => {
-    // Allow localhost for USB connections
-    if (ip === 'localhost' || ip === '127.0.0.1') {
-      return true;
-    }
+    if (ip === 'localhost' || ip === '127.0.0.1') return true;
     const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
     if (!ipRegex.test(ip)) return false;
     const parts = ip.split('.');
@@ -375,21 +397,14 @@ function TerminalIPConfig() {
   };
 
   const isValidPort = (port: string) => {
-    if (!port || port.trim() === '') return true; // Port is optional
+    if (!port || port.trim() === '') return true;
     const portNum = parseInt(port, 10);
     return !isNaN(portNum) && portNum >= 1 && portNum <= 65535;
   };
 
-  const isValidTerminalId = (id: string) => {
-    if (!id || id.trim() === '') return true; // Terminal ID is optional (but required for Valor Connect)
-    // Terminal ID should be alphanumeric (serial number format)
-    return /^[A-Za-z0-9\-_]+$/.test(id.trim());
-  };
-
   const ipValid = terminalIP === '' || isValidIP(terminalIP);
   const portValid = isValidPort(terminalPort);
-  const terminalIdValid = isValidTerminalId(terminalId);
-  const canSave = ipValid && portValid && terminalIdValid;
+  const canSave = ipValid && portValid;
 
   return (
     <div className="space-y-4">
@@ -397,53 +412,23 @@ function TerminalIPConfig() {
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Terminal IP Address
         </label>
-        <input
-          type="text"
-          value={terminalIP}
-          onChange={(e) => setTerminalIP(e.target.value)}
-          placeholder="192.168.1.100 (WiFi) or localhost (USB only)"
+          <input
+            type="text"
+            value={terminalIP}
+            onChange={(e) => setTerminalIP(e.target.value)}
+            placeholder="192.168.1.100"
           className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
-            ipValid
-              ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
-              : 'border-red-300 dark:border-red-600 focus:ring-red-500'
-          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
-        />
+              ipValid
+                ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+                : 'border-red-300 dark:border-red-600 focus:ring-red-500'
+            } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+          />
         {!ipValid && terminalIP !== '' && (
           <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
             <XCircle className="w-4 h-4" />
-            Invalid IP address format. Use format like 192.168.1.100 or localhost
+            Invalid IP format
           </p>
         )}
-        <div className="mt-2 space-y-2">
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-            <p className="text-xs font-semibold text-blue-900 dark:text-blue-200 mb-1">
-              📡 For WiFi Connection (PAX VP100 via WiFi):
-            </p>
-            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
-              • Enter the terminal's <strong>network IP address</strong> (e.g., 192.168.1.100)
-            </p>
-            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
-              • Terminal and computer must be on the <strong>same WiFi network</strong>
-            </p>
-            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
-              • Find IP in terminal settings or router admin panel
-            </p>
-            <p className="text-xs text-red-600 dark:text-red-400 font-medium mt-2 ml-2">
-              ⚠️ Do NOT use localhost for WiFi connections!
-            </p>
-          </div>
-          <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
-            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-              🔌 For USB Connection Only:
-            </p>
-            <p className="text-xs text-gray-600 dark:text-gray-400 ml-2">
-              • Use <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">localhost</code> or <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">127.0.0.1</code>
-            </p>
-            <p className="text-xs text-gray-600 dark:text-gray-400 ml-2">
-              • Port: 4430 (default for USB)
-            </p>
-          </div>
-        </div>
       </div>
       
       <div>
@@ -454,7 +439,7 @@ function TerminalIPConfig() {
           type="number"
           value={terminalPort}
           onChange={(e) => setTerminalPort(e.target.value)}
-          placeholder="4430 (USB) or 10009 (WiFi)"
+          placeholder="10009"
           min="1"
           max="65535"
           className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
@@ -466,114 +451,28 @@ function TerminalIPConfig() {
         {!portValid && terminalPort !== '' && (
           <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
             <XCircle className="w-4 h-4" />
-            Invalid port number. Port must be between 1 and 65535
+            Invalid port number
           </p>
         )}
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          Default: 4430 for USB, 10009 for WiFi. Leave empty to use default.
-        </p>
       </div>
 
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Terminal ID (VP100 Serial Number) <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="text"
-          value={terminalId}
-          onChange={(e) => setTerminalId(e.target.value)}
-          placeholder="VP100 serial number (e.g., VP100-123456)"
-          className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
-            terminalIdValid
-              ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
-              : 'border-red-300 dark:border-red-600 focus:ring-red-500'
-          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
-        />
-        {!terminalIdValid && terminalId !== '' && (
-          <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
-            <XCircle className="w-4 h-4" />
-            Invalid Terminal ID format. Use alphanumeric characters, dashes, or underscores only.
-          </p>
-        )}
-        <div className="mt-2 space-y-2">
-          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-            <p className="text-xs font-semibold text-yellow-900 dark:text-yellow-200 mb-1">
-              ⚠️ Required for PAX WiFi Terminal (Valor Connect):
-            </p>
-            <p className="text-xs text-yellow-800 dark:text-yellow-300 ml-2">
-              • Enter your <strong>VP100 serial number</strong> (found on device or in Valor Portal)
-            </p>
-            <p className="text-xs text-yellow-800 dark:text-yellow-300 ml-2">
-              • Terminal must be <strong>registered in Valor Portal/Authorize.Net</strong>
-            </p>
-            <p className="text-xs text-yellow-800 dark:text-yellow-300 ml-2">
-              • This enables cloud-to-cloud payment flow (Valor Connect)
-            </p>
-          </div>
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-            <p className="text-xs font-semibold text-blue-900 dark:text-blue-200 mb-1">
-              ℹ️ How to find your Terminal ID:
-            </p>
-            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
-              • Check the serial number on the back/bottom of your VP100 device
-            </p>
-            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
-              • Log into Valor Portal and view registered devices
-            </p>
-            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
-              • Check Authorize.Net merchant interface for terminal registration
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={handleTest}
-          disabled={isTesting || !terminalIP || !canSave}
-          className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-gray-900 dark:text-white bg-white dark:bg-gray-700 flex items-center justify-center gap-2"
-        >
-          {isTesting ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Testing...</span>
-            </>
-          ) : (
-            <>
-              <CreditCard className="w-4 h-4" />
-              <span>Test Connection</span>
-            </>
-          )}
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={isSaving || !canSave}
-          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Saving...</span>
-            </>
-          ) : (
-            <>
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Save</span>
-            </>
-          )}
-        </button>
-      </div>
-      
-      {terminalIP && ipValid && (
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Your terminal settings will be used automatically when processing payments.
-        </p>
-      )}
-      {!terminalId && (
-        <p className="text-sm text-yellow-600 dark:text-yellow-400 mt-1">
-          ⚠️ Terminal ID is required for PAX WiFi Terminal payments. Please enter your VP100 serial number.
-        </p>
-      )}
+          <button
+            onClick={handleSave}
+        disabled={isSaving || !canSave}
+        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Saving...</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Save</span>
+              </>
+            )}
+          </button>
     </div>
   );
 }

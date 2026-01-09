@@ -40,10 +40,21 @@ export const validateSale = (req, res, next) => {
       if (!req.body.bluetoothPayload || !req.body.bluetoothPayload.descriptor || !req.body.bluetoothPayload.value) {
         errors.push('USB card reader payment data is required. Please scan the card with the USB reader.');
       }
-    } else if (useTerminal || useEBizChargeTerminal) {
-      // Network Terminal mode - validate terminal IP instead of card details
+    } else if (useTerminal) {
+      // PAX Terminal mode (Valor Connect - cloud-to-cloud) - validate terminalNumber
+      if (!req.body.terminalNumber || req.body.terminalNumber.trim() === '') {
+        errors.push('Terminal number is required for PAX terminal payment. Please configure your VP100 serial number in Settings.');
+      } else {
+        // Basic Terminal number validation (alphanumeric, dashes, underscores)
+        const terminalNumberTrimmed = req.body.terminalNumber.trim();
+        if (!/^[A-Za-z0-9\-_]+$/.test(terminalNumberTrimmed)) {
+          errors.push('Invalid Terminal number format. Use alphanumeric characters, dashes, or underscores only.');
+        }
+      }
+    } else if (useEBizChargeTerminal) {
+      // EBizCharge Terminal mode - validate terminal IP
       if (!req.body.terminalIP) {
-        errors.push('Terminal IP address is required for terminal payment');
+        errors.push('Terminal IP address is required for EBizCharge terminal payment');
       } else {
         // Basic IP validation (allow localhost for USB terminals)
         const ipTrimmed = req.body.terminalIP.trim();

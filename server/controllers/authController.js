@@ -126,7 +126,7 @@ export const login = async (req, res) => {
         taxPercentage: resolveTaxPercentage(user),
         terminalIP: user.terminalIP,
         terminalPort: user.terminalPort,
-        terminalId: user.terminalId
+        terminalNumber: user.terminalNumber
       }
     }, 'Login successful');
   } catch (err) {
@@ -390,7 +390,7 @@ export const getCurrentUser = async (req, res) => {
 
 export const updateMyTerminalIP = async (req, res) => {
   try {
-    const { terminalIP, terminalPort, terminalId } = req.body;
+    const { terminalIP, terminalPort, terminalNumber } = req.body;
     const user = await User.findByPk(req.user.id);
     
     if (!user) {
@@ -414,15 +414,15 @@ export const updateMyTerminalIP = async (req, res) => {
       }
     }
 
-    // Validate terminalId if provided (VP100 serial number for Valor Connect)
-    if (terminalId !== undefined && terminalId !== null && terminalId !== '') {
-      const terminalIdTrimmed = terminalId.trim();
-      if (terminalIdTrimmed.length === 0) {
-        return sendValidationError(res, 'Terminal ID cannot be empty. Please enter VP100 serial number or leave empty.');
+    // Validate terminalNumber if provided (VP100 serial number for Valor Connect)
+    if (terminalNumber !== undefined && terminalNumber !== null && terminalNumber !== '') {
+      const terminalNumberTrimmed = terminalNumber.trim();
+      if (terminalNumberTrimmed.length === 0) {
+        return sendValidationError(res, 'Terminal number cannot be empty. Please enter VP100 serial number or leave empty.');
       }
-      // Terminal ID should be alphanumeric (serial number format)
-      if (!/^[A-Za-z0-9\-_]+$/.test(terminalIdTrimmed)) {
-        return sendValidationError(res, 'Invalid Terminal ID format. Use VP100 serial number (alphanumeric, dashes, underscores only).');
+      // Terminal number should be alphanumeric (serial number format)
+      if (!/^[A-Za-z0-9\-_]+$/.test(terminalNumberTrimmed)) {
+        return sendValidationError(res, 'Invalid Terminal number format. Use VP100 serial number (alphanumeric, dashes, underscores only).');
       }
     }
 
@@ -430,8 +430,8 @@ export const updateMyTerminalIP = async (req, res) => {
     user.terminalPort = (terminalPort !== undefined && terminalPort !== null && terminalPort !== '') 
       ? parseInt(terminalPort, 10) 
       : null;
-    user.terminalId = (terminalId !== undefined && terminalId !== null && terminalId !== '') 
-      ? terminalId.trim() 
+    user.terminalNumber = (terminalNumber !== undefined && terminalNumber !== null && terminalNumber !== '') 
+      ? terminalNumber.trim() 
       : null;
     await user.save();
 
