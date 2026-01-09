@@ -978,7 +978,7 @@ export const getOpenSalesOrders = async (customerId) => {
     
     // Additional client-side filtering as safety measure:
     // 1. Ensure status is open (API should handle this, but double-check)
-    // 2. Verify customer_id matches (API should handle this, but double-check)
+    // 2. Verify customer_id matches (API should filter, but verify as safety)
     const openSalesOrders = salesOrders.filter(so => {
       // Check status - should be 'open' according to API response format
       const status = (so.status || '').toLowerCase();
@@ -987,13 +987,6 @@ export const getOpenSalesOrders = async (customerId) => {
       // Verify customer_id matches (API should filter, but verify as safety)
       const soCustomerId = so.customer_id;
       const customerMatches = soCustomerId === customerId || String(soCustomerId) === String(customerId);
-      
-      if (!isOpen) {
-        console.warn(`⚠️ Sales order ${so.salesorder_number} has status "${so.status}" but should be "open"`);
-      }
-      if (!customerMatches) {
-        console.warn(`⚠️ Sales order ${so.salesorder_number} has customer_id "${soCustomerId}" but expected "${customerId}"`);
-      }
       
       return isOpen && customerMatches;
     });
