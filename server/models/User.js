@@ -44,5 +44,10 @@ export const User = sequelize.define('User', {
     type: DataTypes.INTEGER,
     allowNull: true,
     comment: 'Port number for the PAX terminal (e.g., 4430 for USB, 10009 for WiFi)'
+  },
+  terminalId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'VP100 serial number or terminal ID registered in Valor Portal/Authorize.Net (required for Valor Connect cloud-to-cloud payments)'
   }
 });

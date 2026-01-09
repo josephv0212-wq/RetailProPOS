@@ -1,14 +1,19 @@
 /**
- * Authorize.Net Terminal Payment Service
- * Handles payment processing through Authorize.Net with VP100 terminal integration
+ * Authorize.Net Terminal Payment Service (Valor Connect)
+ * Handles cloud-to-cloud payment processing through Authorize.Net with VP100 terminal integration
  * 
  * Flow:
- * 1. App sends payment request to Authorize.Net
- * 2. Authorize.Net triggers popup on VP100 device
- * 3. Customer pays on VP100 device
- * 4. VP100 sends payment data to Authorize.Net
- * 5. App polls Authorize.Net for payment status
- * 6. App shows notification when payment confirmed
+ * 1. App sends payment request to Authorize.Net with terminalId
+ * 2. Authorize.Net routes to VP100 via Valor Connect (WebSocket/TCP)
+ * 3. VP100 displays payment prompt to customer
+ * 4. Customer completes payment on VP100 device
+ * 5. VP100 sends payment data to Authorize.Net
+ * 6. App polls Authorize.Net for payment status
+ * 7. App shows notification when payment confirmed
+ * 
+ * Documentation:
+ * - Authorize.Net API Reference: https://developer.authorize.net/api/reference/
+ * - Valor Connect Integration: VP100 must be registered in Valor Portal/Authorize.Net
  */
 
 import axios from 'axios';
@@ -16,54 +21,50 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Use sandbox endpoint in development, production endpoint in production
+// All Authorize.Net API requests use the same base endpoint
 const AUTHORIZE_NET_ENDPOINT = process.env.NODE_ENV === 'production'
   ? 'https://api.authorize.net/xml/v1/request.api'  // Production endpoint
   : 'https://apitest.authorize.net/xml/v1/request.api';  // Sandbox endpoint (development)
 
+if (!global.AUTHORIZE_NET_ENDPOINT_LOGGED) {
+  console.log(`💳 Authorize.Net endpoint: ${AUTHORIZE_NET_ENDPOINT} (${process.env.NODE_ENV || 'development'})`);
+  global.AUTHORIZE_NET_ENDPOINT_LOGGED = true;
+}
+
 /**
- * Initiate terminal payment - sends payment request to Authorize.Net
- * Authorize.Net will trigger popup on VP100 device
+ * Initiates a terminal payment request with Authorize.Net (Valor Connect).
+ * The VP100 terminal must be registered in Valor Portal/Authorize.Net merchant interface.
  * @param {Object} paymentData - Payment information
- * @param {string} terminalId - Terminal identifier (optional, for multi-terminal setups)
- * @returns {Promise<Object>} Payment initiation result with transaction reference
+ * @param {string} terminalId - VP100 serial number or terminal ID (REQUIRED for Valor Connect)
+ * @returns {Promise<Object>} Payment result with pending status
  */
-export const initiateTerminalPayment = async (paymentData, terminalId = null) => {
+export const initiateTerminalPayment = async (paymentData, terminalId) => {
   const { amount, invoiceNumber, description } = paymentData;
 
-  // Create transaction request for terminal payment
-  // For VP100 terminal payments via Authorize.Net:
-  // - We create a transaction request that Authorize.Net will route to the terminal
-  // - The terminal will prompt the customer for payment
-  // - We'll poll for the transaction status
-  
-  // Generate a unique reference ID for this payment request
-  const refId = `TERMINAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  
+  // Validate terminal ID - REQUIRED for Valor Connect
+  if (!terminalId || terminalId.trim() === '') {
+    return {
+      success: false,
+      error: 'Terminal ID is required. Please configure your VP100 serial number in Settings. The terminal must be registered in Valor Portal/Authorize.Net.'
+    };
+  }
+
   const requestBody = {
     createTransactionRequest: {
       merchantAuthentication: {
         name: process.env.AUTHORIZE_NET_API_LOGIN_ID,
         transactionKey: process.env.AUTHORIZE_NET_TRANSACTION_KEY
       },
-      refId: refId, // Reference ID for tracking
       transactionRequest: {
         transactionType: 'authCaptureTransaction',
         amount: parseFloat(amount).toFixed(2),
-        // For terminal payments, we don't provide card data
-        // Authorize.Net will route to the terminal device based on merchant configuration
-        // The terminal will capture card data from customer
-        // Note: Actual API structure may vary - this is a simplified implementation
-        // Authorize.Net may require deviceSessionId or terminal-specific parameters
+        // Terminal ID for Valor Connect - routes payment to VP100 device
+        // This is the VP100 serial number registered in Valor Portal/Authorize.Net
+        terminalId: terminalId.trim(),
         order: {
           invoiceNumber: invoiceNumber || `POS-${Date.now()}`,
           description: description || 'POS Sale - Terminal Payment'
         },
-        // Device information (if terminal is registered with Authorize.Net)
-        // This helps Authorize.Net route to the correct terminal
-        device: terminalId ? {
-          deviceId: terminalId
-        } : undefined,
-        // Transaction settings
         transactionSettings: {
           setting: [
             {
@@ -81,8 +82,6 @@ export const initiateTerminalPayment = async (paymentData, terminalId = null) =>
   };
 
   try {
-    // Note: Authorize.Net may use different endpoint or method for terminal payments
-    // This is a simplified version - actual implementation may vary based on Authorize.Net's terminal API
     const response = await axios.post(AUTHORIZE_NET_ENDPOINT, requestBody, {
       headers: {
         'Content-Type': 'application/json'
@@ -90,26 +89,31 @@ export const initiateTerminalPayment = async (paymentData, terminalId = null) =>
     });
 
     const result = response.data.transactionResponse;
-    
-    // If transaction is pending (waiting for terminal), return pending status
-    if (result && (result.responseCode === '3' || result.responseCode === '4')) {
-      // Transaction is pending - waiting for terminal response
+
+    // Response code meanings:
+    // 1 = Approved
+    // 2 = Declined
+    // 3 = Error
+    // 4 = Held for Review
+    if (result && result.responseCode === '1') {
+      // Transaction approved (may still be pending on terminal)
       return {
         success: true,
         pending: true,
-        transactionId: result.transId || result.refId,
-        refId: result.refId,
-        message: 'Payment request sent to terminal. Please complete payment on VP100 device.',
+        transactionId: result.transId,
+        refId: response.data.refId,
+        message: 'Payment request sent to VP100 terminal. Please complete payment on device.',
         status: 'pending'
       };
-    } else if (result && result.responseCode === '1') {
-      // Transaction completed immediately (unlikely for terminal payments)
+    } else if (result && (result.responseCode === '3' || result.responseCode === '4')) {
+      // Transaction pending - waiting for terminal response
       return {
         success: true,
-        pending: false,
-        transactionId: result.transId,
-        authCode: result.authCode,
-        message: result.messages?.[0]?.description || 'Transaction approved'
+        pending: true,
+        transactionId: result.transId || response.data.refId,
+        refId: response.data.refId,
+        message: 'Payment request sent to terminal. Please complete payment on VP100 device.',
+        status: 'pending'
       };
     } else {
       const errorMessage = result?.errors?.[0]?.errorText || result?.messages?.[0]?.description || 'Transaction failed';
@@ -121,6 +125,9 @@ export const initiateTerminalPayment = async (paymentData, terminalId = null) =>
     }
   } catch (error) {
     console.error('Authorize.Net Terminal Payment Error:', error.message);
+    if (error.response?.data) {
+      console.error('Error response:', JSON.stringify(error.response.data, null, 2));
+    }
     return {
       success: false,
       error: error.response?.data?.message || error.message
@@ -129,8 +136,8 @@ export const initiateTerminalPayment = async (paymentData, terminalId = null) =>
 };
 
 /**
- * Check payment status by polling Authorize.Net
- * @param {string} transactionId - Transaction ID or reference ID
+ * Check payment status by polling Authorize.Net using getTransactionDetailsRequest
+ * @param {string} transactionId - Transaction ID
  * @returns {Promise<Object>} Payment status
  */
 export const checkPaymentStatus = async (transactionId) => {
@@ -152,13 +159,13 @@ export const checkPaymentStatus = async (transactionId) => {
     });
 
     const result = response.data.transaction;
-    
+
     if (result) {
       const status = result.transactionStatus || 'unknown';
-      const isApproved = status === 'settledSuccessfully' || status === 'authorizedPendingCapture';
-      const isPending = status === 'authorizedPendingCapture' || status === 'capturedPendingSettlement';
-      const isDeclined = status === 'declined' || status === 'voided' || status === 'error';
-      
+      const isApproved = status === 'settledSuccessfully' || status === 'authorizedPendingCapture' || status === 'capturedPendingSettlement';
+      const isPending = status === 'authorizedPendingCapture' || status === 'FDSPendingReview' || status === 'FDSAuthorizedPendingReview';
+      const isDeclined = status === 'declined' || status === 'voided' || status === 'refundSettledSuccessfully' || status === 'refundPendingSettlement';
+
       return {
         success: isApproved,
         pending: isPending && !isApproved && !isDeclined,
@@ -171,17 +178,19 @@ export const checkPaymentStatus = async (transactionId) => {
         timestamp: result.submitTimeUTC
       };
     } else {
+      const errorMessage = response.data?.messages?.message?.[0]?.text || 'Failed to retrieve transaction details';
       return {
         success: false,
-        pending: true,
-        error: 'Transaction not found or still processing'
+        error: errorMessage
       };
     }
   } catch (error) {
-    console.error('Check Payment Status Error:', error.message);
+    console.error('Authorize.Net Check Payment Status Error:', error.message);
+    if (error.response?.data) {
+      console.error('Error response:', JSON.stringify(error.response.data, null, 2));
+    }
     return {
       success: false,
-      pending: true,
       error: error.response?.data?.message || error.message
     };
   }

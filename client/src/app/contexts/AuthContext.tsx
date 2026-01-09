@@ -11,6 +11,7 @@ interface User {
   isActive?: boolean;
   terminalIP?: string | null;
   terminalPort?: number | string | null;
+  terminalId?: string | null;
 }
 
 interface AuthContextType {

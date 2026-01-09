@@ -189,17 +189,24 @@ export const createSale = async (req, res) => {
 
         transactionId = paymentResult.transactionId;
       } else if (useTerminal) {
-        // PAX Terminal mode - process through Authorize.Net (not direct terminal connection)
-        // Flow: App -> Authorize.Net -> VP100 Terminal -> Authorize.Net -> App (polling)
+        // PAX Terminal mode - process through Authorize.Net Valor Connect (cloud-to-cloud)
+        // Flow: App -> Authorize.Net -> VP100 Terminal (via Valor Connect) -> Authorize.Net -> App (polling)
         const { initiateTerminalPayment } = await import('../services/authorizeNetTerminalService.js');
         
-        // Initiate payment request to Authorize.Net
-        // Authorize.Net will trigger popup on VP100 device
+        // Get terminalId from user settings (VP100 serial number registered in Valor Portal/Authorize.Net)
+        const terminalId = req.user.terminalId;
+        
+        if (!terminalId) {
+          return sendError(res, 'Terminal ID is required for PAX WiFi terminal payments. Please configure your VP100 serial number in Settings. The terminal must be registered in Valor Portal/Authorize.Net.', 400);
+        }
+        
+        // Initiate payment request to Authorize.Net with terminalId
+        // Authorize.Net routes to VP100 via Valor Connect (WebSocket/TCP)
         paymentResult = await initiateTerminalPayment({
           amount: total,
           invoiceNumber: `POS-${Date.now()}`,
           description: `POS Sale - ${locationName}`
-        }, terminalIP); // terminalIP used as terminal identifier if needed
+        }, terminalId); // terminalId is the VP100 serial number
 
         if (!paymentResult.success) {
           return sendError(res, 'Failed to initiate terminal payment', 400, paymentResult.error);

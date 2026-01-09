@@ -125,7 +125,8 @@ export const login = async (req, res) => {
         locationName: user.locationName,
         taxPercentage: resolveTaxPercentage(user),
         terminalIP: user.terminalIP,
-        terminalPort: user.terminalPort
+        terminalPort: user.terminalPort,
+        terminalId: user.terminalId
       }
     }, 'Login successful');
   } catch (err) {
@@ -389,7 +390,7 @@ export const getCurrentUser = async (req, res) => {
 
 export const updateMyTerminalIP = async (req, res) => {
   try {
-    const { terminalIP, terminalPort } = req.body;
+    const { terminalIP, terminalPort, terminalId } = req.body;
     const user = await User.findByPk(req.user.id);
     
     if (!user) {
@@ -413,18 +414,33 @@ export const updateMyTerminalIP = async (req, res) => {
       }
     }
 
+    // Validate terminalId if provided (VP100 serial number for Valor Connect)
+    if (terminalId !== undefined && terminalId !== null && terminalId !== '') {
+      const terminalIdTrimmed = terminalId.trim();
+      if (terminalIdTrimmed.length === 0) {
+        return sendValidationError(res, 'Terminal ID cannot be empty. Please enter VP100 serial number or leave empty.');
+      }
+      // Terminal ID should be alphanumeric (serial number format)
+      if (!/^[A-Za-z0-9\-_]+$/.test(terminalIdTrimmed)) {
+        return sendValidationError(res, 'Invalid Terminal ID format. Use VP100 serial number (alphanumeric, dashes, underscores only).');
+      }
+    }
+
     user.terminalIP = terminalIP && terminalIP.trim() !== '' ? terminalIP.trim() : null;
     user.terminalPort = (terminalPort !== undefined && terminalPort !== null && terminalPort !== '') 
       ? parseInt(terminalPort, 10) 
+      : null;
+    user.terminalId = (terminalId !== undefined && terminalId !== null && terminalId !== '') 
+      ? terminalId.trim() 
       : null;
     await user.save();
 
     const sanitizedUser = user.toJSON();
     delete sanitizedUser.password;
 
-    return sendSuccess(res, { user: sanitizedUser }, 'Terminal IP and Port updated successfully');
+    return sendSuccess(res, { user: sanitizedUser }, 'Terminal settings updated successfully');
   } catch (err) {
-    console.error('Update terminal IP/Port error:', err);
-    return sendError(res, 'Failed to update terminal IP and Port', 500, err);
+    console.error('Update terminal settings error:', err);
+    return sendError(res, 'Failed to update terminal settings', 500, err);
   }
 };

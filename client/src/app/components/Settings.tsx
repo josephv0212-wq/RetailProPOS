@@ -170,13 +170,23 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
           {/* PAX Terminal Support */}
           <div className="mt-6">
             <h3 className="font-bold text-gray-900 dark:text-white mb-2">
-              PAX Terminal Support (VP100)
+              PAX Terminal Support (VP100) - Valor Connect
             </h3>
             <div className="text-gray-600 dark:text-gray-400 mb-4 space-y-2">
               <p>
-                PAX Valor VP100 terminal integration with Authorize.Net via <strong>WiFi</strong> or USB is available. 
-                Configure terminal IP address and port below to use the physical terminal for card payments.
+                PAX Valor VP100 terminal integration with Authorize.Net via <strong>Valor Connect</strong> (cloud-to-cloud). 
+                Configure terminal IP address, port, and Terminal ID below to use the physical terminal for card payments.
               </p>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                <p className="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-1">
+                  ℹ️ Valor Connect (Cloud-to-Cloud):
+                </p>
+                <p className="text-xs text-blue-800 dark:text-blue-300">
+                  The VP100 terminal uses <strong>Valor Connect</strong> for cloud-to-cloud payments. 
+                  Your app sends payment requests to Authorize.Net, which routes to your VP100 device via WebSocket/TCP. 
+                  The terminal must be registered in Valor Portal/Authorize.Net with your Terminal ID (serial number).
+                </p>
+              </div>
               <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
                 <p className="text-sm font-semibold text-yellow-900 dark:text-yellow-200 mb-1">
                   ⚠️ Important for WiFi Connections:
@@ -262,6 +272,7 @@ function TerminalIPConfig() {
   const { showToast } = useToast();
   const [terminalIP, setTerminalIP] = useState(user?.terminalIP || '');
   const [terminalPort, setTerminalPort] = useState(user?.terminalPort?.toString() || '');
+  const [terminalId, setTerminalId] = useState(user?.terminalId || '');
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
 
@@ -272,7 +283,10 @@ function TerminalIPConfig() {
     if (user?.terminalPort) {
       setTerminalPort(user.terminalPort.toString());
     }
-  }, [user?.terminalIP, user?.terminalPort]);
+    if (user?.terminalId) {
+      setTerminalId(user.terminalId);
+    }
+  }, [user?.terminalIP, user?.terminalPort, user?.terminalId]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -286,14 +300,15 @@ function TerminalIPConfig() {
         },
         body: JSON.stringify({ 
           terminalIP: terminalIP.trim() || null,
-          terminalPort: terminalPort.trim() || null
+          terminalPort: terminalPort.trim() || null,
+          terminalId: terminalId.trim() || null
         })
       });
 
       const data = await response.json();
       
       if (data.success) {
-        showToast('Terminal IP and Port saved successfully', 'success', 3000);
+        showToast('Terminal settings saved successfully', 'success', 3000);
         if (refreshUser) {
           await refreshUser();
         }
@@ -365,9 +380,16 @@ function TerminalIPConfig() {
     return !isNaN(portNum) && portNum >= 1 && portNum <= 65535;
   };
 
+  const isValidTerminalId = (id: string) => {
+    if (!id || id.trim() === '') return true; // Terminal ID is optional (but required for Valor Connect)
+    // Terminal ID should be alphanumeric (serial number format)
+    return /^[A-Za-z0-9\-_]+$/.test(id.trim());
+  };
+
   const ipValid = terminalIP === '' || isValidIP(terminalIP);
   const portValid = isValidPort(terminalPort);
-  const canSave = ipValid && portValid;
+  const terminalIdValid = isValidTerminalId(terminalId);
+  const canSave = ipValid && portValid && terminalIdValid;
 
   return (
     <div className="space-y-4">
@@ -452,6 +474,59 @@ function TerminalIPConfig() {
         </p>
       </div>
 
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Terminal ID (VP100 Serial Number) <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={terminalId}
+          onChange={(e) => setTerminalId(e.target.value)}
+          placeholder="VP100 serial number (e.g., VP100-123456)"
+          className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+            terminalIdValid
+              ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+              : 'border-red-300 dark:border-red-600 focus:ring-red-500'
+          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+        />
+        {!terminalIdValid && terminalId !== '' && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
+            <XCircle className="w-4 h-4" />
+            Invalid Terminal ID format. Use alphanumeric characters, dashes, or underscores only.
+          </p>
+        )}
+        <div className="mt-2 space-y-2">
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+            <p className="text-xs font-semibold text-yellow-900 dark:text-yellow-200 mb-1">
+              ⚠️ Required for PAX WiFi Terminal (Valor Connect):
+            </p>
+            <p className="text-xs text-yellow-800 dark:text-yellow-300 ml-2">
+              • Enter your <strong>VP100 serial number</strong> (found on device or in Valor Portal)
+            </p>
+            <p className="text-xs text-yellow-800 dark:text-yellow-300 ml-2">
+              • Terminal must be <strong>registered in Valor Portal/Authorize.Net</strong>
+            </p>
+            <p className="text-xs text-yellow-800 dark:text-yellow-300 ml-2">
+              • This enables cloud-to-cloud payment flow (Valor Connect)
+            </p>
+          </div>
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+            <p className="text-xs font-semibold text-blue-900 dark:text-blue-200 mb-1">
+              ℹ️ How to find your Terminal ID:
+            </p>
+            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
+              • Check the serial number on the back/bottom of your VP100 device
+            </p>
+            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
+              • Log into Valor Portal and view registered devices
+            </p>
+            <p className="text-xs text-blue-800 dark:text-blue-300 ml-2">
+              • Check Authorize.Net merchant interface for terminal registration
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="flex gap-2">
         <button
           onClick={handleTest}
@@ -492,6 +567,11 @@ function TerminalIPConfig() {
       {terminalIP && ipValid && (
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           Your terminal settings will be used automatically when processing payments.
+        </p>
+      )}
+      {!terminalId && (
+        <p className="text-sm text-yellow-600 dark:text-yellow-400 mt-1">
+          ⚠️ Terminal ID is required for PAX WiFi Terminal payments. Please enter your VP100 serial number.
         </p>
       )}
     </div>
