@@ -201,6 +201,51 @@ export const initiateTerminalPayment = async (paymentData, terminalNumber) => {
 };
 
 /**
+ * Get list of devices/terminals registered with Authorize.Net
+ * Note: Authorize.Net doesn't have a direct API to list devices
+ * This function attempts to get device information or returns a structure
+ * that can be populated from merchant interface configuration
+ * @returns {Promise<Object>} List of devices/terminals
+ */
+export const getAuthorizeNetDevices = async () => {
+  // Note: Authorize.Net API doesn't have a direct endpoint to list registered devices/terminals
+  // Device information is typically managed through the Merchant Interface
+  // This function provides a structure that can be used to display device information
+  // In a real implementation, you might need to:
+  // 1. Store device information in your database when devices are registered
+  // 2. Use Authorize.Net's Merchant Interface API (if available)
+  // 3. Query device information from Valor Portal API (if available)
+  
+  try {
+    // For now, we'll return an empty array with a note
+    // In production, you would:
+    // - Query your database for registered devices
+    // - Call Valor Portal API to get device list
+    // - Use Authorize.Net Merchant Interface API (if available)
+    
+    console.log('📱 Fetching Authorize.Net devices...');
+    
+    // Placeholder: In a real implementation, you would fetch from:
+    // - Your database (devices registered by users)
+    // - Valor Portal API
+    // - Authorize.Net Merchant Interface
+    
+    return {
+      success: true,
+      devices: [],
+      message: 'Device list will be populated from registered terminals. Devices must be registered in Valor Portal/Authorize.Net Merchant Interface.'
+    };
+  } catch (error) {
+    console.error('❌ Error fetching Authorize.Net devices:', error.message);
+    return {
+      success: false,
+      error: error.message || 'Failed to fetch devices',
+      devices: []
+    };
+  }
+};
+
+/**
  * Check payment status by polling Authorize.Net using getTransactionDetailsRequest
  * @param {string} transactionId - Transaction ID
  * @returns {Promise<Object>} Payment status

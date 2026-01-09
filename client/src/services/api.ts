@@ -399,6 +399,11 @@ export const zohoAPI = {
 
 // Payment Status API (for terminal payments)
 export const paymentAPI = {
+  getDevices: async () => {
+    return apiRequest<{ devices: any[] }>('/payment/devices', {
+      method: 'GET',
+    }, true);
+  },
   checkStatus: async (transactionId: string) => {
     return apiRequest<{
       success: boolean;

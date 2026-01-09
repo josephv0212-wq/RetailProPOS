@@ -149,9 +149,16 @@ export function SignUp({ onSignUp, onNavigateToSignIn }: SignUpProps) {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center px-4 py-8">
       {/* Logo/Title */}
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-12">
-        RetailPro POS
-      </h1>
+      <div className="mb-12 flex flex-col items-center">
+        <img 
+          src="/sz_logo-01-est2001-1.webp" 
+          alt="RetailPro POS Logo" 
+          className="h-20 w-auto mb-4 object-contain"
+        />
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          RetailPro POS
+        </h1>
+      </div>
 
       {/* Sign Up Card */}
       <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8">

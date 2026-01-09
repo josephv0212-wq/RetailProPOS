@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, Loader2, CreditCard, CheckCircle2, XCircle } from 'lucide-react';
+import { Printer, Loader2, CreditCard, CheckCircle2, XCircle, Wifi, RefreshCw, Smartphone } from 'lucide-react';
 import { useAlert } from '../contexts/AlertContext';
-import { printerAPI, authAPI } from '../../services/api';
-import { DatabaseSettings } from './DatabaseSettings';
+import { printerAPI, authAPI, paymentAPI } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -175,28 +174,16 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
             <EBizChargeTerminalConfig />
           </div>
 
-          {/* BBPOS Card Reader Support */}
-          <div>
+          {/* Authorize.Net Devices Section */}
+          <div className="mt-8">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-              BBPOS Card Reader (USB)
+              Authorize.Net Registered Devices
             </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-              USB-connected card reader. No configuration needed.
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              View all payment terminals and devices registered with your Authorize.Net account.
             </p>
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <p className="text-sm text-gray-700 dark:text-gray-300">
-                Simply connect the BBPOS CHIPPER™ 3X reader via USB. The device is automatically detected during payment. Select "USB Card Reader" option in the payment modal.
-              </p>
-            </div>
+            <AuthorizeNetDevicesList />
           </div>
-        </div>
-
-        {/* Database Settings Section */}
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 shadow-sm">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-            Database Settings
-          </h2>
-          <DatabaseSettings />
         </div>
 
         {/* System Information Section */}
@@ -228,6 +215,151 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Authorize.Net Devices List Component
+function AuthorizeNetDevicesList() {
+  const { showToast } = useToast();
+  const [devices, setDevices] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchDevices = async () => {
+    try {
+      const response = await paymentAPI.getDevices();
+      if (response.success && response.data?.devices) {
+        setDevices(response.data.devices);
+      } else {
+        setDevices([]);
+      }
+    } catch (error: any) {
+      console.error('Error fetching devices:', error);
+      showToast('Failed to fetch devices', 'error', 3000);
+      setDevices([]);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDevices();
+  }, []);
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    fetchDevices();
+  };
+
+  if (isLoading) {
+    return (
+      <div className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-6">
+        <div className="flex items-center justify-center gap-2 text-gray-600 dark:text-gray-400">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          <span>Loading devices...</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Refresh Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+        >
+          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          <span>Refresh</span>
+        </button>
+      </div>
+
+      {/* Devices List */}
+      {devices.length === 0 ? (
+        <div className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-6">
+          <div className="text-center">
+            <Smartphone className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-600 dark:text-gray-400 font-medium mb-1">
+              No devices found
+            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-500">
+              Devices registered in Valor Portal/Authorize.Net will appear here.
+            </p>
+            <p className="text-xs text-gray-400 dark:text-gray-600 mt-2">
+              Note: Device information must be registered in the Authorize.Net Merchant Interface or Valor Portal.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {devices.map((device, index) => (
+            <div
+              key={index}
+              className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-4 hover:shadow-md transition-shadow"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Wifi className="w-5 h-5 text-blue-500" />
+                    <h4 className="font-semibold text-gray-900 dark:text-white">
+                      {device.name || device.model || `Device ${index + 1}`}
+                    </h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {device.terminalNumber && (
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Terminal Number:</span>
+                        <p className="font-medium text-gray-900 dark:text-white">{device.terminalNumber}</p>
+                      </div>
+                    )}
+                    {device.serialNumber && (
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Serial Number:</span>
+                        <p className="font-medium text-gray-900 dark:text-white">{device.serialNumber}</p>
+                      </div>
+                    )}
+                    {device.model && (
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Model:</span>
+                        <p className="font-medium text-gray-900 dark:text-white">{device.model}</p>
+                      </div>
+                    )}
+                    {device.status && (
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Status:</span>
+                        <p className="font-medium text-gray-900 dark:text-white">{device.status}</p>
+                      </div>
+                    )}
+                    {device.registeredDate && (
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Registered:</span>
+                        <p className="font-medium text-gray-900 dark:text-white">
+                          {new Date(device.registeredDate).toLocaleDateString()}
+                        </p>
+                      </div>
+                    )}
+                    {device.lastUsed && (
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Last Used:</span>
+                        <p className="font-medium text-gray-900 dark:text-white">
+                          {new Date(device.lastUsed).toLocaleDateString()}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  {device.description && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">{device.description}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

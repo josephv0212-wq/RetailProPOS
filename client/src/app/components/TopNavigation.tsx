@@ -82,8 +82,12 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
         {/* Left Section */}
         <div className="flex items-center gap-2 md:gap-6">
           <div className="flex items-center gap-2">
-            <Store className="w-5 h-5 md:w-6 md:h-6 text-blue-600 dark:text-blue-400" />
-            <span className="font-bold text-blue-600 dark:text-blue-400 text-sm md:text-base">RetailPro POS</span>
+            <img 
+              src="/sz_logo-01-est2001-1.webp" 
+              alt="RetailPro POS Logo" 
+              className="h-8 md:h-10 w-auto object-contain"
+            />
+            <span className="font-bold text-blue-600 dark:text-blue-400 text-sm md:text-base hidden sm:inline">RetailPro POS</span>
           </div>
           
           <div className="hidden md:block h-6 w-px bg-gray-300 dark:bg-gray-600" />

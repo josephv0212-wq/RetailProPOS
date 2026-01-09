@@ -5,7 +5,7 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { checkPaymentStatus, pollPaymentStatus } from '../services/authorizeNetTerminalService.js';
+import { checkPaymentStatus, pollPaymentStatus, getAuthorizeNetDevices } from '../services/authorizeNetTerminalService.js';
 
 const router = express.Router();
 
@@ -41,6 +41,32 @@ router.get('/status/:transactionId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to check payment status',
+      ...(isDevelopment && { error: error.message })
+    });
+  }
+});
+
+/**
+ * GET /payment/devices
+ * Get list of devices/terminals registered with Authorize.Net
+ */
+router.get('/devices', async (req, res) => {
+  try {
+    const result = await getAuthorizeNetDevices();
+    
+    res.json({
+      success: result.success,
+      message: result.message,
+      data: {
+        devices: result.devices || []
+      }
+    });
+  } catch (error) {
+    console.error('Get devices error:', error);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch devices',
       ...(isDevelopment && { error: error.message })
     });
   }
