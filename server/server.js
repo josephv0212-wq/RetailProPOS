@@ -18,6 +18,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { Customer, User } from './models/index.js';
 import bcrypt from 'bcryptjs';
 import { syncCustomersToDatabase } from './controllers/zohoController.js';
+import { logServerStart, logDatabase, logSuccess, logWarning, logError, logInfo, log } from './utils/logger.js';
 
 dotenv.config();
 
@@ -63,15 +64,15 @@ const optionalButRecommended = [
 
 const missing = requiredEnvVars.filter(key => !process.env[key]);
 if (missing.length > 0) {
-  console.error('❌ Missing required environment variables:', missing.join(', '));
-  console.error('Please set these variables before starting the server.');
+  logError(`Missing required environment variables: ${missing.join(', ')}`);
+  logError('Please set these variables before starting the server.');
   process.exit(1);
 }
 
 const missingOptional = optionalButRecommended.filter(key => !process.env[key]);
 if (missingOptional.length > 0) {
-  console.warn('⚠️  Missing optional environment variables:', missingOptional.join(', '));
-  console.warn('Some features may not work correctly without these.');
+  logWarning(`Missing optional environment variables: ${missingOptional.join(', ')}`);
+  logWarning('Some features may not work correctly without these.');
 }
 
 const app = express();
@@ -204,7 +205,7 @@ const cleanupBackupTables = async () => {
         }
       }
     } catch (error) {
-      console.warn('⚠️  Warning: Could not clean up backup tables:', error.message);
+      logWarning(`Could not clean up backup tables: ${error.message}`);
       // Don't fail if cleanup fails, continue with sync
     }
   }
@@ -221,7 +222,7 @@ const checkAndSyncCustomers = async () => {
     const customerCount = await Customer.count();
     
     if (customerCount === 0) {
-      console.log('📋 No customers found in database. Syncing from Zoho...');
+      logInfo('No customers found in database. Syncing from Zoho...');
       
       // Check if Zoho credentials are available
       const hasZohoCredentials = 
@@ -231,23 +232,23 @@ const checkAndSyncCustomers = async () => {
         process.env.ZOHO_ORGANIZATION_ID;
       
       if (!hasZohoCredentials) {
-        console.warn('⚠️  Zoho credentials not configured. Skipping customer sync.');
-        console.warn('   Set ZOHO_REFRESH_TOKEN, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, and ZOHO_ORGANIZATION_ID to enable sync.');
+        logWarning('Zoho credentials not configured. Skipping customer sync.');
+        log('Set ZOHO_REFRESH_TOKEN, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, and ZOHO_ORGANIZATION_ID to enable sync.');
         return;
       }
       
       try {
         const result = await syncCustomersToDatabase();
-        console.log(`✅ Customer sync completed: ${result.stats.created} created, ${result.stats.updated} updated (${result.stats.total} total)`);
+        logSuccess(`Customer sync completed: ${result.stats.created} created, ${result.stats.updated} updated (${result.stats.total} total)`);
       } catch (syncError) {
-        console.error('❌ Failed to sync customers from Zoho:', syncError.message);
-        console.error('   The server will continue to run, but customers may not be available.');
+        logError('Failed to sync customers from Zoho', syncError);
+        log('The server will continue to run, but customers may not be available.');
       }
     } else {
-      console.log(`✅ Found ${customerCount} customer(s) in database. Skipping sync.`);
+      logSuccess(`Found ${customerCount} customer(s) in database. Skipping sync.`);
     }
   } catch (error) {
-    console.error('❌ Error checking customers:', error.message);
+    logError('Error checking customers', error);
     // Don't fail server startup if customer check fails
   }
 };
@@ -256,9 +257,9 @@ const disableSQLiteForeignKeys = async () => {
   if (DATABASE_SETTING === 'local') {
     try {
       await sequelize.query('PRAGMA foreign_keys = OFF');
-      console.log('🔐 SQLite foreign key checks disabled for schema sync');
+      logDatabase('SQLite foreign key checks disabled for schema sync');
     } catch (err) {
-      console.warn('⚠️ Failed to disable SQLite foreign keys:', err.message);
+      logWarning(`Failed to disable SQLite foreign keys: ${err.message}`);
     }
   }
 };
@@ -267,9 +268,9 @@ const enableSQLiteForeignKeys = async () => {
   if (DATABASE_SETTING === 'local') {
     try {
       await sequelize.query('PRAGMA foreign_keys = ON');
-      console.log('🔐 SQLite foreign key checks re-enabled');
+      logDatabase('SQLite foreign key checks re-enabled');
     } catch (err) {
-      console.warn('⚠️ Failed to re-enable SQLite foreign keys:', err.message);
+      logWarning(`Failed to re-enable SQLite foreign keys: ${err.message}`);
     }
   }
 };
@@ -280,15 +281,43 @@ const ensureItemImageColumn = async () => {
     // This ALTER is safe to run repeatedly; on second run it will throw
     // "duplicate column name", which we catch and ignore.
     await sequelize.query('ALTER TABLE `Items` ADD COLUMN `imageData` TEXT');
-    console.log('✅ Added imageData column to Items table');
+    logSuccess('Added imageData column to Items table');
   } catch (err) {
     const msg = err?.message || '';
     if (msg.includes('duplicate column name') || msg.includes('duplicate column')) {
-      console.log('ℹ️  imageData column already exists on Items table');
+      logInfo('imageData column already exists on Items table');
       return;
     }
     // If the table doesn't exist or other error, log but don't crash server
-    console.warn('⚠️  Could not ensure imageData column on Items table:', msg);
+    logWarning(`Could not ensure imageData column on Items table: ${msg}`);
+  }
+};
+
+// Ensure bankAccountLast4 column exists on Customers table (for SQLite / auto-sync disabled)
+const ensureBankAccountColumn = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      // SQLite syntax - Add bankAccountLast4 column
+      try {
+        await sequelize.query('ALTER TABLE `Customers` ADD COLUMN `bankAccountLast4` VARCHAR(255) NULL');
+        logSuccess('Added bankAccountLast4 column to Customers table');
+      } catch (err) {
+        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
+          throw err;
+        }
+        logInfo('bankAccountLast4 column already exists on Customers table');
+      }
+    } else {
+      // PostgreSQL syntax - Add bankAccountLast4 column
+      try {
+        await sequelize.query('ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "bankAccountLast4" VARCHAR(255) NULL');
+        logSuccess('Added bankAccountLast4 column to Customers table');
+      } catch (err) {
+        logWarning(`Could not ensure bankAccountLast4 column: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    logWarning(`Could not ensure bankAccountLast4 column on Customers table: ${err.message}`);
   }
 };
 
@@ -299,62 +328,62 @@ const ensureTerminalColumns = async () => {
       // SQLite syntax - Add terminalIP column
       try {
         await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalIP` VARCHAR(255) NULL');
-        console.log('✅ Added terminalIP column to Users table');
+        logSuccess('Added terminalIP column to Users table');
       } catch (err) {
         if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
           throw err;
         }
-        console.log('ℹ️  terminalIP column already exists on Users table');
+        logInfo('terminalIP column already exists on Users table');
       }
       
       // SQLite syntax - Add terminalPort column
       try {
         await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalPort` INTEGER NULL');
-        console.log('✅ Added terminalPort column to Users table');
+        logSuccess('Added terminalPort column to Users table');
       } catch (err) {
         if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
           throw err;
         }
-        console.log('ℹ️  terminalPort column already exists on Users table');
+        logInfo('terminalPort column already exists on Users table');
       }
       
       // SQLite syntax - Add terminalNumber column
       try {
         await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalNumber` VARCHAR(255) NULL');
-        console.log('✅ Added terminalNumber column to Users table');
+        logSuccess('Added terminalNumber column to Users table');
       } catch (err) {
         if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
           throw err;
         }
-        console.log('ℹ️  terminalNumber column already exists on Users table');
+        logInfo('terminalNumber column already exists on Users table');
       }
     } else {
       // PostgreSQL syntax - Add terminalIP column
       try {
         await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalIP" VARCHAR(255) NULL');
-        console.log('✅ Added terminalIP column to Users table');
+        logSuccess('Added terminalIP column to Users table');
       } catch (err) {
-        console.warn('⚠️  Could not ensure terminalIP column:', err.message);
+        logWarning(`Could not ensure terminalIP column: ${err.message}`);
       }
       
       // PostgreSQL syntax - Add terminalPort column
       try {
         await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalPort" INTEGER NULL');
-        console.log('✅ Added terminalPort column to Users table');
+        logSuccess('Added terminalPort column to Users table');
       } catch (err) {
-        console.warn('⚠️  Could not ensure terminalPort column:', err.message);
+        logWarning(`Could not ensure terminalPort column: ${err.message}`);
       }
       
       // PostgreSQL syntax - Add terminalNumber column
       try {
         await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalNumber" VARCHAR(255) NULL');
-        console.log('✅ Added terminalNumber column to Users table');
+        logSuccess('Added terminalNumber column to Users table');
       } catch (err) {
-        console.warn('⚠️  Could not ensure terminalNumber column:', err.message);
+        logWarning(`Could not ensure terminalNumber column: ${err.message}`);
       }
     }
   } catch (err) {
-    console.warn('⚠️  Could not ensure terminal columns on Users table:', err.message);
+    logWarning(`Could not ensure terminal columns on Users table: ${err.message}`);
   }
 };
 
@@ -376,9 +405,11 @@ const startServer = async () => {
   if (DATABASE_SETTING === 'local') {
     await ensureItemImageColumn();
     await ensureTerminalColumns();
+    await ensureBankAccountColumn();
   } else {
     // For PostgreSQL, also ensure columns exist
     await ensureTerminalColumns();
+    await ensureBankAccountColumn();
   }
 
   // Admin user creation handled by bootstrap login (see authController.js)
@@ -386,26 +417,27 @@ const startServer = async () => {
   await checkAndSyncCustomers();
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log('✅ RetailPro POS Backend running on port', PORT);
-    console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`📍 Database Setting: ${DATABASE_SETTING} (${DATABASE_SETTING === 'local' ? 'SQLite' : 'PostgreSQL'})`);
-    console.log('📍 Endpoints available:');
-    console.log('   - GET  /health (health check)');
-    console.log('   - POST /auth/login');
-    console.log('   - POST /auth/users');
-    console.log('   - GET  /auth/me');
-    console.log('   - POST /sales');
-    console.log('   - GET  /sales');
-    console.log('   - GET  /items');
-    console.log('   - GET  /customers');
-    console.log('   - POST /zoho/sync/all');
+    logServerStart(PORT, process.env.NODE_ENV || 'development');
+    logDatabase(`Database: ${DATABASE_SETTING} (${DATABASE_SETTING === 'local' ? 'SQLite' : 'PostgreSQL'})`);
+    log('');
+    log('Available Endpoints:');
+    log('  GET  /health (health check)');
+    log('  POST /auth/login');
+    log('  POST /auth/users');
+    log('  GET  /auth/me');
+    log('  POST /sales');
+    log('  GET  /sales');
+    log('  GET  /items');
+    log('  GET  /customers');
+    log('  POST /zoho/sync/all');
     if (process.env.NODE_ENV === 'production') {
-      console.log('⚠️  Database auto-sync is disabled. Use migrations for schema changes.');
+      logWarning('Database auto-sync is disabled. Use migrations for schema changes.');
     }
+    console.log('');
   });
 };
 
 startServer().catch(err => {
-  console.error('❌ DB connection failed:', err);
+  logError('DB connection failed', err);
   process.exit(1);
 });

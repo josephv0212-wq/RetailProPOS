@@ -20,13 +20,19 @@
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "jsonwebtoken": "^9.0.2",
+    "nodemon": "",
     "pg": "^8.11.3",
     "sequelize": "^6.36.0",
     "sqlite3": "^5.1.6",
     "uuid": "^9.0.1",
-    "nodemon": ""
+    "xml2js": "^0.6.2"
   },
-  "keywords": ["pos", "retail", "backend", "api"],
+  "keywords": [
+    "pos",
+    "retail",
+    "backend",
+    "api"
+  ],
   "author": "",
   "license": "MIT"
 }

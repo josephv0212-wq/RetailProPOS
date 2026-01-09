@@ -803,7 +803,6 @@ export const getItemsFromPricebook = async (pricebookId) => {
 
 export const getItemsFromPricebookByName = async (pricebookName) => {
   try {
-    console.log(`Looking up pricebook by name: "${pricebookName}"`);
     const pricebook = await getPricebookByName(pricebookName);
     
     if (!pricebook) {

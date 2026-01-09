@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { parseStringPromise } from 'xml2js';
 dotenv.config();
 
 // Use sandbox endpoint in development, production endpoint in production
@@ -177,4 +178,422 @@ export const voidTransaction = async (transactionId) => {
       error: error.message
     };
   }
+};
+
+/**
+ * Get customer profile by customer profile ID
+ * Note: Authorize.net CIM API uses XML format, but we'll try JSON first
+ * @param {string} customerProfileId - The Authorize.net customer profile ID
+ * @returns {Promise<Object>} Customer profile details
+ */
+export const getCustomerProfile = async (customerProfileId) => {
+  // Authorize.net CIM API uses XML format
+  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<getCustomerProfileRequest xmlns="AnetApi/xml/v1/schema/AnetApiSchema.xsd">
+  <merchantAuthentication>
+    <name>${process.env.AUTHORIZE_NET_API_LOGIN_ID}</name>
+    <transactionKey>${process.env.AUTHORIZE_NET_TRANSACTION_KEY}</transactionKey>
+  </merchantAuthentication>
+  <customerProfileId>${customerProfileId}</customerProfileId>
+</getCustomerProfileRequest>`;
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, xmlBody, {
+      headers: {
+        'Content-Type': 'text/xml'
+      }
+    });
+
+    // Parse XML response
+    const result = await parseStringPromise(response.data);
+
+    const messages = result.getCustomerProfileResponse?.messages?.[0];
+    const resultCode = messages?.resultCode?.[0];
+
+    if (resultCode === 'Ok') {
+      const profile = result.getCustomerProfileResponse?.profile?.[0];
+      return {
+        success: true,
+        profile: profile
+      };
+    } else {
+      const errorText = messages?.message?.[0]?.text?.[0] || 'Failed to get customer profile';
+      return {
+        success: false,
+        error: errorText
+      };
+    }
+  } catch (error) {
+    console.error('Get Customer Profile Error:', error.message);
+    if (error.response?.data) {
+      console.error('Response data:', error.response.data);
+    }
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message
+    };
+  }
+};
+
+/**
+ * Get all customer profile IDs
+ * Note: Authorize.net CIM API uses XML format
+ * @returns {Promise<Object>} List of customer profile IDs
+ */
+export const getCustomerProfileIds = async () => {
+  // Authorize.net CIM API uses XML format
+  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<getCustomerProfileIdsRequest xmlns="AnetApi/xml/v1/schema/AnetApiSchema.xsd">
+  <merchantAuthentication>
+    <name>${process.env.AUTHORIZE_NET_API_LOGIN_ID}</name>
+    <transactionKey>${process.env.AUTHORIZE_NET_TRANSACTION_KEY}</transactionKey>
+  </merchantAuthentication>
+</getCustomerProfileIdsRequest>`;
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, xmlBody, {
+      headers: {
+        'Content-Type': 'text/xml'
+      }
+    });
+
+    // Parse XML response
+    const result = await parseStringPromise(response.data);
+
+    const messages = result.getCustomerProfileIdsResponse?.messages?.[0];
+    const resultCode = messages?.resultCode?.[0];
+
+    if (resultCode === 'Ok') {
+      const ids = result.getCustomerProfileIdsResponse?.ids?.[0]?.numericString || [];
+      const profileIds = Array.isArray(ids) ? ids : [ids].filter(Boolean);
+      return {
+        success: true,
+        profileIds: profileIds
+      };
+    } else {
+      const errorText = messages?.message?.[0]?.text?.[0] || 'Failed to get customer profile IDs';
+      return {
+        success: false,
+        error: errorText,
+        profileIds: []
+      };
+    }
+  } catch (error) {
+    console.error('Get Customer Profile IDs Error:', error.message);
+    if (error.response?.data) {
+      console.error('Response data:', error.response.data);
+    }
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message,
+      profileIds: []
+    };
+  }
+};
+
+/**
+ * Attempt to find customer profile by email using duplicate create workaround
+ * Authorize.net enforces uniqueness for Merchant Customer ID and Email.
+ * If we try to create a duplicate, it returns an error with the existing customerProfileId.
+ * Note: Authorize.net CIM API uses XML format
+ * @param {string} email - Customer email
+ * @param {string} merchantCustomerId - Optional merchant customer ID
+ * @returns {Promise<Object>} Customer profile ID if found
+ */
+export const findCustomerProfileByEmail = async (email, merchantCustomerId = null) => {
+  if (!email) {
+    return {
+      success: false,
+      error: 'Email is required'
+    };
+  }
+
+  // Use email as merchant customer ID if not provided
+  const customerId = merchantCustomerId || email.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20);
+
+  // Authorize.net CIM API uses XML format
+  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<createCustomerProfileRequest xmlns="AnetApi/xml/v1/schema/AnetApiSchema.xsd">
+  <merchantAuthentication>
+    <name>${process.env.AUTHORIZE_NET_API_LOGIN_ID}</name>
+    <transactionKey>${process.env.AUTHORIZE_NET_TRANSACTION_KEY}</transactionKey>
+  </merchantAuthentication>
+  <profile>
+    <merchantCustomerId>${customerId}</merchantCustomerId>
+    <email>${email}</email>
+  </profile>
+</createCustomerProfileRequest>`;
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, xmlBody, {
+      headers: {
+        'Content-Type': 'text/xml'
+      }
+    });
+
+    // Parse XML response
+    const result = await parseStringPromise(response.data);
+
+    const messages = result.createCustomerProfileResponse?.messages?.[0];
+    const resultCode = messages?.resultCode?.[0];
+
+    // If successful, profile was created (new customer)
+    if (resultCode === 'Ok') {
+      const profileId = result.createCustomerProfileResponse?.customerProfileId?.[0];
+      if (profileId) {
+        return {
+          success: true,
+          customerProfileId: profileId,
+          isNew: true
+        };
+      }
+    }
+
+    // Check for duplicate error
+    const errorCode = messages?.message?.[0]?.code?.[0] || '';
+    const errorText = messages?.message?.[0]?.text?.[0] || '';
+
+    // Authorize.net error code E00039 indicates duplicate profile
+    if (errorCode === 'E00039' || errorText.includes('duplicate') || errorText.includes('already exists')) {
+      // Try to extract customer profile ID from error message
+      // Error format: "A duplicate customer profile already exists with customer profile ID: 12345678"
+      const profileIdMatch = errorText.match(/customer profile ID[:\s]+(\d+)/i) || 
+                             errorText.match(/ID[:\s]+(\d+)/i);
+      
+      if (profileIdMatch && profileIdMatch[1]) {
+        return {
+          success: true,
+          customerProfileId: profileIdMatch[1],
+          isNew: false
+        };
+      }
+
+      // If we can't extract ID from error, try iterative search
+      return {
+        success: false,
+        error: 'Duplicate found but could not extract profile ID',
+        shouldSearch: true
+      };
+    }
+
+    return {
+      success: false,
+      error: errorText || 'Unexpected response'
+    };
+  } catch (error) {
+    // Try to parse XML error response
+    if (error.response?.data) {
+      try {
+        const result = await parseStringPromise(error.response.data);
+        
+        const messages = result.createCustomerProfileResponse?.messages?.[0];
+        const errorCode = messages?.message?.[0]?.code?.[0] || '';
+        const errorText = messages?.message?.[0]?.text?.[0] || '';
+
+        // Authorize.net error code E00039 indicates duplicate profile
+        if (errorCode === 'E00039' || errorText.includes('duplicate') || errorText.includes('already exists')) {
+          const profileIdMatch = errorText.match(/customer profile ID[:\s]+(\d+)/i) || 
+                                 errorText.match(/ID[:\s]+(\d+)/i);
+          
+          if (profileIdMatch && profileIdMatch[1]) {
+            return {
+              success: true,
+              customerProfileId: profileIdMatch[1],
+              isNew: false
+            };
+          }
+
+          return {
+            success: false,
+            error: 'Duplicate found but could not extract profile ID',
+            shouldSearch: true
+          };
+        }
+
+        return {
+          success: false,
+          error: errorText || error.message
+        };
+      } catch (parseError) {
+        // If XML parsing fails, return generic error
+      }
+    }
+
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Search for customer profile by iterating through all profile IDs
+ * This is only recommended for small datasets
+ * Prioritizes name matching over email matching
+ * @param {string} name - Customer name to search for (primary)
+ * @param {string} email - Customer email to search for (fallback)
+ * @returns {Promise<Object>} Customer profile if found
+ */
+export const searchCustomerProfileIteratively = async (name = null, email = null) => {
+  try {
+    // Get all customer profile IDs
+    const idsResult = await getCustomerProfileIds();
+    
+    if (!idsResult.success || !idsResult.profileIds || idsResult.profileIds.length === 0) {
+      return {
+        success: false,
+        error: 'No customer profiles found or failed to retrieve profile IDs'
+      };
+    }
+
+    // Silently search through profiles
+
+    // Search through each profile
+    for (const profileId of idsResult.profileIds) {
+      try {
+        const profileResult = await getCustomerProfile(profileId);
+        
+        if (profileResult.success && profileResult.profile) {
+          const profile = profileResult.profile;
+          // XML parsing returns arrays, so we need to handle that
+          const profileEmail = (Array.isArray(profile.email) ? profile.email[0] : profile.email) || '';
+          const profileName = (Array.isArray(profile.description) ? profile.description[0] : profile.description) || 
+                             (Array.isArray(profile.merchantCustomerId) ? profile.merchantCustomerId[0] : profile.merchantCustomerId) || '';
+          
+          // Prioritize name matching first
+          if (name && profileName && profileName.toLowerCase().includes(name.toLowerCase())) {
+            return {
+              success: true,
+              profile: profile,
+              customerProfileId: profileId
+            };
+          }
+          
+          // Fallback to email matching if name doesn't match
+          if (email && profileEmail && profileEmail.toLowerCase() === email.toLowerCase()) {
+            return {
+              success: true,
+              profile: profile,
+              customerProfileId: profileId
+            };
+          }
+        }
+      } catch (err) {
+        // Continue searching if one profile fails
+        continue;
+      }
+    }
+
+    return {
+      success: false,
+      error: 'Customer profile not found'
+    };
+  } catch (error) {
+    console.error('Iterative Search Error:', error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Extract bank account information from Authorize.net customer profile
+ * Handles deeply nested XML array structure: paymentProfiles[].payment[].bankAccount[].accountNumber[]
+ * @param {Object} profile - Authorize.net customer profile
+ * @returns {Object} Bank account info { bankAccountLast4, hasBankAccount }
+ */
+export const extractBankAccountInfo = (profile) => {
+  if (!profile) {
+    return { bankAccountLast4: null, hasBankAccount: false };
+  }
+
+  try {
+    // Authorize.net stores payment profiles in profile.paymentProfiles
+    const paymentProfiles = profile.paymentProfiles || [];
+    
+    // Handle XML array format - paymentProfiles is an array
+    const profiles = Array.isArray(paymentProfiles) ? paymentProfiles : [];
+    
+    // Search through payment profiles for bank account
+    for (const paymentProfile of profiles) {
+      // paymentProfile.payment is an array
+      const payments = Array.isArray(paymentProfile.payment) ? paymentProfile.payment : [];
+      
+      for (const payment of payments) {
+        // payment.bankAccount is an array
+        const bankAccounts = Array.isArray(payment.bankAccount) ? payment.bankAccount : [];
+        
+        for (const bankAccount of bankAccounts) {
+          // bankAccount.accountNumber is an array
+          const accountNumbers = Array.isArray(bankAccount.accountNumber) 
+            ? bankAccount.accountNumber 
+            : (bankAccount.accountNumber ? [bankAccount.accountNumber] : []);
+          
+          for (const accountNumber of accountNumbers) {
+            if (accountNumber && typeof accountNumber === 'string') {
+              // Account number is already masked as "XXXX9500", extract last 4 digits
+              // Remove any non-digit characters and get last 4 digits
+              const digits = accountNumber.replace(/\D/g, '');
+              if (digits.length >= 4) {
+                const last4 = digits.slice(-4);
+                return {
+                  bankAccountLast4: last4,
+                  hasBankAccount: true
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    return { bankAccountLast4: null, hasBankAccount: false };
+  } catch (error) {
+    // Silently fail - no bank account info found
+    return { bankAccountLast4: null, hasBankAccount: false };
+  }
+};
+
+/**
+ * Get customer profile details by name, email, or customer ID
+ * Prioritizes name-based search over email-based search
+ * @param {Object} searchCriteria - Search criteria { name?, email?, customerProfileId?, merchantCustomerId? }
+ * @returns {Promise<Object>} Customer profile details
+ */
+export const getCustomerProfileDetails = async (searchCriteria) => {
+  const { name, email, customerProfileId, merchantCustomerId } = searchCriteria;
+
+  // Method 1: If we have customerProfileId, use it directly
+  if (customerProfileId) {
+    const result = await getCustomerProfile(customerProfileId);
+    if (result.success) {
+      return result;
+    }
+  }
+
+  // Method 2: Iterative search by name (prioritized) or email (fallback)
+  if (name || email) {
+    const result = await searchCustomerProfileIteratively(name || null, email || null);
+    if (result.success) {
+      return result;
+    }
+  }
+
+  // Method 3: Try duplicate create workaround with email (fallback if iterative search fails)
+  if (email && !name) {
+    const result = await findCustomerProfileByEmail(email, merchantCustomerId);
+    if (result.success && result.customerProfileId) {
+      // Now get the full profile
+      const profileResult = await getCustomerProfile(result.customerProfileId);
+      if (profileResult.success) {
+        return profileResult;
+      }
+    }
+  }
+
+  return {
+    success: false,
+    error: 'Customer profile not found using any available method'
+  };
 };

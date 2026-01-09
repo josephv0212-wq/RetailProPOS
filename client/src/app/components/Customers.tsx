@@ -41,13 +41,21 @@ export function Customers({ customers, isLoading = false }: CustomersProps) {
   };
 
   const getPaymentInfo = (customer: Customer) => {
-    if (!customer.paymentInfo?.hasCard) return 'None';
+    const paymentMethods = [];
     
-    if (customer.paymentInfo.cardBrand && customer.paymentInfo.last4) {
-      return `${customer.paymentInfo.cardBrand} •••• ${customer.paymentInfo.last4}`;
+    if (customer.paymentInfo?.hasCard && customer.paymentInfo.cardBrand && customer.paymentInfo.last4) {
+      paymentMethods.push(`${customer.paymentInfo.cardBrand} •••• ${customer.paymentInfo.last4}`);
     }
     
-    return 'Card info saved';
+    if (customer.bankAccountLast4 || customer.paymentInfo?.bankAccountLast4) {
+      paymentMethods.push(`Bank: XXXX${customer.bankAccountLast4 || customer.paymentInfo?.bankAccountLast4}`);
+    }
+    
+    if (paymentMethods.length === 0) {
+      return customer.paymentInfo?.hasCard ? 'Card info saved' : 'None';
+    }
+    
+    return paymentMethods.join(', ');
   };
 
   return (

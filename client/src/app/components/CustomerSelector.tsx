@@ -126,6 +126,11 @@ export function CustomerSelector({ customers, selectedCustomer, onSelectCustomer
                             ({customer.cardBrand}: xxxx xxxx xxxx {customer.last_four_digits})
                           </span>
                         )}
+                        {customer.bankAccountLast4 && (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            (Bank: XXXX{customer.bankAccountLast4})
+                          </span>
+                        )}
                       </div>
                       <div className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                         {customer.company && customer.company !== customer.name && (

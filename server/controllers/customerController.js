@@ -1,7 +1,9 @@
 import { Customer } from '../models/index.js';
 import { Op } from 'sequelize';
 import { getCustomerById as getZohoCustomerById, getCustomerCards, syncCustomersFromZoho } from '../services/zohoService.js';
+import { getCustomerProfileDetails } from '../services/authorizeNetService.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
+import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
 
 const normalizeContactType = (value) => {
   if (!value) return null;
@@ -124,7 +126,7 @@ export const getCustomers = async (req, res) => {
 
     // If no customers found and no search filter, try syncing from Zoho first
     if (customers.length === 0 && !search) {
-      console.log('No customers found in DB. Syncing from Zoho...');
+      logInfo('No customers found in DB. Syncing from Zoho...');
       try {
         const zohoCustomers = await syncCustomersFromZoho();
         
@@ -162,7 +164,7 @@ export const getCustomers = async (req, res) => {
           order: [['contactName', 'ASC']]
         });
       } catch (syncError) {
-        console.error('Failed to sync customers from Zoho:', syncError);
+        logError('Failed to sync customers from Zoho', syncError);
         // Continue to return empty list even if sync fails
       }
     }
@@ -170,7 +172,7 @@ export const getCustomers = async (req, res) => {
     const filteredCustomers = customers.filter(customer => normalizeContactType(customer.contactType) !== 'vendor');
     return sendSuccess(res, { customers: filteredCustomers });
   } catch (err) {
-    console.error('Get customers error:', err);
+    logError('Get customers error', err);
     return sendError(res, 'Failed to fetch customers', 500, err);
   }
 };
@@ -184,9 +186,11 @@ export const getCustomerById = async (req, res) => {
       return sendNotFound(res, 'Customer');
     }
 
+    // Customer data is returned without console logging
+
     return sendSuccess(res, { customer });
   } catch (err) {
-    console.error('Get customer error:', err);
+    logError('Get customer error', err);
     return sendError(res, 'Failed to fetch customer', 500, err);
   }
 };
@@ -202,7 +206,7 @@ export const getCustomerByLocation = async (req, res) => {
 
     return sendSuccess(res, { customers });
   } catch (err) {
-    console.error('Get customers by location error:', err);
+    logError('Get customers by location error', err);
     return sendError(res, 'Failed to fetch customers', 500, err);
   }
 };
@@ -216,6 +220,39 @@ export const getCustomerPriceList = async (req, res) => {
       return sendNotFound(res, 'Customer');
     }
 
+    // Fetch and log Authorize.Net customer profile details
+    try {
+      const searchCriteria = {
+        name: customer.contactName || null,
+        email: customer.email || null,
+        merchantCustomerId: customer.zohoId || null
+      };
+
+      // Only search if we have at least name or email
+      if (searchCriteria.name || searchCriteria.email) {
+        const authorizeNetProfile = await getCustomerProfileDetails(searchCriteria);
+        
+        if (authorizeNetProfile.success && authorizeNetProfile.profile) {
+          // Extract and save bank account information
+          const { extractBankAccountInfo } = await import('../services/authorizeNetService.js');
+          const bankAccountInfo = extractBankAccountInfo(authorizeNetProfile.profile);
+          
+          if (bankAccountInfo.hasBankAccount && bankAccountInfo.bankAccountLast4) {
+            try {
+              await customer.update({
+                bankAccountLast4: bankAccountInfo.bankAccountLast4
+              });
+              console.log(`💳 Bank Account: XXXX${bankAccountInfo.bankAccountLast4}`);
+            } catch (updateError) {
+              // Silently fail - don't log errors
+            }
+          }
+        }
+      }
+    } catch (authNetError) {
+      // Don't fail the request if Authorize.Net lookup fails - silently continue
+    }
+
     // If customer has no Zoho ID, return with existing last_four_digits
     if (!customer.zohoId) {
       return res.json({ 
@@ -227,7 +264,8 @@ export const getCustomerPriceList = async (req, res) => {
           last_four_digits: customer.last_four_digits || null,
           card_type: customer.cardBrand || null,
           has_card_info: customer.last_four_digits ? true : false,
-          card_info_checked: false // Can't check without Zoho ID
+          card_info_checked: false, // Can't check without Zoho ID
+          bank_account_last4: customer.bankAccountLast4 || null
         }
       });
     }
@@ -243,12 +281,6 @@ export const getCustomerPriceList = async (req, res) => {
     let cardInfoChecked = false;
     
     try {
-      if (needsZohoFetch) {
-        console.log(`Fetching Zoho customer details for customer ID: ${customer.zohoId} (last_four_digits not in DB)`);
-      } else {
-        console.log(`Fetching Zoho customer details for customer ID: ${customer.zohoId} (last_four_digits already in DB, skipping card fetch)`);
-      }
-      
       zohoCustomer = await getZohoCustomerById(customer.zohoId);
       
       // Extract pricebook_name from Zoho customer data
@@ -259,8 +291,6 @@ export const getCustomerPriceList = async (req, res) => {
                            zohoCustomer.pricebook?.name ||
                            null;
       
-      console.log(`Customer pricebook name: ${pricebookName || 'none'}`);
-
       // Extract tax preference from Zoho customer data
       // Check multiple possible field names and locations
       let taxPreference = null;
@@ -334,9 +364,9 @@ export const getCustomerPriceList = async (req, res) => {
             hasPaymentMethod: true,
             paymentMethodType: 'card'
           });
-          console.log(`Updated customer ${customer.contactName} with last_four_digits: ${last_four_digits}, cardBrand: ${cardBrand}`);
+          logSuccess(`Updated customer record with card information: ${last_four_digits} (${cardBrand || 'Unknown'})`);
         } catch (updateError) {
-          console.error('Failed to update customer with last_four_digits:', updateError);
+          logError('Failed to update customer with card information', updateError);
           // Continue even if update fails
         }
       }
@@ -359,6 +389,9 @@ export const getCustomerPriceList = async (req, res) => {
       // Use current customer cardBrand if we don't have one from Zoho
       const finalCardBrand = cardBrand || customer.cardBrand || null;
 
+      // Reload customer to get updated bankAccountLast4 if it was just saved
+      await customer.reload();
+      
       return sendSuccess(res, { 
         pricebook_name: pricebookName,
         tax_preference: taxPreference,
@@ -366,15 +399,17 @@ export const getCustomerPriceList = async (req, res) => {
         last_four_digits: last_four_digits,
         card_type: finalCardBrand,
         has_card_info: hasCardInfo,
-        card_info_checked: cardInfoChecked
+        card_info_checked: cardInfoChecked,
+        bank_account_last4: customer.bankAccountLast4 || null
       });
     } catch (zohoError) {
-      console.error('Failed to fetch customer details from Zoho:', zohoError.message);
-      console.error('Zoho error details:', {
-        message: zohoError.message,
-        response: zohoError.response?.data,
-        status: zohoError.response?.status
-      });
+      logError('Failed to fetch customer details from Zoho', zohoError);
+      if (zohoError.response) {
+        log(`  HTTP Status: ${zohoError.response.status}`);
+        if (zohoError.response.data) {
+          log(`  Response:`, zohoError.response.data);
+        }
+      }
       return sendSuccess(res, { 
         pricebook_name: null,
         tax_preference: null,
@@ -382,11 +417,12 @@ export const getCustomerPriceList = async (req, res) => {
         last_four_digits: customer.last_four_digits || null,
         card_type: customer.cardBrand || null,
         has_card_info: customer.last_four_digits ? true : false,
-        card_info_checked: false // Error occurred, couldn't check
+        card_info_checked: false, // Error occurred, couldn't check
+        bank_account_last4: customer.bankAccountLast4 || null
       });
     }
   } catch (err) {
-    console.error('Get customer price list error:', err);
+    logError('Get customer price list error', err);
     return sendError(res, 'Failed to fetch customer price list', 500, err);
   }
 };

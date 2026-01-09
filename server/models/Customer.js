@@ -52,6 +52,9 @@ export const Customer = sequelize.define('Customer', {
   cardBrand: {
     type: DataTypes.STRING
   },
+  bankAccountLast4: {
+    type: DataTypes.STRING
+  },
   paymentMethodId: {
     type: DataTypes.STRING
   },

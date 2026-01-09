@@ -15,6 +15,7 @@ export interface Customer {
   paymentMethodType?: 'card' | null;
   last_four_digits?: string;
   cardBrand?: string;
+  bankAccountLast4?: string;
   isActive: boolean;
   lastSyncedAt?: Date | string | null;
   createdAt?: Date | string;
@@ -29,6 +30,8 @@ export interface Customer {
     cardBrand?: string;
     last4?: string;
     hasCard?: boolean;
+    bankAccountLast4?: string;
+    hasBankAccount?: boolean;
   };
 }
 

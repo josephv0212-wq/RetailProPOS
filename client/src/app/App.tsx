@@ -416,17 +416,21 @@ function AppContent() {
         const card_type = priceListRes.data?.card_type;
         const has_card_info = priceListRes.data?.has_card_info;
         const card_info_checked = priceListRes.data?.card_info_checked;
+        const bank_account_last4 = priceListRes.data?.bank_account_last4;
         
-        // Update customer object with card info
+        // Update customer object with card info and bank account info
         const updatedCustomer: Customer = {
           ...customer,
           last_four_digits: last_four_digits || customer.last_four_digits,
           cardBrand: card_type || customer.cardBrand,
+          bankAccountLast4: bank_account_last4 || customer.bankAccountLast4,
           paymentInfo: {
             ...customer.paymentInfo,
             cardBrand: card_type || customer.cardBrand,
             last4: last_four_digits || customer.last_four_digits,
             hasCard: has_card_info !== undefined ? has_card_info : customer.hasPaymentMethod,
+            bankAccountLast4: bank_account_last4 || customer.bankAccountLast4,
+            hasBankAccount: !!bank_account_last4,
           },
         };
         

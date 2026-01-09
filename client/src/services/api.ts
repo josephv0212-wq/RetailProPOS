@@ -264,6 +264,7 @@ export const customersAPI = {
       card_type: string;
       has_card_info: boolean;
       card_info_checked: boolean;
+      bank_account_last4: string | null;
     }>(`/customers/${id}/price-list`);
   },
 };

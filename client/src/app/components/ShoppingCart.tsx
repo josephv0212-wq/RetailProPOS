@@ -87,6 +87,11 @@ export function ShoppingCart({
                     {selectedCustomer.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits}
                   </div>
                 )}
+                {(selectedCustomer.bankAccountLast4 || selectedCustomer.paymentInfo?.bankAccountLast4) && (
+                  <div className="text-xs text-blue-600 dark:text-blue-400">
+                    Bank: XXXX{selectedCustomer.bankAccountLast4 || selectedCustomer.paymentInfo?.bankAccountLast4}
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -2,6 +2,7 @@ import { Sequelize } from 'sequelize';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { logDatabase } from '../utils/logger.js';
 
 dotenv.config();
 
@@ -31,10 +32,8 @@ if (DATABASE_SETTING === 'local') {
     }
   });
   
-  console.log('📦 Using SQLite database (local mode)');
-  console.log(`📍 Database file: ${dbPath}`);
+  logDatabase(`Using SQLite database (local mode) - ${dbPath}`);
 } else {
-  console.log("~~~~~~~~~~~~~~~~~~~~~~~Database url~~~~~~~~~~~~~~~~~~~~~~~~~~~", process.env.DATABASE_URL);
   // PostgreSQL configuration for cloud database
   if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL is required when DATABASE_SETTING is "cloud"');
@@ -51,7 +50,7 @@ if (DATABASE_SETTING === 'local') {
     }
   });
   
-  console.log('☁️  Using PostgreSQL database (cloud mode)');
+  logDatabase('Using PostgreSQL database (cloud mode)');
 }
 
 export { sequelize };
