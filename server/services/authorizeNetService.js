@@ -597,3 +597,147 @@ export const getCustomerProfileDetails = async (searchCriteria) => {
     error: 'Customer profile not found using any available method'
   };
 };
+
+/**
+ * Charge a customer for an invoice or sales order using Authorize.net CIM
+ * This function uses stored customer payment profiles to process payments
+ * @param {Object} paymentData - Payment data { customerProfileId, customerPaymentProfileId, amount, invoiceNumber, description }
+ * @returns {Promise<Object>} Transaction result
+ */
+export const chargeCustomerProfile = async (paymentData) => {
+  const { customerProfileId, customerPaymentProfileId, amount, invoiceNumber, description } = paymentData;
+
+  if (!customerProfileId || !customerPaymentProfileId) {
+    return {
+      success: false,
+      error: 'Customer profile ID and payment profile ID are required'
+    };
+  }
+
+  if (!amount || amount <= 0) {
+    return {
+      success: false,
+      error: 'Valid amount is required'
+    };
+  }
+
+  // Authorize.net transaction API uses JSON format
+  const requestBody = {
+    createTransactionRequest: {
+      merchantAuthentication: {
+        name: process.env.AUTHORIZE_NET_API_LOGIN_ID,
+        transactionKey: process.env.AUTHORIZE_NET_TRANSACTION_KEY
+      },
+      transactionRequest: {
+        transactionType: 'authCaptureTransaction',
+        amount: parseFloat(amount).toFixed(2),
+        profile: {
+          customerProfileId: customerProfileId.toString(),
+          paymentProfile: {
+            paymentProfileId: customerPaymentProfileId.toString()
+          }
+        },
+        order: {
+          invoiceNumber: invoiceNumber || `INV-${Date.now()}`,
+          description: description || 'Invoice Payment'
+        }
+      }
+    }
+  };
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, requestBody, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const result = response.data.transactionResponse;
+    
+    if (result && result.responseCode === '1') {
+      return {
+        success: true,
+        transactionId: result.transId,
+        authCode: result.authCode,
+        accountNumber: result.accountNumber,
+        message: result.messages?.[0]?.description || 'Transaction approved'
+      };
+    } else {
+      const errorMessage = result?.errors?.[0]?.errorText || result?.messages?.[0]?.description || 'Transaction failed';
+      return {
+        success: false,
+        error: errorMessage,
+        errorCode: result?.errors?.[0]?.errorCode
+      };
+    }
+  } catch (error) {
+    console.error('Authorize.Net CIM Charge Error:', error.message);
+    if (error.response?.data) {
+      console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message
+    };
+  }
+};
+
+/**
+ * Get payment profile IDs from a customer profile
+ * Extracts all payment profile IDs (both credit card and bank account) from a customer profile
+ * @param {Object} profile - Authorize.net customer profile (from getCustomerProfile)
+ * @returns {Array<Object>} Array of payment profiles with IDs and types
+ */
+export const extractPaymentProfiles = (profile) => {
+  if (!profile) {
+    return [];
+  }
+
+  try {
+    const paymentProfiles = profile.paymentProfiles || [];
+    const profiles = Array.isArray(paymentProfiles) ? paymentProfiles : [];
+    const result = [];
+
+    for (const paymentProfile of profiles) {
+      // Extract payment profile ID
+      const paymentProfileId = Array.isArray(paymentProfile.customerPaymentProfileId)
+        ? paymentProfile.customerPaymentProfileId[0]
+        : paymentProfile.customerPaymentProfileId;
+
+      if (!paymentProfileId) continue;
+
+      // Check for credit card
+      const payments = Array.isArray(paymentProfile.payment) ? paymentProfile.payment : [];
+      for (const payment of payments) {
+        if (payment.creditCard && Array.isArray(payment.creditCard)) {
+          const card = payment.creditCard[0];
+          const cardNumber = Array.isArray(card.cardNumber) ? card.cardNumber[0] : card.cardNumber;
+          const expirationDate = Array.isArray(card.expirationDate) ? card.expirationDate[0] : card.expirationDate;
+          
+          result.push({
+            paymentProfileId: paymentProfileId.toString(),
+            type: 'credit_card',
+            cardNumber: cardNumber || 'XXXX',
+            expirationDate: expirationDate || '',
+            isDefault: paymentProfile.billTo && Array.isArray(paymentProfile.billTo) && paymentProfile.billTo[0]?.defaultPaymentProfile === 'true'
+          });
+        } else if (payment.bankAccount && Array.isArray(payment.bankAccount)) {
+          const bankAccount = payment.bankAccount[0];
+          const accountNumber = Array.isArray(bankAccount.accountNumber) ? bankAccount.accountNumber[0] : bankAccount.accountNumber;
+          
+          result.push({
+            paymentProfileId: paymentProfileId.toString(),
+            type: 'ach',
+            accountNumber: accountNumber || 'XXXX',
+            isDefault: paymentProfile.billTo && Array.isArray(paymentProfile.billTo) && paymentProfile.billTo[0]?.defaultPaymentProfile === 'true'
+          });
+        }
+      }
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error extracting payment profiles:', error);
+    return [];
+  }
+};

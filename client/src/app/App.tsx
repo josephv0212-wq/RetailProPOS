@@ -18,6 +18,7 @@ import { useAlert } from './contexts/AlertContext';
 import { Customer, Product, CartItem, PaymentDetails, Sale } from './types';
 import { itemsAPI, customersAPI, salesAPI, zohoAPI } from '../services/api';
 import { SalesOrderInvoiceModal } from './components/SalesOrderInvoiceModal';
+import { PaymentMethodSelector } from './components/PaymentMethodSelector';
 import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
 
@@ -57,6 +58,8 @@ function AppContent() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [isOrderInvoiceModalOpen, setIsOrderInvoiceModalOpen] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
+  const [pendingChargeItems, setPendingChargeItems] = useState<any[]>([]);
 
   // Constants from user data
   const TAX_RATE = user?.taxPercentage ? user.taxPercentage / 100 : 0.0825;
@@ -310,92 +313,123 @@ function AppContent() {
     }
   };
 
-  // Handle selection of sales orders and/or invoices - load items and go to payment
+  // Handle selection of sales orders and/or invoices - show payment method selector first
   const handleSelectOrdersInvoices = async (items: any[]) => {
     if (items.length === 0) return;
 
-    try {
-      // Load all products first
-      await loadProducts();
-      await new Promise(resolve => setTimeout(resolve, 300));
+    if (!selectedCustomer || !selectedCustomer.id) {
+      showToast('Customer must be selected to charge invoices/sales orders', 'error', 4000);
+      return;
+    }
 
-      const newCartItems: CartItem[] = [];
-      const itemDetails: any[] = [];
-
-      // Fetch details for all selected items
-      for (const item of items) {
-        try {
-          let lineItems: any[] = [];
-          
-          if (item.type === 'salesorder') {
-            const response = await zohoAPI.getSalesOrderDetails(item.salesorder_id);
-            if (response.success && response.data?.salesOrder) {
-              lineItems = response.data.salesOrder.line_items || [];
-              itemDetails.push({ ...item, lineItems, name: item.salesorder_number });
-            }
-          } else if (item.type === 'invoice') {
-            const response = await zohoAPI.getInvoiceDetails(item.invoice_id);
-            if (response.success && response.data?.invoice) {
-              lineItems = response.data.invoice.line_items || [];
-              itemDetails.push({ ...item, lineItems, name: item.invoice_number });
-            }
-          }
-
-          // Match line items with products and add to cart
-          for (const lineItem of lineItems) {
-            let product = products.find(p => p.zohoId === lineItem.item_id);
-            
-            if (!product) {
-              product = products.find(p => 
-                p.sku === lineItem.sku || 
-                p.name.toLowerCase() === (lineItem.name || '').toLowerCase()
-              );
-            }
-
-            if (product) {
-              const existingItem = newCartItems.find(item => item.product.id === product!.id);
-              if (existingItem) {
-                existingItem.quantity += parseFloat(lineItem.quantity || 1);
-              } else {
-                newCartItems.push({
-                  product,
-                  quantity: parseFloat(lineItem.quantity || 1)
-                });
-              }
-            } else {
-              console.warn(`Product not found for item: ${lineItem.name || lineItem.sku}`);
-            }
-          }
-        } catch (err: any) {
-          console.error(`Failed to load ${item.type}:`, err);
-          showToast(`Failed to load ${item.type === 'salesorder' ? 'sales order' : 'invoice'} ${item.type === 'salesorder' ? item.salesorder_number : item.invoice_number}`, 'error', 4000);
-        }
+    // Prepare items for charging - extract amounts
+    const chargeItems = items.map(item => {
+      if (item.type === 'invoice') {
+        // For invoices, use balance (outstanding amount) if available, otherwise use total
+        const amount = item.balance > 0 ? item.balance : item.total;
+        return {
+          type: 'invoice' as const,
+          id: item.invoice_id,
+          number: item.invoice_number,
+          amount: parseFloat(amount)
+        };
+      } else if (item.type === 'salesorder') {
+        // For sales orders, use total
+        return {
+          type: 'salesorder' as const,
+          id: item.salesorder_id,
+          number: item.salesorder_number,
+          amount: parseFloat(item.total)
+        };
       }
+      return null;
+    }).filter(Boolean) as Array<{
+      type: 'invoice' | 'salesorder';
+      id: string;
+      number: string;
+      amount: number;
+    }>;
 
-      if (newCartItems.length > 0) {
-        // Clear existing cart and set new items
-        setCartItems(newCartItems);
-        const itemNames = itemDetails.map(d => d.name).join(', ');
-        showToast(`Loaded ${newCartItems.length} item(s) from ${items.length} selected order(s)`, 'success', 4000);
-        
-        // Close modal
-        setIsOrderInvoiceModalOpen(false);
-        setOpenSalesOrders([]);
-        setInvoices([]);
-        
-        // Continue with customer selection to set up pricebook, then go to payment
-        await continueCustomerSelection(selectedCustomer);
-        
-        // Open payment modal directly
-        if (selectedCustomer && newCartItems.length > 0) {
-          setIsPaymentModalOpen(true);
+    if (chargeItems.length === 0) {
+      showToast('No valid items to charge', 'error', 4000);
+      return;
+    }
+
+    // Store items and show payment method selector
+    setPendingChargeItems(chargeItems);
+    setIsOrderInvoiceModalOpen(false);
+    setOpenSalesOrders([]);
+    setInvoices([]);
+    setIsPaymentMethodSelectorOpen(true);
+  };
+
+  // Handle payment method selection and charge
+  const handlePaymentMethodSelected = async (paymentProfileId: string) => {
+    if (!selectedCustomer || !selectedCustomer.id || pendingChargeItems.length === 0) {
+      return;
+    }
+
+    try {
+      // Show loading state
+      setLoadingOrders(true);
+      setIsPaymentMethodSelectorOpen(false);
+
+      // Charge invoices/sales orders via Authorize.net CIM
+      const response = await salesAPI.chargeInvoicesSalesOrders({
+        customerId: selectedCustomer.id,
+        paymentProfileId,
+        items: pendingChargeItems
+      });
+
+      if (response.success && response.data) {
+        const { results, errors, summary } = response.data;
+
+        // Clear pending items
+        setPendingChargeItems([]);
+
+        // Show results
+        if (summary.successful > 0) {
+          const totalAmount = results.reduce((sum, r) => sum + r.amount, 0);
+          showToast(
+            `Successfully charged ${summary.successful} item(s) totaling $${totalAmount.toFixed(2)}`,
+            'success',
+            5000
+          );
+        }
+
+        if (summary.failed > 0) {
+          const errorMessages = errors.map(e => `${e.item.type} ${e.item.number}: ${e.error}`).join('\n');
+          showAlert({
+            title: 'Some charges failed',
+            message: `Failed to charge ${summary.failed} item(s):\n\n${errorMessages}`
+          });
+        }
+
+        // If all succeeded, show success message
+        if (summary.failed === 0) {
+          const transactionIds = results.map(r => r.transactionId).join(', ');
+          showToast(
+            `All charges processed successfully. Transaction IDs: ${transactionIds}`,
+            'success',
+            6000
+          );
         }
       } else {
-        showToast('No matching products found for selected items', 'warning', 4000);
+        showToast(
+          response.error || 'Failed to charge invoices/sales orders',
+          'error',
+          5000
+        );
       }
     } catch (err: any) {
-      console.error('Failed to load selected items:', err);
-      showToast('Failed to load items from selected orders', 'error', 4000);
+      console.error('Failed to charge invoices/sales orders:', err);
+      showToast(
+        err.message || 'Failed to charge invoices/sales orders',
+        'error',
+        5000
+      );
+    } finally {
+      setLoadingOrders(false);
     }
   };
 
@@ -883,6 +917,21 @@ function AppContent() {
           invoices={invoices}
           onSelectItems={handleSelectOrdersInvoices}
           customerName={selectedCustomer.name || selectedCustomer.contactName}
+        />
+      )}
+
+      {/* Payment Method Selector Modal */}
+      {selectedCustomer && (
+        <PaymentMethodSelector
+          isOpen={isPaymentMethodSelectorOpen}
+          onClose={() => {
+            setIsPaymentMethodSelectorOpen(false);
+            setPendingChargeItems([]);
+          }}
+          onSelect={handlePaymentMethodSelected}
+          customerId={selectedCustomer.id}
+          customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
+          loading={loadingOrders}
         />
       )}
     </div>

@@ -1,7 +1,7 @@
 import { Customer } from '../models/index.js';
 import { Op } from 'sequelize';
 import { getCustomerById as getZohoCustomerById, getCustomerCards, syncCustomersFromZoho } from '../services/zohoService.js';
-import { getCustomerProfileDetails } from '../services/authorizeNetService.js';
+import { getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
 import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
 
@@ -424,5 +424,88 @@ export const getCustomerPriceList = async (req, res) => {
   } catch (err) {
     logError('Get customer price list error', err);
     return sendError(res, 'Failed to fetch customer price list', 500, err);
+  }
+};
+
+/**
+ * Get customer payment profiles from Authorize.net CIM
+ * GET /customers/:id/payment-profiles
+ */
+export const getCustomerPaymentProfiles = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const customer = await Customer.findByPk(id);
+
+    if (!customer) {
+      return sendNotFound(res, 'Customer');
+    }
+
+    // Try to get customer profile from Authorize.net
+    let customerProfileId = customer.customerProfileId;
+    let profile = null;
+
+    // If we have stored profile ID, use it directly
+    if (customerProfileId) {
+      const { getCustomerProfile } = await import('../services/authorizeNetService.js');
+      const profileResult = await getCustomerProfile(customerProfileId);
+      if (profileResult.success) {
+        profile = profileResult.profile;
+      }
+    }
+
+    // If not found or not stored, search for it
+    if (!profile) {
+      const searchCriteria = {
+        name: customer.contactName || null,
+        email: customer.email || null,
+        merchantCustomerId: customer.zohoId || null
+      };
+
+      if (searchCriteria.name || searchCriteria.email) {
+        const profileResult = await getCustomerProfileDetails(searchCriteria);
+        
+        if (profileResult.success && profileResult.profile) {
+          profile = profileResult.profile;
+          customerProfileId = Array.isArray(profile.customerProfileId)
+            ? profile.customerProfileId[0]
+            : profile.customerProfileId;
+
+          // Store profile ID for future use
+          if (customerProfileId) {
+            await customer.update({
+              customerProfileId: customerProfileId.toString()
+            });
+          }
+        }
+      }
+    }
+
+    if (!profile) {
+      return sendSuccess(res, {
+        customerProfileId: null,
+        paymentProfiles: [],
+        message: 'Customer does not have a payment profile in Authorize.net'
+      });
+    }
+
+    // Extract payment profiles
+    const paymentProfiles = extractPaymentProfiles(profile);
+
+    // Get the stored payment profile ID if available
+    const storedPaymentProfileId = customer.customerPaymentProfileId;
+
+    // Mark default/stored profile
+    const profilesWithDefault = paymentProfiles.map(p => ({
+      ...p,
+      isStored: p.paymentProfileId === storedPaymentProfileId
+    }));
+
+    return sendSuccess(res, {
+      customerProfileId: customerProfileId?.toString() || null,
+      paymentProfiles: profilesWithDefault
+    });
+  } catch (err) {
+    logError('Get customer payment profiles error', err);
+    return sendError(res, 'Failed to fetch customer payment profiles', 500, err);
   }
 };

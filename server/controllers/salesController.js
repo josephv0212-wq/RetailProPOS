@@ -1,6 +1,6 @@
 import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer } from '../models/index.js';
-import { processPayment, processAchPayment, calculateCreditCardFee } from '../services/authorizeNetService.js';
+import { processPayment, processAchPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
 import { processTerminalPayment } from '../services/paxTerminalService.js';
 import { processTerminalPayment as processEBizChargePayment } from '../services/ebizchargeTerminalService.js';
 import { processBluetoothPayment } from '../services/bbposService.js';
@@ -660,5 +660,208 @@ export const getSyncStatus = async (req, res) => {
   } catch (err) {
     console.error('Get sync status error:', err);
     return sendError(res, 'Failed to fetch sync status', 500, err);
+  }
+};
+
+/**
+ * Charge customer for selected invoices and/or sales orders using Authorize.net CIM
+ * POST /sales/charge-invoices
+ * Body: { customerId, items: [{ type: 'invoice'|'salesorder', id: string, number: string, amount: number }] }
+ */
+export const chargeInvoicesSalesOrders = async (req, res) => {
+  try {
+    const { customerId, items, paymentProfileId } = req.body;
+
+    if (!customerId) {
+      return sendValidationError(res, 'Customer ID is required');
+    }
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return sendValidationError(res, 'At least one invoice or sales order must be provided');
+    }
+
+    if (!paymentProfileId) {
+      return sendValidationError(res, 'Payment profile ID is required');
+    }
+
+    // Get customer from database
+    const customer = await Customer.findByPk(customerId);
+    if (!customer) {
+      return sendNotFound(res, 'Customer');
+    }
+
+    // Get or find customer's Authorize.net profile
+    let customerProfileId = customer.customerProfileId;
+    let customerPaymentProfileId = paymentProfileId; // Use the provided payment profile ID
+
+    // If profile IDs are not stored, try to find them
+    if (!customerProfileId || !customerPaymentProfileId) {
+      console.log(`🔍 Customer ${customer.contactName} does not have stored profile IDs. Searching Authorize.net...`);
+      
+      const searchCriteria = {
+        name: customer.contactName,
+        email: customer.email,
+        merchantCustomerId: customer.zohoId
+      };
+
+      const profileResult = await getCustomerProfileDetails(searchCriteria);
+      
+      if (!profileResult.success || !profileResult.profile) {
+        return sendError(
+          res,
+          'Customer does not have a payment profile in Authorize.net. Please ensure the customer has a stored payment method in Authorize.net CIM.',
+          400
+        );
+      }
+
+      // Extract profile ID
+      const profile = profileResult.profile;
+      customerProfileId = Array.isArray(profile.customerProfileId)
+        ? profile.customerProfileId[0]
+        : profile.customerProfileId;
+
+      if (!customerProfileId) {
+        return sendError(
+          res,
+          'Could not retrieve customer profile ID from Authorize.net',
+          400
+        );
+      }
+
+      // Extract payment profiles
+      const paymentProfiles = extractPaymentProfiles(profile);
+      
+      if (paymentProfiles.length === 0) {
+        return sendError(
+          res,
+          'Customer does not have any payment profiles in Authorize.net. Please add a payment method first.',
+          400
+        );
+      }
+
+      // Verify that the requested payment profile exists
+      const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+      
+      if (!requestedProfile) {
+        return sendError(
+          res,
+          `Payment profile ID ${paymentProfileId} not found for this customer. Available profiles: ${paymentProfiles.map(p => p.paymentProfileId).join(', ')}`,
+          400
+        );
+      }
+
+      // Store profile IDs in database for future use
+      await customer.update({
+        customerProfileId: customerProfileId.toString(),
+        customerPaymentProfileId: paymentProfileId.toString()
+      });
+
+      console.log(`✅ Found and stored Authorize.net profile IDs for customer ${customer.contactName}`);
+    } else {
+      // Verify that the stored payment profile ID matches the requested one
+      if (customer.customerPaymentProfileId !== paymentProfileId) {
+        // Re-verify by fetching profile
+        const profileResult = await getCustomerProfileDetails({
+          customerProfileId: customerProfileId
+        });
+        
+        if (profileResult.success && profileResult.profile) {
+          const paymentProfiles = extractPaymentProfiles(profileResult.profile);
+          const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+          
+          if (!requestedProfile) {
+            return sendError(
+              res,
+              `Payment profile ID ${paymentProfileId} not found for this customer`,
+              400
+            );
+          }
+        }
+      }
+    }
+
+    // Process each invoice/sales order
+    const results = [];
+    const errors = [];
+
+    for (const item of items) {
+      const { type, id, number, amount } = item;
+
+      if (!type || !id || !number || !amount) {
+        errors.push({
+          item: { type, id, number },
+          error: 'Missing required fields: type, id, number, or amount'
+        });
+        continue;
+      }
+
+      if (amount <= 0) {
+        errors.push({
+          item: { type, id, number },
+          error: 'Amount must be greater than 0'
+        });
+        continue;
+      }
+
+      try {
+        const invoiceNumber = type === 'invoice' ? number : `SO-${number}`;
+        const description = type === 'invoice' 
+          ? `Invoice Payment: ${number}`
+          : `Sales Order Payment: ${number}`;
+
+        const chargeResult = await chargeCustomerProfile({
+          customerProfileId,
+          customerPaymentProfileId,
+          amount: parseFloat(amount),
+          invoiceNumber,
+          description
+        });
+
+        if (chargeResult.success) {
+          results.push({
+            type,
+            id,
+            number,
+            amount: parseFloat(amount),
+            transactionId: chargeResult.transactionId,
+            authCode: chargeResult.authCode,
+            message: chargeResult.message,
+            success: true
+          });
+        } else {
+          errors.push({
+            item: { type, id, number },
+            error: chargeResult.error,
+            errorCode: chargeResult.errorCode
+          });
+        }
+      } catch (err) {
+        console.error(`Error charging ${type} ${number}:`, err);
+        errors.push({
+          item: { type, id, number },
+          error: err.message || 'Unknown error occurred'
+        });
+      }
+    }
+
+    // Return results
+    return sendSuccess(res, {
+      customer: {
+        id: customer.id,
+        name: customer.contactName,
+        customerProfileId,
+        customerPaymentProfileId
+      },
+      results,
+      errors,
+      summary: {
+        total: items.length,
+        successful: results.length,
+        failed: errors.length
+      }
+    }, `Processed ${results.length} of ${items.length} items successfully`);
+  } catch (err) {
+    console.error('Charge invoices/sales orders error:', err);
+    return sendError(res, 'Failed to charge invoices/sales orders', 500, err);
   }
 };

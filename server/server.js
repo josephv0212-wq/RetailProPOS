@@ -321,6 +321,53 @@ const ensureBankAccountColumn = async () => {
   }
 };
 
+// Ensure customerProfileId and customerPaymentProfileId columns exist on Customers table (for SQLite / auto-sync disabled)
+const ensureCustomerProfileColumns = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      // SQLite syntax - Add customerProfileId column
+      try {
+        await sequelize.query('ALTER TABLE `Customers` ADD COLUMN `customerProfileId` VARCHAR(255) NULL');
+        logSuccess('Added customerProfileId column to Customers table');
+      } catch (err) {
+        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
+          throw err;
+        }
+        logInfo('customerProfileId column already exists on Customers table');
+      }
+      
+      // SQLite syntax - Add customerPaymentProfileId column
+      try {
+        await sequelize.query('ALTER TABLE `Customers` ADD COLUMN `customerPaymentProfileId` VARCHAR(255) NULL');
+        logSuccess('Added customerPaymentProfileId column to Customers table');
+      } catch (err) {
+        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
+          throw err;
+        }
+        logInfo('customerPaymentProfileId column already exists on Customers table');
+      }
+    } else {
+      // PostgreSQL syntax - Add customerProfileId column
+      try {
+        await sequelize.query('ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "customerProfileId" VARCHAR(255) NULL');
+        logSuccess('Added customerProfileId column to Customers table');
+      } catch (err) {
+        logWarning(`Could not ensure customerProfileId column: ${err.message}`);
+      }
+      
+      // PostgreSQL syntax - Add customerPaymentProfileId column
+      try {
+        await sequelize.query('ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "customerPaymentProfileId" VARCHAR(255) NULL');
+        logSuccess('Added customerPaymentProfileId column to Customers table');
+      } catch (err) {
+        logWarning(`Could not ensure customerPaymentProfileId column: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    logWarning(`Could not ensure customer profile columns on Customers table: ${err.message}`);
+  }
+};
+
 // Ensure terminalIP, terminalPort, and terminalNumber columns exist on Users table (for SQLite / auto-sync disabled)
 const ensureTerminalColumns = async () => {
   try {
@@ -406,10 +453,12 @@ const startServer = async () => {
     await ensureItemImageColumn();
     await ensureTerminalColumns();
     await ensureBankAccountColumn();
+    await ensureCustomerProfileColumns();
   } else {
     // For PostgreSQL, also ensure columns exist
     await ensureTerminalColumns();
     await ensureBankAccountColumn();
+    await ensureCustomerProfileColumns();
   }
 
   // Admin user creation handled by bootstrap login (see authController.js)

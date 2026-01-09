@@ -58,6 +58,16 @@ export const Customer = sequelize.define('Customer', {
   paymentMethodId: {
     type: DataTypes.STRING
   },
+  customerProfileId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Authorize.net Customer Information Manager (CIM) profile ID'
+  },
+  customerPaymentProfileId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Authorize.net CIM payment profile ID'
+  },
   isActive: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

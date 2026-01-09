@@ -267,6 +267,22 @@ export const customersAPI = {
       bank_account_last4: string | null;
     }>(`/customers/${id}/price-list`);
   },
+
+  getPaymentProfiles: async (id: number) => {
+    return apiRequest<{
+      customerProfileId: string | null;
+      paymentProfiles: Array<{
+        paymentProfileId: string;
+        type: 'credit_card' | 'ach';
+        cardNumber?: string;
+        expirationDate?: string;
+        accountNumber?: string;
+        isDefault?: boolean;
+        isStored?: boolean;
+      }>;
+      message?: string;
+    }>(`/customers/${id}/payment-profiles`);
+  },
 };
 
 // Sales API
@@ -329,6 +345,49 @@ export const salesAPI = {
       salesReceiptNumber: string;
     }>(`/sales/${saleId}/sync/zoho`, {
       method: 'POST',
+    }, true);
+  },
+
+  chargeInvoicesSalesOrders: async (data: {
+    customerId: number;
+    paymentProfileId: string;
+    items: Array<{
+      type: 'invoice' | 'salesorder';
+      id: string;
+      number: string;
+      amount: number;
+    }>;
+  }) => {
+    return apiRequest<{
+      customer: {
+        id: number;
+        name: string;
+        customerProfileId: string;
+        customerPaymentProfileId: string;
+      };
+      results: Array<{
+        type: string;
+        id: string;
+        number: string;
+        amount: number;
+        transactionId: string;
+        authCode: string;
+        message: string;
+        success: boolean;
+      }>;
+      errors: Array<{
+        item: { type: string; id: string; number: string };
+        error: string;
+        errorCode?: string;
+      }>;
+      summary: {
+        total: number;
+        successful: number;
+        failed: number;
+      };
+    }>('/sales/charge-invoices', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }, true);
   },
 };
