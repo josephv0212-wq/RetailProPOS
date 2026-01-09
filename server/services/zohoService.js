@@ -968,9 +968,6 @@ export const getOpenSalesOrders = async (customerId) => {
       // If it causes issues, we can remove it and sort client-side
     };
     
-    console.log(`🔍 Fetching open sales orders for customer_id: ${customerId}`);
-    console.log(`📋 API params:`, JSON.stringify(params, null, 2));
-    
     // Fetch all pages of sales orders for this customer
     const salesOrders = await fetchAllPages('/salesorders', params, 'salesorders');
     
@@ -1044,9 +1041,6 @@ export const getCustomerInvoices = async (customerId, status = 'unpaid') => {
       status: status, // Filter by status (unpaid, partially_paid, sent, etc.)
       sort_column: 'date' // Sort by date
     };
-    
-    console.log(`🔍 Fetching invoices for customer_id: ${customerId}, status: ${status}`);
-    console.log(`📋 API params:`, JSON.stringify(params, null, 2));
     
     // Fetch all pages of invoices for this customer
     const invoices = await fetchAllPages('/invoices', params, 'invoices');
