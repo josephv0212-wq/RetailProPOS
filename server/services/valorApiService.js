@@ -2,10 +2,13 @@
  * Valor API Service
  * Handles cloud-to-connect payment processing with VP100 PAX terminals via Valor API
  * 
+ * IMPORTANT: This is a DIRECT integration with Valor API - NO Authorize.Net required!
+ * Valor API is a standalone payment gateway that communicates directly with VP100 terminals.
+ * 
  * Valor Connect Cloud-to-Connect Integration:
  * - Model: PAX Valor VP100
  * - Connection: WiFi (cloud-to-connect via Valor API)
- * - Gateway: Valor API (cloud infrastructure)
+ * - Gateway: Valor API (cloud infrastructure) - NOT Authorize.Net
  * - Protocol: REST API over HTTPS
  * 
  * Flow:
@@ -21,6 +24,7 @@
  * Documentation:
  * - Valor API Reference: https://valorapi.readme.io/reference
  * - Terminal must be registered in Valor Portal and configured for cloud-to-connect
+ * - NO Authorize.Net account or credentials needed for Valor API integration
  */
 
 import axios from 'axios';

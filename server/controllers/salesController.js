@@ -30,7 +30,7 @@ const resolveTaxPercentage = (user) => {
 
 export const createSale = async (req, res) => {
   try {
-    const { items, customerId, paymentType, paymentDetails, notes, terminalIP, useTerminal, useEBizChargeTerminal, useBluetoothReader, bluetoothPayload, customerTaxPreference, useStoredPayment, paymentProfileId } = req.body;
+    const { items, customerId, paymentType, paymentDetails, notes, terminalIP, useTerminal, useValorApi, useEBizChargeTerminal, useBluetoothReader, bluetoothPayload, customerTaxPreference, useStoredPayment, paymentProfileId, terminalNumber, valorTransactionId } = req.body;
     const userId = req.user.id;
     const locationId = req.user.locationId;
     const locationName = req.user.locationName;
@@ -311,6 +311,25 @@ export const createSale = async (req, res) => {
         }
 
         transactionId = paymentResult.transactionId;
+      } else if (useValorApi) {
+        // Valor API mode - payment already processed in frontend via Valor API (NO Authorize.Net)
+        // Flow: Frontend -> Valor API -> VP100 Terminal -> Valor API -> Frontend -> Backend (record sale)
+        // Payment is already completed, we just need to record the sale with the Valor transaction ID
+        
+        if (!valorTransactionId) {
+          return sendError(res, 'Valor API transaction ID is required. Payment must be processed via Valor API first.', 400);
+        }
+
+        // Payment already processed successfully via Valor API in frontend
+        // Use the Valor transaction ID as our transaction ID
+        transactionId = valorTransactionId;
+        
+        // Create a success result to match the expected format
+        paymentResult = {
+          success: true,
+          transactionId: valorTransactionId,
+          message: 'Payment processed successfully via Valor API'
+        };
       } else if (useEBizChargeTerminal) {
         // EBizCharge Terminal mode - process through EBizCharge WiFi terminal
         if (!terminalIP) {

@@ -6,6 +6,8 @@ This guide explains how to set up **Valor API** (cloud-to-connect integration) f
 
 Valor API is a cloud-based REST API that allows your POS application to send payment requests directly to VP100 terminals via Valor's cloud infrastructure. The terminal communicates through WiFi and connects to Valor's cloud servers, eliminating the need for direct TCP/IP connections.
 
+**Important:** Valor API is a **standalone payment gateway** - it does **NOT** require Authorize.Net or any other payment processor. Valor API handles all payment processing directly through Valor's cloud infrastructure.
+
 ## Prerequisites
 
 1. **PAX Valor VP100 Terminal** - Must be a VP100 model

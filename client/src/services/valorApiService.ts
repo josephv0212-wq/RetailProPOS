@@ -1,5 +1,8 @@
 // Valor API Service for Frontend
 // Handles cloud-to-connect payment processing with VP100 PAX terminals via Valor API
+// 
+// IMPORTANT: This is a DIRECT integration with Valor API - NO Authorize.Net required!
+// Valor API is a standalone payment gateway that communicates directly with VP100 terminals.
 
 const getEnvVar = (key: string): string | undefined => {
   try {

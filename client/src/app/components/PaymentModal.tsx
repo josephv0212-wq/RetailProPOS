@@ -773,7 +773,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <p className="text-xs text-gray-600">
-                        <strong>How it works (Valor API):</strong> When you click "Confirm Payment", the system sends the payment request directly to Valor API with your Terminal serial number. Valor API routes the request to your VP100 terminal via cloud-to-connect. The customer will be prompted on the terminal to insert, swipe, or tap their card. The terminal processes the payment and returns the result.
+                        <strong>How it works (Valor API - Direct Integration):</strong> When you click "Confirm Payment", the system sends the payment request <strong>directly to Valor API</strong> (no Authorize.Net required) with your Terminal serial number. Valor API routes the request to your VP100 terminal via cloud-to-connect. The customer will be prompted on the terminal to insert, swipe, or tap their card. The terminal processes the payment and returns the result through Valor API.
                       </p>
                     </div>
                   </div>

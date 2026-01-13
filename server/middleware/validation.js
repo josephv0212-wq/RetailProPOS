@@ -32,10 +32,26 @@ export const validateSale = (req, res, next) => {
   // Validate payment details based on payment type
   if (paymentType === 'credit_card' || paymentType === 'debit_card') {
     const useTerminal = req.body.useTerminal;
+    const useValorApi = req.body.useValorApi;
     const useBluetoothReader = req.body.useBluetoothReader;
     const useEBizChargeTerminal = req.body.useEBizChargeTerminal;
     
-    if (useBluetoothReader) {
+    if (useValorApi) {
+      // Valor API mode - validate terminalNumber and valorTransactionId
+      if (!req.body.terminalNumber || req.body.terminalNumber.trim() === '') {
+        errors.push('Terminal serial number is required for Valor API payment. Please configure your VP100 serial number in Settings.');
+      } else {
+        // Basic Terminal serial number validation (alphanumeric, dashes, underscores)
+        const terminalNumberTrimmed = req.body.terminalNumber.trim();
+        if (!/^[A-Za-z0-9\-_]+$/.test(terminalNumberTrimmed)) {
+          errors.push('Invalid Terminal serial number format. Use alphanumeric characters, dashes, or underscores only.');
+        }
+      }
+      // valorTransactionId is required - payment must be processed in frontend first
+      if (!req.body.valorTransactionId || req.body.valorTransactionId.trim() === '') {
+        errors.push('Valor API transaction ID is required. Payment must be processed via Valor API in the frontend first.');
+      }
+    } else if (useBluetoothReader) {
       // USB Card Reader mode (BBPOS) - validate opaqueData/bluetoothPayload
       if (!req.body.bluetoothPayload || !req.body.bluetoothPayload.descriptor || !req.body.bluetoothPayload.value) {
         errors.push('USB card reader payment data is required. Please scan the card with the USB reader.');
