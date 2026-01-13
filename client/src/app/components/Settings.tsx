@@ -152,13 +152,24 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
             </div>
           </div>
 
+          {/* Valor API Configuration */}
+          <div className="mb-8 pb-8 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+              Valor API (Cloud-to-Connect)
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Direct cloud-to-connect payment integration via Valor API. Only Terminal serial number is required. IP and Port are not needed.
+            </p>
+            <ValorApiConfig />
+          </div>
+
           {/* PAX Terminal Support - Main Configuration */}
           <div className="mb-8 pb-8 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-              PAX VP100 Terminal (Valor Connect)
+              PAX VP100 Terminal (Valor Connect via Authorize.Net)
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              Cloud-to-cloud payment integration. Only Terminal number is required. IP and Port are not needed for Valor Connect.
+              Cloud-to-cloud payment integration through Authorize.Net. Only Terminal number is required. IP and Port are not needed for Valor Connect.
             </p>
             <PAXTerminalConfig />
           </div>
@@ -360,6 +371,164 @@ function AuthorizeNetDevicesList() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Valor API Configuration Component
+function ValorApiConfig() {
+  const { user, refreshUser } = useAuth();
+  const { showToast } = useToast();
+  const [terminalNumber, setTerminalNumber] = useState(user?.terminalNumber || '');
+  const [isSaving, setIsSaving] = useState(false);
+  const [devices, setDevices] = useState<any[]>([]);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+
+  useEffect(() => {
+    if (user?.terminalNumber) {
+      setTerminalNumber(user.terminalNumber);
+    }
+  }, [user?.terminalNumber]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const response = await authAPI.updateTerminalSettings(terminalNumber);
+      
+      if (response.success) {
+        showToast('Valor API terminal settings saved successfully', 'success', 3000);
+        if (refreshUser) {
+          await refreshUser();
+        }
+      } else {
+        showToast(response.message || 'Failed to save terminal settings', 'error', 4000);
+      }
+    } catch (error: any) {
+      console.error('Error saving terminal settings:', error);
+      showToast(error.message || 'Failed to save terminal settings', 'error', 4000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const fetchDevices = async () => {
+    setIsLoadingDevices(true);
+    try {
+      const { getValorDevices } = await import('../../services/valorApiService');
+      const result = await getValorDevices();
+      if (result.success && result.data?.devices) {
+        setDevices(result.data.devices);
+      } else {
+        setDevices([]);
+        showToast(result.error || 'Failed to fetch devices', 'error', 3000);
+      }
+    } catch (error: any) {
+      console.error('Error fetching Valor devices:', error);
+      showToast('Failed to fetch devices', 'error', 3000);
+      setDevices([]);
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  };
+
+  const isValidTerminalNumber = (num: string) => {
+    if (!num || num.trim() === '') return false;
+    return /^[A-Za-z0-9\-_]+$/.test(num.trim());
+  };
+
+  const terminalNumberValid = isValidTerminalNumber(terminalNumber);
+  const canSave = terminalNumberValid && terminalNumber.trim() !== '';
+
+  return (
+    <div className="space-y-4">
+      {/* Terminal Serial Number - Required for Valor API */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Terminal Serial Number <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={terminalNumber}
+          onChange={(e) => setTerminalNumber(e.target.value)}
+          placeholder="VP100-123456"
+          required
+          className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+            terminalNumber && terminalNumberValid
+              ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+              : terminalNumber && !terminalNumberValid
+              ? 'border-red-300 dark:border-red-600 focus:ring-red-500'
+              : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+        />
+        {!terminalNumberValid && terminalNumber !== '' && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
+            <XCircle className="w-4 h-4" />
+            Invalid format. Use alphanumeric characters, dashes, or underscores.
+          </p>
+        )}
+        {!terminalNumber && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+            ⚠️ Terminal serial number is required for Valor API payments. Enter your VP100 serial number.
+          </p>
+        )}
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          Find it on the device label or in Valor Portal
+        </p>
+      </div>
+
+      {/* Info Box - Valor API */}
+      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+        <p className="text-sm text-blue-900 dark:text-blue-200 font-medium mb-1">
+          ℹ️ Valor API (Cloud-to-Connect)
+        </p>
+        <p className="text-xs text-blue-800 dark:text-blue-300">
+          IP Address and Port are <strong>not required</strong> for Valor API. The terminal communicates through Valor's cloud infrastructure. Only Terminal serial number is needed.
+        </p>
+      </div>
+
+      {/* Device List */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Registered Terminals
+          </label>
+          <button
+            onClick={fetchDevices}
+            disabled={isLoadingDevices}
+            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-50"
+          >
+            {isLoadingDevices ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
+        {devices.length > 0 ? (
+          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
+            {devices.map((device, index) => (
+              <div key={index} className="text-sm text-gray-700 dark:text-gray-300">
+                {device.serialNumber || device.sn || device.id || `Device ${index + 1}`}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 text-sm text-gray-500 dark:text-gray-400">
+            No devices found. Click "Refresh" to fetch registered terminals from Valor API.
+          </div>
+        )}
+      </div>
+
+      {/* Action Button */}
+      <div className="pt-2">
+        <button
+          onClick={handleSave}
+          disabled={!canSave || isSaving}
+          className={`w-full px-4 py-2 rounded-lg font-medium transition-colors ${
+            canSave && !isSaving
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+          }`}
+        >
+          {isSaving ? 'Saving...' : 'Save Terminal Settings'}
+        </button>
+      </div>
     </div>
   );
 }

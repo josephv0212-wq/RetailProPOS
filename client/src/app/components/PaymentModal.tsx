@@ -6,7 +6,10 @@ import { encryptCardData, loadAcceptJs, isAcceptJsAvailable } from '../../servic
 import { connectAndReadCard, isWebSerialSupported } from '../../services/usbCardReaderService';
 // TerminalDiscoveryDialog removed - not needed for Valor Connect (only Terminal number required)
 import { pollPaymentStatus } from '../../services/paymentPollingService';
+import { initiateValorPayment, pollValorPaymentStatus } from '../../services/valorApiService';
 import { useToast } from '../contexts/ToastContext';
+import { customersAPI } from '../../services/api';
+import { PaymentMethodSelector } from './PaymentMethodSelector';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -19,17 +22,20 @@ interface PaymentModalProps {
   userTerminalNumber?: string | null;
   userTerminalIP?: string | null;
   userTerminalPort?: number | string | null;
+  customerId?: number | null;
+  customerName?: string | null;
 }
 
 const paymentMethods: PaymentMethod[] = [
   { type: 'cash', label: 'Cash' },
   { type: 'credit_card', label: 'Credit Card' },
   { type: 'debit_card', label: 'Debit Card' },
+  { type: 'stored_payment', label: 'Stored Payment Method' },
   { type: 'zelle', label: 'Zelle' },
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalNumber, userTerminalIP, userTerminalPort }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalNumber, userTerminalIP, userTerminalPort, customerId, customerName }: PaymentModalProps) {
   const { showToast } = useToast();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
@@ -42,7 +48,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [achAccount, setAchAccount] = useState('');
   const [achAccountType, setAchAccountType] = useState<'checking' | 'savings'>('checking');
   const [achBankName, setAchBankName] = useState('');
-  const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'manual'>('manual');
+  const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'valor_api' | 'manual'>('manual');
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading' | 'processing'>('ready');
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -52,6 +58,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [selectedTerminalNumber, setSelectedTerminalNumber] = useState<string | null>(userTerminalNumber || null);
   const [selectedTerminalIP, setSelectedTerminalIP] = useState<string | null>(userTerminalIP || null);
   const [selectedTerminalPort, setSelectedTerminalPort] = useState<number | string | null>(userTerminalPort || null);
+  const [paymentProfiles, setPaymentProfiles] = useState<any[]>([]);
+  const [selectedPaymentProfileId, setSelectedPaymentProfileId] = useState<string | null>(null);
+  const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
+  const [loadingPaymentProfiles, setLoadingPaymentProfiles] = useState(false);
 
   // Load Accept.js on mount
   useEffect(() => {
@@ -83,9 +93,44 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     }
   }, [userTerminalNumber, userTerminalIP, userTerminalPort]);
 
+  // Load payment profiles when customer is available
+  useEffect(() => {
+    if (isOpen && customerId) {
+      loadPaymentProfiles();
+    } else {
+      setPaymentProfiles([]);
+      setSelectedPaymentProfileId(null);
+    }
+  }, [isOpen, customerId]);
+
+  const loadPaymentProfiles = async () => {
+    if (!customerId) return;
+    
+    setLoadingPaymentProfiles(true);
+    try {
+      const response = await customersAPI.getPaymentProfiles(customerId);
+      if (response.success && response.data?.paymentProfiles) {
+        setPaymentProfiles(response.data.paymentProfiles);
+        // Auto-select default or stored profile if available
+        const defaultProfile = response.data.paymentProfiles.find((p: any) => p.isDefault || p.isStored) || response.data.paymentProfiles[0];
+        if (defaultProfile) {
+          setSelectedPaymentProfileId(defaultProfile.paymentProfileId);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load payment profiles:', err);
+    } finally {
+      setLoadingPaymentProfiles(false);
+    }
+  };
+
   // Terminal discovery removed - Valor Connect only needs Terminal number (configured in Settings)
 
-  const convenienceFee = (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') ? total * 0.03 : 0;
+  // Calculate convenience fee for card payments and stored payment methods (if credit card)
+  const isCardPayment = selectedMethod === 'credit_card' || selectedMethod === 'debit_card' || 
+    (selectedMethod === 'stored_payment' && selectedPaymentProfileId && 
+     paymentProfiles.find((p: any) => p.paymentProfileId === selectedPaymentProfileId)?.type === 'credit_card');
+  const convenienceFee = isCardPayment ? total * 0.03 : 0;
   const finalTotal = total + convenienceFee;
 
   if (!isOpen) return null;
@@ -109,6 +154,17 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         setIsProcessing(false);
         return;
       }
+    } else if (selectedMethod === 'stored_payment') {
+      if (!selectedPaymentProfileId) {
+        setError('Please select a stored payment method');
+        setIsProcessing(false);
+        return;
+      }
+      if (paymentProfiles.length === 0) {
+        setError('No stored payment methods available for this customer');
+        setIsProcessing(false);
+        return;
+      }
     } else if (selectedMethod === 'zelle' && !zelleConfirmation) {
       setError('Please enter Zelle confirmation number');
       setIsProcessing(false);
@@ -123,9 +179,15 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Ensure card payments use credit_card (can be changed to debit_card if needed)
-    const paymentMethod = (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') 
-      ? 'credit_card'  // Default to credit_card, can add UI to select debit_card later
-      : selectedMethod;
+    // For stored_payment, determine type from selected profile
+    let paymentMethod = selectedMethod;
+    if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
+      paymentMethod = 'credit_card';  // Default to credit_card, can add UI to select debit_card later
+    } else if (selectedMethod === 'stored_payment') {
+      // Determine payment type from selected profile
+      const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === selectedPaymentProfileId);
+      paymentMethod = selectedProfile?.type === 'ach' ? 'ach' : 'credit_card';
+    }
     
     const paymentDetails: PaymentDetails = {
       method: paymentMethod,
@@ -289,6 +351,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           paymentDetails.zip = cardZip;
         }
       }
+    } else if (selectedMethod === 'stored_payment') {
+      // Use stored payment method via CIM
+      paymentDetails.useStoredPayment = true;
+      paymentDetails.paymentProfileId = selectedPaymentProfileId;
     } else if (selectedMethod === 'zelle') {
       paymentDetails.confirmationNumber = zelleConfirmation;
     } else if (selectedMethod === 'ach') {
@@ -302,7 +368,85 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     }
 
     // For terminal payments, handle pending status and polling
-    if (cardPaymentMethod === 'pax_terminal' && paymentDetails.useTerminal) {
+    if (cardPaymentMethod === 'valor_api' && paymentDetails.useValorApi) {
+      // Valor API payment flow
+      try {
+        setCardReaderStatus('processing');
+        setError('');
+        
+        const terminalNumber = paymentDetails.terminalNumber || '';
+        const invoiceNumber = `POS-${Date.now()}`;
+        const description = `POS Sale - ${invoiceNumber}`;
+        
+        // Initiate payment via Valor API
+        const paymentResult = await initiateValorPayment(
+          finalTotal,
+          terminalNumber,
+          invoiceNumber,
+          description
+        );
+        
+        if (!paymentResult.success) {
+          throw new Error(paymentResult.error || 'Failed to initiate Valor API payment');
+        }
+        
+        // Show notification
+        showToast(
+          'Payment request sent to VP100 terminal via Valor API. Waiting for customer to complete payment...',
+          'info',
+          5000
+        );
+        
+        // Get transaction ID from result
+        const transactionId = paymentResult.data?.transactionId || paymentResult.transactionId;
+        if (!transactionId) {
+          throw new Error('No transaction ID received from Valor API');
+        }
+        
+        // Start polling for payment status
+        const finalStatus = await pollValorPaymentStatus(
+          transactionId,
+          terminalNumber,
+          60, // maxAttempts: 2 minutes max (60 * 2 seconds)
+          2000, // intervalMs: Poll every 2 seconds
+          (status, attempt) => {
+            // Update UI during polling
+            if (status.data?.pending) {
+              setCardReaderStatus('processing');
+            }
+          }
+        );
+        
+        // Payment completed (approved or declined)
+        if (!finalStatus.data?.pending && !finalStatus.pending) {
+          if (finalStatus.success || finalStatus.data?.success) {
+            // Payment approved - call onConfirmPayment to complete sale
+            paymentDetails.valorTransactionId = transactionId;
+            await onConfirmPayment(paymentDetails);
+            showToast('Payment approved! Transaction completed.', 'success', 5000);
+            setIsProcessing(false);
+            onClose();
+          } else {
+            // Payment declined
+            setError(finalStatus.data?.message || finalStatus.data?.error || finalStatus.error || 'Payment was declined. Please try again.');
+            setCardReaderStatus('ready');
+            setIsProcessing(false);
+            showToast('Payment declined. Please try again.', 'error', 5000);
+          }
+        } else {
+          // Timeout
+          setError('Payment timeout. Please check the terminal or try again.');
+          setCardReaderStatus('ready');
+          setIsProcessing(false);
+          showToast('Payment timeout. Please check terminal status.', 'error', 5000);
+        }
+      } catch (err: any) {
+        setError(err.message || 'Failed to process Valor API payment');
+        setCardReaderStatus('ready');
+        setIsProcessing(false);
+        showToast('Payment processing error. Please try again.', 'error', 5000);
+      }
+    } else if (cardPaymentMethod === 'pax_terminal' && paymentDetails.useTerminal) {
       try {
         // Call onConfirmPayment which will initiate payment and may return pending status
         const result = await onConfirmPayment(paymentDetails);
@@ -479,6 +623,28 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                 <span className="text-sm">Card</span>
               </button>
               
+              {customerId && paymentProfiles.length > 0 && (
+                <button
+                  onClick={() => {
+                    setSelectedMethod('stored_payment');
+                    if (!selectedPaymentProfileId && paymentProfiles.length > 0) {
+                      const defaultProfile = paymentProfiles.find((p: any) => p.isDefault || p.isStored) || paymentProfiles[0];
+                      if (defaultProfile) {
+                        setSelectedPaymentProfileId(defaultProfile.paymentProfileId);
+                      }
+                    }
+                  }}
+                  className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                    selectedMethod === 'stored_payment'
+                      ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                      : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
+                  }`}
+                >
+                  <Wallet className="w-6 h-6" />
+                  <span className="text-sm">Stored</span>
+                </button>
+              )}
+              
               <button
                 onClick={() => setSelectedMethod('zelle')}
                 className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
@@ -531,7 +697,18 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <button
+                    onClick={() => setCardPaymentMethod('valor_api')}
+                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                      cardPaymentMethod === 'valor_api'
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                    }`}
+                  >
+                    <Wifi className="w-5 h-5" />
+                    <span className="text-xs font-medium">Valor API</span>
+                  </button>
                   <button
                     onClick={() => setCardPaymentMethod('pax_terminal')}
                     className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
@@ -541,7 +718,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     }`}
                   >
                     <Wifi className="w-5 h-5" />
-                    <span className="text-xs font-medium">PAX WiFi Terminal</span>
+                    <span className="text-xs font-medium">PAX WiFi</span>
                   </button>
                   <button
                     onClick={() => setCardPaymentMethod('usb_reader')}
@@ -567,7 +744,40 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   </button>
                 </div>
 
-                {cardPaymentMethod === 'pax_terminal' ? (
+                {cardPaymentMethod === 'valor_api' ? (
+                  <div className="space-y-4">
+                    {/* Valor API Terminal Instructions */}
+                    <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
+                      <Wifi className="w-12 h-12 text-blue-400 mx-auto" />
+                      <div>
+                        <p className="font-medium text-gray-900 mb-1">
+                          {cardReaderStatus === 'ready' && 'Valor API Terminal Ready'}
+                          {cardReaderStatus === 'processing' && 'Processing Payment...'}
+                        </p>
+                        <p className="text-sm text-gray-600 mb-2">
+                          {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to process payment via Valor API'}
+                          {cardReaderStatus === 'processing' && 'Customer will be prompted on the VP100 terminal. Please wait...'}
+                        </p>
+                        <div className="mt-3 text-left bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-600">
+                            <strong>Terminal Serial Number:</strong> {selectedTerminalNumber || userTerminalNumber || 'Not configured'}
+                          </p>
+                        </div>
+                        {!selectedTerminalNumber && !userTerminalNumber && (
+                          <p className="text-xs text-red-600 mt-2 font-medium">
+                            ⚠️ Please configure Terminal serial number (VP100 serial number) in Settings
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-xs text-gray-600">
+                        <strong>How it works (Valor API):</strong> When you click "Confirm Payment", the system sends the payment request directly to Valor API with your Terminal serial number. Valor API routes the request to your VP100 terminal via cloud-to-connect. The customer will be prompted on the terminal to insert, swipe, or tap their card. The terminal processes the payment and returns the result.
+                      </p>
+                    </div>
+                  </div>
+                ) : cardPaymentMethod === 'pax_terminal' ? (
                   <div className="space-y-4">
                     {/* PAX WiFi Terminal Instructions */}
                     <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
@@ -738,6 +948,98 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     />
                   </div>
                 </div>
+              </div>
+            )}
+
+            {selectedMethod === 'stored_payment' && (
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-400 rounded-xl p-6 space-y-3">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center">
+                    <Wallet className="w-7 h-7 text-white" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-gray-900">Stored Payment Method</h3>
+                </div>
+
+                {loadingPaymentProfiles ? (
+                  <div className="text-center py-8">
+                    <Loader className="w-8 h-8 text-green-600 mx-auto animate-spin mb-2" />
+                    <p className="text-gray-600">Loading payment methods...</p>
+                  </div>
+                ) : paymentProfiles.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-600 mb-2">No stored payment methods available</p>
+                    <p className="text-sm text-gray-500">This customer does not have any stored payment methods in Authorize.net</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {paymentProfiles.map((profile: any) => {
+                      const isSelected = selectedPaymentProfileId === profile.paymentProfileId;
+                      const formatCardNumber = (cardNumber: string) => {
+                        if (!cardNumber || cardNumber === 'XXXX') return 'XXXX';
+                        if (cardNumber.includes('X')) return cardNumber;
+                        const digits = cardNumber.replace(/\D/g, '');
+                        return digits.length >= 4 ? `XXXX${digits.slice(-4)}` : 'XXXX';
+                      };
+                      const formatAccountNumber = (accountNumber: string) => {
+                        if (!accountNumber || accountNumber === 'XXXX') return 'XXXX';
+                        if (accountNumber.includes('X')) return accountNumber;
+                        const digits = accountNumber.replace(/\D/g, '');
+                        return digits.length >= 4 ? `XXXX${digits.slice(-4)}` : 'XXXX';
+                      };
+
+                      return (
+                        <button
+                          key={profile.paymentProfileId}
+                          onClick={() => setSelectedPaymentProfileId(profile.paymentProfileId)}
+                          className={`w-full p-4 border rounded-lg transition-all text-left ${
+                            isSelected
+                              ? 'border-green-600 dark:border-green-400 bg-green-50 dark:bg-green-900/20'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-green-500 dark:hover:border-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-5 h-5 border-2 rounded flex items-center justify-center ${
+                              isSelected
+                                ? 'bg-green-600 dark:bg-green-500 border-green-600 dark:border-green-500'
+                                : 'border-gray-300 dark:border-gray-600'
+                            }`}>
+                              {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                {profile.type === 'credit_card' ? (
+                                  <CreditCard className="w-5 h-5 text-green-600 dark:text-green-400" />
+                                ) : (
+                                  <Building2 className="w-5 h-5 text-green-600 dark:text-green-400" />
+                                )}
+                                <span className="font-semibold text-gray-900 dark:text-white">
+                                  {profile.type === 'credit_card' ? 'Credit Card' : 'Bank Account'}
+                                </span>
+                                {(profile.isDefault || profile.isStored) && (
+                                  <span className="text-xs text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2 py-0.5 rounded">
+                                    {profile.isDefault ? 'Default' : 'Stored'}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-sm text-gray-600 dark:text-gray-400">
+                                {profile.type === 'credit_card' ? (
+                                  <>
+                                    <div>Card: {formatCardNumber(profile.cardNumber || 'XXXX')}</div>
+                                    {profile.expirationDate && (
+                                      <div className="text-xs mt-1">Exp: {profile.expirationDate}</div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div>Account: {formatAccountNumber(profile.accountNumber || 'XXXX')}</div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

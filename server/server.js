@@ -12,6 +12,7 @@ import paxRoutes from './routes/paxRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import bbposRoutes from './routes/bbposRoutes.js';
 import ebizchargeRoutes from './routes/ebizchargeRoutes.js';
+import valorApiRoutes from './routes/valorApiRoutes.js';
 import { sequelize } from './config/db.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -54,6 +55,10 @@ const optionalButRecommended = [
   'EBIZCHARGE_PASSWORD',
   'EBIZCHARGE_SECURITY_ID',
   'EBIZCHARGE_API_URL',
+  'VALOR_API_BASE_URL',
+  'VALOR_API_MERCHANT_ID',
+  'VALOR_API_API_KEY',
+  'VALOR_API_SECRET_KEY',
   'PRINTER_IP_LOC001',
   'PRINTER_IP_LOC002',
   'PRINTER_IP_LOC003',
@@ -182,6 +187,7 @@ app.use('/pax', paxRoutes);
 app.use('/payment', paymentRoutes);
 app.use('/bbpos', bbposRoutes);
 app.use('/ebizcharge', ebizchargeRoutes);
+app.use('/valor', valorApiRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

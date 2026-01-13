@@ -374,6 +374,8 @@ export const salesAPI = {
         authCode: string;
         message: string;
         success: boolean;
+        underReview?: boolean;
+        reviewStatus?: string | null;
       }>;
       errors: Array<{
         item: { type: string; id: string; number: string };

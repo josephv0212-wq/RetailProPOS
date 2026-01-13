@@ -654,6 +654,7 @@ export const chargeCustomerProfile = async (paymentData) => {
 
     const result = response.data.transactionResponse;
     
+    // Response codes: '1' = Approved, '2' = Declined, '3' = Error, '4' = Held for Review
     if (result && result.responseCode === '1') {
       return {
         success: true,
@@ -662,12 +663,25 @@ export const chargeCustomerProfile = async (paymentData) => {
         accountNumber: result.accountNumber,
         message: result.messages?.[0]?.description || 'Transaction approved'
       };
+    } else if (result && result.responseCode === '4') {
+      // Transaction is held for review - this is not a failure, but requires attention
+      // The transaction was submitted successfully but needs manual review in Authorize.net
+      return {
+        success: true, // Treat as success since transaction was submitted
+        transactionId: result.transId,
+        authCode: result.authCode,
+        accountNumber: result.accountNumber,
+        message: result.messages?.[0]?.description || 'Transaction is under review',
+        underReview: true,
+        reviewStatus: 'pending'
+      };
     } else {
       const errorMessage = result?.errors?.[0]?.errorText || result?.messages?.[0]?.description || 'Transaction failed';
       return {
         success: false,
         error: errorMessage,
-        errorCode: result?.errors?.[0]?.errorCode
+        errorCode: result?.errors?.[0]?.errorCode,
+        responseCode: result?.responseCode
       };
     }
   } catch (error) {

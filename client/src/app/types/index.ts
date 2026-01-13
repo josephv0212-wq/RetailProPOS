@@ -81,12 +81,14 @@ export interface PaymentDetails {
     bankName: string;
   };
   // For card payments
-  useTerminal?: boolean;
+  useTerminal?: boolean; // PAX Terminal via Authorize.Net Valor Connect
+  useValorApi?: boolean; // Valor API direct cloud-to-connect
   useEBizChargeTerminal?: boolean;
-  terminalNumber?: string; // VP100 serial number for Valor Connect (cloud-to-cloud)
+  terminalNumber?: string; // VP100 serial number for Valor Connect/Valor API (cloud-to-cloud)
   terminalIP?: string; // Legacy support for direct terminal connection
   terminalPort?: number | string; // Legacy support for direct terminal connection
   useBluetoothReader?: boolean;
+  valorTransactionId?: string; // Transaction ID from Valor API
   bluetoothPayload?: {
     descriptor: string;
     value: string;

@@ -30,7 +30,7 @@ const resolveTaxPercentage = (user) => {
 
 export const createSale = async (req, res) => {
   try {
-    const { items, customerId, paymentType, paymentDetails, notes, terminalIP, useTerminal, useEBizChargeTerminal, useBluetoothReader, bluetoothPayload, customerTaxPreference } = req.body;
+    const { items, customerId, paymentType, paymentDetails, notes, terminalIP, useTerminal, useEBizChargeTerminal, useBluetoothReader, bluetoothPayload, customerTaxPreference, useStoredPayment, paymentProfileId } = req.body;
     const userId = req.user.id;
     const locationId = req.user.locationId;
     const locationName = req.user.locationName;
@@ -137,8 +137,45 @@ export const createSale = async (req, res) => {
     }
     
     const baseTotal = subtotal + taxAmount;
+    // For stored payment, we need to determine the type first to calculate fees correctly
+    let actualPaymentType = paymentType;
+    let cardProcessingFee = 0;
+    
+    if (useStoredPayment && paymentProfileId && customer) {
+      // Determine payment type from profile to calculate correct fees
+      let customerProfileId = customer.customerProfileId;
+      
+      if (!customerProfileId) {
+        const searchCriteria = {
+          name: customer.contactName,
+          email: customer.email,
+          merchantCustomerId: customer.zohoId
+        };
+        const profileResult = await getCustomerProfileDetails(searchCriteria);
+        if (profileResult.success && profileResult.profile) {
+          const profile = profileResult.profile;
+          customerProfileId = Array.isArray(profile.customerProfileId)
+            ? profile.customerProfileId[0]
+            : profile.customerProfileId;
+        }
+      }
+      
+      if (customerProfileId) {
+        const profileResult = await getCustomerProfileDetails({
+          customerProfileId: customerProfileId
+        });
+        if (profileResult.success && profileResult.profile) {
+          const paymentProfiles = extractPaymentProfiles(profileResult.profile);
+          const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+          if (selectedProfile) {
+            actualPaymentType = selectedProfile.type === 'ach' ? 'ach' : 'credit_card';
+          }
+        }
+      }
+    }
+    
     // 3% convenience fee applies to all card payments (credit and debit)
-    const cardProcessingFee = (paymentType === 'credit_card' || paymentType === 'debit_card')
+    cardProcessingFee = (actualPaymentType === 'credit_card' || actualPaymentType === 'debit_card')
       ? calculateCreditCardFee(subtotal, taxAmount)
       : 0;
 
@@ -148,7 +185,110 @@ export const createSale = async (req, res) => {
     let paymentResult = null;
 
     // Process payment based on payment type
-    if (paymentType === 'credit_card' || paymentType === 'debit_card') {
+    if (useStoredPayment && paymentProfileId && customer) {
+      // Stored payment method via Authorize.net CIM - use same logic as chargeInvoicesSalesOrders
+      let customerProfileId = customer.customerProfileId;
+      let customerPaymentProfileId = paymentProfileId;
+
+      // If profile IDs are not stored, try to find them
+      if (!customerProfileId) {
+        const searchCriteria = {
+          name: customer.contactName,
+          email: customer.email,
+          merchantCustomerId: customer.zohoId
+        };
+
+        const profileResult = await getCustomerProfileDetails(searchCriteria);
+        
+        if (!profileResult.success || !profileResult.profile) {
+          return sendError(
+            res,
+            'Customer does not have a payment profile in Authorize.net. Please ensure the customer has a stored payment method in Authorize.net CIM.',
+            400
+          );
+        }
+
+        // Extract profile ID
+        const profile = profileResult.profile;
+        customerProfileId = Array.isArray(profile.customerProfileId)
+          ? profile.customerProfileId[0]
+          : profile.customerProfileId;
+
+        if (!customerProfileId) {
+          return sendError(
+            res,
+            'Could not retrieve customer profile ID from Authorize.net',
+            400
+          );
+        }
+
+        // Extract payment profiles
+        const paymentProfiles = extractPaymentProfiles(profile);
+        
+        if (paymentProfiles.length === 0) {
+          return sendError(
+            res,
+            'Customer does not have any payment profiles in Authorize.net. Please add a payment method first.',
+            400
+          );
+        }
+
+        // Verify that the requested payment profile exists
+        const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+        
+        if (!requestedProfile) {
+          return sendError(
+            res,
+            `Payment profile ID ${paymentProfileId} not found for this customer. Available profiles: ${paymentProfiles.map(p => p.paymentProfileId).join(', ')}`,
+            400
+          );
+        }
+
+        // Store profile IDs in database for future use
+        await customer.update({
+          customerProfileId: customerProfileId.toString(),
+          customerPaymentProfileId: paymentProfileId.toString()
+        });
+      } else {
+        // Verify that the stored payment profile ID matches the requested one
+        if (customer.customerPaymentProfileId !== paymentProfileId) {
+          // Re-verify by fetching profile
+          const profileResult = await getCustomerProfileDetails({
+            customerProfileId: customerProfileId
+          });
+          
+          if (profileResult.success && profileResult.profile) {
+            const paymentProfiles = extractPaymentProfiles(profileResult.profile);
+            const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+            
+            if (!requestedProfile) {
+              return sendError(
+                res,
+                `Payment profile ID ${paymentProfileId} not found for this customer`,
+                400
+              );
+            }
+          }
+        }
+      }
+
+      // Charge using stored payment method
+      paymentResult = await chargeCustomerProfile({
+        customerProfileId,
+        customerPaymentProfileId: paymentProfileId,
+        amount: total,
+        invoiceNumber: `POS-${Date.now()}`,
+        description: `POS Sale - ${locationName}`
+      });
+
+      if (!paymentResult.success) {
+        return sendError(res, 'Stored payment processing failed', 400, paymentResult.error);
+      }
+
+      transactionId = paymentResult.transactionId;
+      // Update paymentType to actual type determined from profile
+      paymentType = actualPaymentType;
+    } else if (paymentType === 'credit_card' || paymentType === 'debit_card') {
       if (useBluetoothReader) {
         // Bluetooth Card Reader mode - process using opaqueData from reader
         if (!bluetoothPayload || !bluetoothPayload.descriptor || !bluetoothPayload.value) {
@@ -826,13 +966,16 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
             transactionId: chargeResult.transactionId,
             authCode: chargeResult.authCode,
             message: chargeResult.message,
-            success: true
+            success: true,
+            underReview: chargeResult.underReview || false,
+            reviewStatus: chargeResult.reviewStatus || null
           });
         } else {
           errors.push({
             item: { type, id, number },
             error: chargeResult.error,
-            errorCode: chargeResult.errorCode
+            errorCode: chargeResult.errorCode,
+            responseCode: chargeResult.responseCode
           });
         }
       } catch (err) {

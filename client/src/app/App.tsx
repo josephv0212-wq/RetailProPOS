@@ -387,14 +387,37 @@ function AppContent() {
         // Clear pending items
         setPendingChargeItems([]);
 
+        // Check for transactions under review
+        const underReviewItems = results.filter(r => r.underReview);
+        const approvedItems = results.filter(r => !r.underReview);
+
         // Show results
         if (summary.successful > 0) {
           const totalAmount = results.reduce((sum, r) => sum + r.amount, 0);
-          showToast(
-            `Successfully charged ${summary.successful} item(s) totaling $${totalAmount.toFixed(2)}`,
-            'success',
-            5000
-          );
+          
+          if (underReviewItems.length > 0 && approvedItems.length === 0) {
+            // All transactions are under review
+            const reviewNumbers = underReviewItems.map(r => `${r.type} ${r.number}`).join(', ');
+            showAlert({
+              title: 'Transactions Under Review',
+              message: `${underReviewItems.length} transaction(s) submitted but are under review by Authorize.net:\n\n${reviewNumbers}\n\nPlease check your Authorize.net merchant interface to approve or decline these transactions.`
+            });
+          } else if (underReviewItems.length > 0) {
+            // Some approved, some under review
+            const reviewNumbers = underReviewItems.map(r => `${r.type} ${r.number}`).join(', ');
+            showToast(
+              `Charged ${approvedItems.length} item(s) successfully. ${underReviewItems.length} transaction(s) under review: ${reviewNumbers}`,
+              'warning',
+              7000
+            );
+          } else {
+            // All approved
+            showToast(
+              `Successfully charged ${summary.successful} item(s) totaling $${totalAmount.toFixed(2)}`,
+              'success',
+              5000
+            );
+          }
         }
 
         if (summary.failed > 0) {
@@ -405,8 +428,8 @@ function AppContent() {
           });
         }
 
-        // If all succeeded, show success message
-        if (summary.failed === 0) {
+        // If all succeeded and none are under review, show detailed success message
+        if (summary.failed === 0 && underReviewItems.length === 0) {
           const transactionIds = results.map(r => r.transactionId).join(', ');
           showToast(
             `All charges processed successfully. Transaction IDs: ${transactionIds}`,
@@ -576,7 +599,14 @@ function AppContent() {
     if (paymentDetails.method === 'cash') {
       apiPaymentDetails.cashReceived = paymentDetails.cashReceived || total;
     } else if (paymentDetails.method === 'credit_card' || paymentDetails.method === 'debit_card') {
-      if (paymentDetails.useEBizChargeTerminal) {
+      if (paymentDetails.useValorApi) {
+        // Valor API payment - already processed in PaymentModal
+        // Just record the sale with the transaction ID
+        apiPaymentDetails.useValorApi = true;
+        apiPaymentDetails.terminalNumber = paymentDetails.terminalNumber;
+        apiPaymentDetails.valorTransactionId = paymentDetails.valorTransactionId;
+        // Payment already processed via Valor API, so we just need to record the sale
+      } else if (paymentDetails.useEBizChargeTerminal) {
         apiPaymentDetails.useEBizChargeTerminal = true;
         apiPaymentDetails.terminalIP = paymentDetails.terminalIP;
       } else if (paymentDetails.useTerminal) {
@@ -592,6 +622,13 @@ function AppContent() {
         apiPaymentDetails.cvv = paymentDetails.cvv;
         apiPaymentDetails.zip = paymentDetails.zip;
       }
+    } else if (paymentDetails.useStoredPayment && paymentDetails.paymentProfileId) {
+      // Stored payment method via CIM
+      // Note: useStoredPayment and paymentProfileId will be added at root level below
+      // Determine payment type from stored profile (will be determined on backend)
+      // For now, set paymentType based on method
+      const isAch = paymentDetails.method === 'ach';
+      paymentType = isAch ? 'ach' : 'credit_card';
     } else if (paymentDetails.method === 'zelle') {
       apiPaymentDetails.zelleConfirmation = paymentDetails.zelleConfirmation;
     } else if (paymentDetails.method === 'ach') {
@@ -621,10 +658,23 @@ function AppContent() {
         requestBody.bluetoothPayload = paymentDetails.bluetoothPayload;
       }
 
+      // Add useValorApi at root level if using Valor API
+      if (paymentDetails.useValorApi) {
+        requestBody.useValorApi = true;
+        requestBody.terminalNumber = paymentDetails.terminalNumber;
+        requestBody.valorTransactionId = paymentDetails.valorTransactionId;
+      }
+
       // Add useTerminal at root level if using PAX terminal (Valor Connect)
       if (paymentDetails.useTerminal) {
         requestBody.useTerminal = true;
         requestBody.terminalNumber = paymentDetails.terminalNumber;
+      }
+
+      // Add useStoredPayment and paymentProfileId at root level if using stored payment method
+      if (paymentDetails.useStoredPayment && paymentDetails.paymentProfileId) {
+        requestBody.useStoredPayment = true;
+        requestBody.paymentProfileId = paymentDetails.paymentProfileId;
       }
 
       const response = await salesAPI.create(requestBody);
@@ -898,6 +948,8 @@ function AppContent() {
         userTerminalNumber={user?.terminalNumber}
         userTerminalIP={user?.terminalIP}
         userTerminalPort={user?.terminalPort}
+        customerId={selectedCustomer?.id || null}
+        customerName={selectedCustomer?.name || selectedCustomer?.contactName || null}
       />
 
       {/* Unified Sales Order & Invoice Modal */}
