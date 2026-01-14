@@ -49,6 +49,19 @@ if (!global.VALOR_API_ENDPOINT_LOGGED) {
   console.log(`   Publish: ${VALOR_PUBLISH_URL}`);
   console.log(`   Status: ${VALOR_TXN_STATUS_URL}`);
   console.log(`   Cancel: ${VALOR_CANCEL_URL}`);
+  
+  // Check if credentials are configured
+  if (!VALOR_APP_ID || !VALOR_APP_KEY) {
+    console.error('❌ Valor API credentials NOT configured!');
+    console.error('   VALOR_APP_ID:', VALOR_APP_ID ? 'SET' : 'MISSING');
+    console.error('   VALOR_APP_KEY:', VALOR_APP_KEY ? 'SET' : 'MISSING');
+    console.error('   Please set VALOR_APP_ID and VALOR_APP_KEY in your .env file');
+  } else {
+    console.log('✅ Valor API credentials configured');
+    console.log(`   App ID: ${VALOR_APP_ID.substring(0, 10)}...`);
+    console.log(`   App Key: ${VALOR_APP_KEY.substring(0, 10)}...`);
+  }
+  
   global.VALOR_API_ENDPOINT_LOGGED = true;
 }
 
@@ -78,11 +91,28 @@ export const checkValorCredentials = () => {
  * @returns {Object} Headers object
  */
 const getValorHeaders = () => {
-  return {
+  // Check if credentials are set
+  if (!VALOR_APP_ID || !VALOR_APP_KEY) {
+    console.error('❌ Valor API credentials not configured!');
+    console.error('VALOR_APP_ID:', VALOR_APP_ID ? 'SET' : 'MISSING');
+    console.error('VALOR_APP_KEY:', VALOR_APP_KEY ? 'SET' : 'MISSING');
+  }
+  
+  const headers = {
     'Content-Type': 'application/json',
-    'X-VALOR-APP-ID': VALOR_APP_ID,
-    'X-VALOR-APP-KEY': VALOR_APP_KEY
+    'X-VALOR-APP-ID': VALOR_APP_ID || '',
+    'X-VALOR-APP-KEY': VALOR_APP_KEY || ''
   };
+  
+  // Log headers (redact key for security)
+  if (VALOR_APP_ID && VALOR_APP_KEY) {
+    console.log('📤 Valor headers configured:', {
+      'X-VALOR-APP-ID': VALOR_APP_ID.substring(0, 10) + '...',
+      'X-VALOR-APP-KEY': VALOR_APP_KEY.substring(0, 10) + '...'
+    });
+  }
+  
+  return headers;
 };
 
 /**
@@ -304,11 +334,39 @@ export const initiateTerminalPayment = async (paymentData, epi) => {
       console.error('Error status:', error.response.status);
     }
     
+    // Extract error message from response
+    let errorMessage = 'Failed to connect to Valor Connect API';
+    let errorCode = error.response?.status || null;
+    let errorDetails = error.response?.data || null;
+    
+    if (error.response?.data) {
+      // Try to extract error message from various possible formats
+      if (typeof error.response.data === 'string') {
+        errorMessage = error.response.data;
+      } else if (error.response.data.desc) {
+        errorMessage = error.response.data.desc; // Valor uses "desc" field
+      } else if (error.response.data.msg) {
+        errorMessage = error.response.data.msg; // Valor uses "msg" field
+      } else if (error.response.data.mesg) {
+        errorMessage = error.response.data.mesg; // Valor uses "mesg" field
+      } else if (error.response.data.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response.data.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.response.data.MESSAGE) {
+        errorMessage = error.response.data.MESSAGE;
+      } else if (error.response.data.ERROR) {
+        errorMessage = error.response.data.ERROR;
+      }
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
     return {
       success: false,
       error: errorMessage,
       errorCode: errorCode,
-      errorDetails: errorDetails || (error.response?.data ? error.response.data : null)
+      errorDetails: errorDetails
     };
   }
 };
