@@ -1,49 +1,54 @@
 /**
  * Valor API Service
- * Handles cloud-to-connect payment processing with VP100 PAX terminals via Valor API
+ * Handles cloud-to-connect payment processing with VP100 PAX terminals via Valor Connect API
  * 
- * IMPORTANT: This is a DIRECT integration with Valor API - NO Authorize.Net required!
- * Valor API is a standalone payment gateway that communicates directly with VP100 terminals.
+ * IMPORTANT: This is a DIRECT integration with Valor Connect API - NO Authorize.Net required!
+ * Valor Connect API is a standalone payment gateway that communicates directly with VP100 terminals.
  * 
  * Valor Connect Cloud-to-Connect Integration:
  * - Model: PAX Valor VP100
- * - Connection: WiFi (cloud-to-connect via Valor API)
- * - Gateway: Valor API (cloud infrastructure) - NOT Authorize.Net
+ * - Connection: WiFi (cloud-to-connect via Valor Connect)
+ * - Gateway: Valor Connect API (cloud infrastructure) - NOT Authorize.Net
  * - Protocol: REST API over HTTPS
+ * - Authentication: X-VALOR-APP-ID and X-VALOR-APP-KEY headers (not Bearer tokens)
  * 
  * Flow:
- * 1. App authenticates with Valor API to get Bearer token
- * 2. App sends payment request to Valor API with terminal serial number
- * 3. Valor API routes request to VP100 terminal via cloud infrastructure
- * 4. VP100 displays payment prompt to customer
- * 5. Customer completes payment on VP100 device
- * 6. VP100 sends payment data back to Valor API
- * 7. App polls Valor API for payment status
- * 8. App shows notification when payment confirmed
+ * 1. App sends payment request to Valor Connect API with EPI (Equipment Profile Identifier)
+ * 2. Valor Connect API routes request to VP100 terminal via cloud infrastructure
+ * 3. VP100 displays payment prompt to customer (automatically triggered)
+ * 4. Customer completes payment on VP100 device
+ * 5. VP100 sends payment data back to Valor Connect API
+ * 6. App polls Valor Connect API for payment status
+ * 7. App shows notification when payment confirmed
  * 
  * Documentation:
- * - Valor API Reference: https://valorapi.readme.io/reference
- * - Terminal must be registered in Valor Portal and configured for cloud-to-connect
- * - NO Authorize.Net account or credentials needed for Valor API integration
+ * - Valor Connect uses EPI (Equipment Profile Identifier) to target terminals
+ * - Terminal must be registered in Valor Portal and configured for Valor Connect (Cloud mode)
+ * - Terminal must display "Waiting for Valor Connect" to receive payment requests
+ * - NO Authorize.Net account or credentials needed for Valor Connect integration
  */
 
 import axios from 'axios';
 import dotenv from 'dotenv';
 dotenv.config();
 
-// Valor API Configuration
-const VALOR_API_BASE_URL = process.env.VALOR_API_BASE_URL || 'https://api.valorpaytech.com';
-const VALOR_API_MERCHANT_ID = process.env.VALOR_API_MERCHANT_ID;
-const VALOR_API_API_KEY = process.env.VALOR_API_API_KEY;
-const VALOR_API_SECRET_KEY = process.env.VALOR_API_SECRET_KEY;
+// Valor Connect API Configuration
+// Note: These are staging endpoints. Production endpoints will be provided by Valor during go-live.
+const VALOR_CHECK_EPI_URL = process.env.VALOR_CHECK_EPI_URL || 'https://demo.valorpaytech.com/api/Valor/checkepi';
+const VALOR_PUBLISH_URL = process.env.VALOR_PUBLISH_URL || 'https://securelink-staging.valorpaytech.com:4430/?status';
+const VALOR_TXN_STATUS_URL = process.env.VALOR_TXN_STATUS_URL || 'https://securelink-staging.valorpaytech.com:4430/?txn_status';
+const VALOR_CANCEL_URL = process.env.VALOR_CANCEL_URL || 'https://securelink-staging.valorpaytech.com:4430/?cancel';
 
-// Token cache for authentication
-let bearerToken = null;
-let tokenExpiry = null;
+// Valor API Credentials (App ID and App Key from Valor Portal)
+const VALOR_APP_ID = process.env.VALOR_APP_ID;
+const VALOR_APP_KEY = process.env.VALOR_APP_KEY;
 
 // Log which endpoint is being used (only once at startup)
 if (!global.VALOR_API_ENDPOINT_LOGGED) {
-  console.log(`💳 Valor API endpoint: ${VALOR_API_BASE_URL} (${process.env.NODE_ENV || 'development'})`);
+  console.log(`💳 Valor Connect API endpoints configured (${process.env.NODE_ENV || 'development'})`);
+  console.log(`   Publish: ${VALOR_PUBLISH_URL}`);
+  console.log(`   Status: ${VALOR_TXN_STATUS_URL}`);
+  console.log(`   Cancel: ${VALOR_CANCEL_URL}`);
   global.VALOR_API_ENDPOINT_LOGGED = true;
 }
 
@@ -54,9 +59,8 @@ if (!global.VALOR_API_ENDPOINT_LOGGED) {
 const checkValorCredentials = () => {
   const missing = [];
   
-  if (!VALOR_API_MERCHANT_ID) missing.push('VALOR_API_MERCHANT_ID');
-  if (!VALOR_API_API_KEY) missing.push('VALOR_API_API_KEY');
-  if (!VALOR_API_SECRET_KEY) missing.push('VALOR_API_SECRET_KEY');
+  if (!VALOR_APP_ID) missing.push('VALOR_APP_ID');
+  if (!VALOR_APP_KEY) missing.push('VALOR_APP_KEY');
   
   if (missing.length > 0) {
     return {
@@ -70,8 +74,87 @@ const checkValorCredentials = () => {
 };
 
 /**
- * Authenticate with Valor API and get Bearer token
- * @returns {Promise<Object>} Authentication result with token
+ * Get Valor API headers (X-VALOR-APP-ID and X-VALOR-APP-KEY)
+ * @returns {Object} Headers object
+ */
+const getValorHeaders = () => {
+  return {
+    'Content-Type': 'application/json',
+    'X-VALOR-APP-ID': VALOR_APP_ID,
+    'X-VALOR-APP-KEY': VALOR_APP_KEY
+  };
+};
+
+/**
+ * Check EPI (Equipment Profile Identifier) status
+ * Validates that the EPI is active and accessible
+ * @param {string} epi - Equipment Profile Identifier (e.g., "2501357713")
+ * @returns {Promise<Object>} EPI status result
+ */
+export const checkEPI = async (epi) => {
+  // Check credentials first
+  const credentialCheck = checkValorCredentials();
+  if (!credentialCheck.valid) {
+    return {
+      success: false,
+      error: credentialCheck.error
+    };
+  }
+
+  if (!epi || epi.trim() === '') {
+    return {
+      success: false,
+      error: 'EPI (Equipment Profile Identifier) is required'
+    };
+  }
+
+  try {
+    const response = await axios.post(
+      VALOR_CHECK_EPI_URL,
+      { EPI: epi.trim() },
+      {
+        headers: getValorHeaders(),
+        timeout: 30000
+      }
+    );
+
+    console.log('📥 Valor Check EPI response:', JSON.stringify(response.data, null, 2));
+
+    if (response.data && (response.data.status === 'active' || response.data.active === true)) {
+      return {
+        success: true,
+        epi: epi.trim(),
+        active: true,
+        message: 'EPI is active and ready'
+      };
+    } else {
+      return {
+        success: false,
+        epi: epi.trim(),
+        active: false,
+        error: response.data?.message || 'EPI is not active'
+      };
+    }
+  } catch (error) {
+    console.error('❌ Valor Check EPI error:', error.message);
+    if (error.response?.data) {
+      console.error('Error response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    
+    return {
+      success: false,
+      error: error.response?.data?.message || 
+             error.response?.data?.error || 
+             error.message || 
+             'Failed to check EPI status'
+    };
+  }
+};
+
+/**
+ * Authenticate with Valor API (legacy function - kept for compatibility)
+ * Note: Valor Connect uses header-based auth, not Bearer tokens
+ * @returns {Promise<Object>} Authentication result
  */
 export const authenticateValorApi = async () => {
   // Check credentials first
@@ -83,101 +166,41 @@ export const authenticateValorApi = async () => {
     };
   }
 
-  // Return cached token if still valid
-  if (bearerToken && tokenExpiry && Date.now() < tokenExpiry) {
-    return {
-      success: true,
-      token: bearerToken,
-      cached: true
-    };
-  }
-
-  try {
-    // Valor API authentication endpoint
-    // Based on Valor API documentation, authentication typically uses merchant credentials
-    const authUrl = `${VALOR_API_BASE_URL}/auth/token`; // Adjust endpoint based on actual API docs
-    
-    const response = await axios.post(authUrl, {
-      merchantId: VALOR_API_MERCHANT_ID,
-      apiKey: VALOR_API_API_KEY,
-      secretKey: VALOR_API_SECRET_KEY
-    }, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (response.data && response.data.token) {
-      bearerToken = response.data.token;
-      // Token typically expires in 1 hour, adjust based on API response
-      const expiresIn = response.data.expiresIn || 3600; // Default 1 hour
-      tokenExpiry = Date.now() + (expiresIn * 1000) - 60000; // Subtract 1 minute for safety
-      
-      console.log('✅ Valor API authentication successful');
-      
-      return {
-        success: true,
-        token: bearerToken,
-        expiresIn: expiresIn
-      };
-    } else {
-      return {
-        success: false,
-        error: 'Invalid authentication response from Valor API'
-      };
-    }
-  } catch (error) {
-    console.error('❌ Valor API authentication error:', error.message);
-    if (error.response?.data) {
-      console.error('Error response data:', JSON.stringify(error.response.data, null, 2));
-    }
-    
-    return {
-      success: false,
-      error: error.response?.data?.message || 
-             error.response?.data?.error || 
-             error.message || 
-             'Failed to authenticate with Valor API'
-    };
-  }
+  // Valor Connect uses header-based auth, so we just validate credentials exist
+  return {
+    success: true,
+    message: 'Valor Connect credentials configured (header-based authentication)',
+    authenticated: true
+  };
 };
 
 /**
- * Get authenticated Bearer token (with automatic authentication if needed)
- * @returns {Promise<string>} Bearer token
- */
-const getBearerToken = async () => {
-  // Check if we have a valid cached token
-  if (bearerToken && tokenExpiry && Date.now() < tokenExpiry) {
-    return bearerToken;
-  }
-
-  // Authenticate to get new token
-  const authResult = await authenticateValorApi();
-  if (!authResult.success) {
-    throw new Error(authResult.error || 'Failed to authenticate with Valor API');
-  }
-
-  return bearerToken;
-};
-
-/**
- * Initiate a terminal payment request via Valor API (cloud-to-connect)
+ * Initiate a terminal payment request via Valor Connect API (Publish API)
+ * This triggers the payment dialog on the VP100 terminal
  * @param {Object} paymentData - Payment information
  * @param {string} paymentData.amount - Payment amount
  * @param {string} paymentData.invoiceNumber - Invoice number (optional)
  * @param {string} paymentData.description - Transaction description (optional)
- * @param {string} terminalSerialNumber - VP100 serial number (REQUIRED for Valor Connect)
- * @returns {Promise<Object>} Payment result with pending status
+ * @param {string} epi - Equipment Profile Identifier (REQUIRED for Valor Connect)
+ * @returns {Promise<Object>} Payment result with transaction reference
  */
-export const initiateTerminalPayment = async (paymentData, terminalSerialNumber) => {
+export const initiateTerminalPayment = async (paymentData, epi) => {
   const { amount, invoiceNumber, description } = paymentData;
 
-  // Validate terminal serial number - REQUIRED for Valor Connect
-  if (!terminalSerialNumber || terminalSerialNumber.trim() === '') {
+  // Check credentials first
+  const credentialCheck = checkValorCredentials();
+  if (!credentialCheck.valid) {
     return {
       success: false,
-      error: 'Terminal serial number is required. Please configure your VP100 serial number in Settings. The terminal must be registered in Valor Portal and configured for cloud-to-connect.'
+      error: credentialCheck.error
+    };
+  }
+
+  // Validate EPI - REQUIRED for Valor Connect
+  if (!epi || epi.trim() === '') {
+    return {
+      success: false,
+      error: 'EPI (Equipment Profile Identifier) is required. Please configure your EPI in Settings. The terminal must be registered in Valor Portal and configured for Valor Connect (Cloud mode).'
     };
   }
 
@@ -191,59 +214,60 @@ export const initiateTerminalPayment = async (paymentData, terminalSerialNumber)
   }
 
   try {
-    // Get Bearer token
-    const token = await getBearerToken();
-
-    // Valor API payment endpoint
-    // Adjust endpoint and request structure based on actual Valor API documentation
-    const paymentUrl = `${VALOR_API_BASE_URL}/terminals/${terminalSerialNumber}/transactions/sale`;
-    
+    // Valor Connect Publish API endpoint
+    // This endpoint triggers the payment dialog on the VP100 terminal
     const requestBody = {
-      amount: paymentAmount.toFixed(2),
-      invoiceNumber: invoiceNumber || `POS-${Date.now()}`,
-      description: description || 'POS Sale - Terminal Payment',
-      // Add other required fields based on Valor API documentation
-      transactionType: 'SALE',
-      timeout: 180 // Wait up to 180 seconds for terminal response
+      EPI: epi.trim(),
+      AMOUNT: paymentAmount.toFixed(2),
+      TRAN_MODE: "1",   // 1 = Credit
+      TRAN_CODE: "01"    // 01 = Sale
     };
 
-    console.log('📤 Sending terminal payment request to Valor API:', {
-      endpoint: paymentUrl,
-      terminalSerialNumber: terminalSerialNumber.trim(),
+    // Add optional fields if provided
+    if (invoiceNumber) {
+      requestBody.INVOICE_NUMBER = invoiceNumber;
+    }
+    if (description) {
+      requestBody.DESCRIPTION = description;
+    }
+
+    console.log('📤 Sending terminal payment request to Valor Connect API:', {
+      endpoint: VALOR_PUBLISH_URL,
+      epi: epi.trim(),
       amount: paymentAmount.toFixed(2)
     });
 
-    const response = await axios.post(paymentUrl, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
+    const response = await axios.post(VALOR_PUBLISH_URL, requestBody, {
+      headers: getValorHeaders(),
       timeout: 30000 // 30 seconds for initial request
     });
 
-    console.log('📥 Valor API response:', JSON.stringify(response.data, null, 2));
+    console.log('📥 Valor Connect Publish API response:', JSON.stringify(response.data, null, 2));
 
     const result = response.data;
 
-    // Handle response based on Valor API structure
-    // Adjust based on actual API response format
-    if (result && result.status === 'PENDING' || result.status === 'SUCCESS') {
+    // Handle response based on Valor Connect API structure
+    // The response should contain a transaction reference ID (reqTxnId or similar)
+    if (result && (result.status === 'PENDING' || result.status === 'SUCCESS' || result.reqTxnId || result.transactionId)) {
+      const transactionId = result.reqTxnId || result.transactionId || result.id || `TXN-${Date.now()}`;
+      
       return {
         success: true,
-        pending: result.status === 'PENDING',
-        transactionId: result.transactionId || result.id,
+        pending: result.status === 'PENDING' || !result.status || result.status === 'SUCCESS',
+        transactionId: transactionId,
+        reqTxnId: transactionId, // Valor Connect uses reqTxnId for status polling
         refId: result.refId || result.referenceId,
-        message: result.status === 'PENDING' 
+        message: result.status === 'PENDING' || !result.status
           ? 'Payment request sent to VP100 terminal. Please complete payment on device.'
-          : 'Payment processed successfully',
-        status: result.status.toLowerCase(),
+          : result.message || 'Payment processed successfully',
+        status: (result.status || 'PENDING').toLowerCase(),
         amount: result.amount || paymentAmount.toFixed(2)
       };
-    } else if (result && result.status === 'DECLINED' || result.status === 'FAILED') {
+    } else if (result && (result.status === 'DECLINED' || result.status === 'FAILED')) {
       const errorMessage = result.message || result.error || 'Transaction declined';
       const errorCode = result.errorCode || result.code;
       
-      console.error('❌ Valor API transaction declined:', {
+      console.error('❌ Valor Connect transaction declined:', {
         status: result.status,
         errorCode: errorCode,
         errorMessage: errorMessage
@@ -259,7 +283,7 @@ export const initiateTerminalPayment = async (paymentData, terminalSerialNumber)
       const errorMessage = result?.message || result?.error || 'Transaction failed';
       const errorCode = result?.errorCode || result?.code;
       
-      console.error('❌ Valor API transaction error:', {
+      console.error('❌ Valor Connect transaction error:', {
         errorCode: errorCode,
         errorMessage: errorMessage,
         fullResponse: result
@@ -272,7 +296,7 @@ export const initiateTerminalPayment = async (paymentData, terminalSerialNumber)
       };
     }
   } catch (error) {
-    console.error('❌ Valor API Terminal Payment Error:', error.message);
+    console.error('❌ Valor Connect Terminal Payment Error:', error.message);
     if (error.response?.data) {
       console.error('Error response data:', JSON.stringify(error.response.data, null, 2));
     }
@@ -285,55 +309,69 @@ export const initiateTerminalPayment = async (paymentData, terminalSerialNumber)
       error: error.response?.data?.message || 
              error.response?.data?.error || 
              error.message || 
-             'Failed to connect to Valor API'
+             'Failed to connect to Valor Connect API'
     };
   }
 };
 
 /**
- * Check payment status by polling Valor API
- * @param {string} transactionId - Transaction ID
- * @param {string} terminalSerialNumber - Terminal serial number (optional, may be needed for lookup)
+ * Check payment status by polling Valor Connect API
+ * @param {string} reqTxnId - Transaction reference ID (from Publish API response)
+ * @param {string} epi - Equipment Profile Identifier (optional, may be needed for lookup)
  * @returns {Promise<Object>} Payment status
  */
-export const checkPaymentStatus = async (transactionId, terminalSerialNumber = null) => {
-  try {
-    // Get Bearer token
-    const token = await getBearerToken();
+export const checkPaymentStatus = async (reqTxnId, epi = null) => {
+  // Check credentials first
+  const credentialCheck = checkValorCredentials();
+  if (!credentialCheck.valid) {
+    return {
+      success: false,
+      error: credentialCheck.error
+    };
+  }
 
-    // Valor API status endpoint
-    // Adjust endpoint based on actual Valor API documentation
-    let statusUrl;
-    if (terminalSerialNumber) {
-      statusUrl = `${VALOR_API_BASE_URL}/terminals/${terminalSerialNumber}/transactions/${transactionId}`;
-    } else {
-      statusUrl = `${VALOR_API_BASE_URL}/transactions/${transactionId}`;
+  if (!reqTxnId) {
+    return {
+      success: false,
+      error: 'Transaction reference ID (reqTxnId) is required'
+    };
+  }
+
+  try {
+    // Valor Connect Transaction Status API endpoint
+    const requestBody = {
+      reqTxnId: reqTxnId
+    };
+
+    // Add EPI if provided (may be required for some implementations)
+    if (epi) {
+      requestBody.EPI = epi.trim();
     }
 
-    const response = await axios.get(statusUrl, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+    const response = await axios.post(VALOR_TXN_STATUS_URL, requestBody, {
+      headers: getValorHeaders(),
+      timeout: 30000
     });
 
     const result = response.data;
 
     if (result) {
-      const status = result.status || result.transactionStatus || 'unknown';
-      const isApproved = status === 'APPROVED' || status === 'SUCCESS' || status === 'SETTLED';
-      const isPending = status === 'PENDING' || status === 'PROCESSING';
-      const isDeclined = status === 'DECLINED' || status === 'FAILED' || status === 'CANCELLED';
+      const status = result.status || result.transactionStatus || result.STATUS || 'unknown';
+      const isApproved = status === 'APPROVED' || status === 'SUCCESS' || status === 'SETTLED' || status === 'APPROVE';
+      const isPending = status === 'PENDING' || status === 'PROCESSING' || status === 'IN_PROGRESS';
+      const isDeclined = status === 'DECLINED' || status === 'FAILED' || status === 'CANCELLED' || status === 'CANCEL';
 
       return {
         success: isApproved,
         pending: isPending && !isApproved && !isDeclined,
         declined: isDeclined,
-        transactionId: result.transactionId || result.id,
+        transactionId: result.transactionId || result.reqTxnId || result.id || reqTxnId,
+        reqTxnId: result.reqTxnId || reqTxnId,
         status: status.toLowerCase(),
-        amount: result.amount,
-        authCode: result.authCode || result.authorizationCode,
-        message: result.message || result.responseReasonDescription || `Transaction ${status}`,
-        timestamp: result.timestamp || result.createdAt || result.submitTimeUTC
+        amount: result.amount || result.AMOUNT,
+        authCode: result.authCode || result.authorizationCode || result.AUTH_CODE,
+        message: result.message || result.responseReasonDescription || result.MESSAGE || `Transaction ${status}`,
+        timestamp: result.timestamp || result.createdAt || result.submitTimeUTC || result.TIMESTAMP
       };
     } else {
       return {
@@ -342,7 +380,7 @@ export const checkPaymentStatus = async (transactionId, terminalSerialNumber = n
       };
     }
   } catch (error) {
-    console.error('Valor API Check Payment Status Error:', error.message);
+    console.error('Valor Connect Check Payment Status Error:', error.message);
     if (error.response?.data) {
       console.error('Error response:', JSON.stringify(error.response.data, null, 2));
     }
@@ -355,16 +393,16 @@ export const checkPaymentStatus = async (transactionId, terminalSerialNumber = n
 
 /**
  * Poll payment status until completion or timeout
- * @param {string} transactionId - Transaction ID
- * @param {string} terminalSerialNumber - Terminal serial number (optional)
+ * @param {string} reqTxnId - Transaction reference ID
+ * @param {string} epi - Equipment Profile Identifier (optional)
  * @param {number} maxAttempts - Maximum polling attempts (default: 60)
  * @param {number} intervalMs - Polling interval in milliseconds (default: 2000 = 2 seconds)
  * @param {Function} onStatusUpdate - Callback function for status updates
  * @returns {Promise<Object>} Final payment status
  */
 export const pollPaymentStatus = async (
-  transactionId,
-  terminalSerialNumber = null,
+  reqTxnId,
+  epi = null,
   maxAttempts = 60,
   intervalMs = 2000,
   onStatusUpdate = null
@@ -374,7 +412,7 @@ export const pollPaymentStatus = async (
   while (attempts < maxAttempts) {
     attempts++;
     
-    const status = await checkPaymentStatus(transactionId, terminalSerialNumber);
+    const status = await checkPaymentStatus(reqTxnId, epi);
     
     // Call status update callback if provided
     if (onStatusUpdate) {
@@ -395,92 +433,67 @@ export const pollPaymentStatus = async (
     success: false,
     pending: true,
     error: 'Payment status check timeout. Please check terminal or transaction manually.',
-    transactionId: transactionId
+    transactionId: reqTxnId,
+    reqTxnId: reqTxnId
   };
 };
 
 /**
- * Get list of devices/terminals registered with Valor API
- * @returns {Promise<Object>} List of devices/terminals
+ * Cancel a pending transaction via Valor Connect API
+ * @param {string} reqTxnId - Transaction reference ID to cancel
+ * @param {string} epi - Equipment Profile Identifier (optional)
+ * @returns {Promise<Object>} Cancel result
  */
-export const getValorDevices = async () => {
-  try {
-    // Get Bearer token
-    const token = await getBearerToken();
-
-    // Valor API devices endpoint
-    const devicesUrl = `${VALOR_API_BASE_URL}/terminals`;
-    
-    console.log('📱 Fetching Valor API devices...');
-    
-    const response = await axios.get(devicesUrl, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    const devices = response.data?.devices || response.data?.terminals || response.data || [];
-    
-    return {
-      success: true,
-      devices: Array.isArray(devices) ? devices : [],
-      message: 'Devices retrieved successfully'
-    };
-  } catch (error) {
-    console.error('❌ Error fetching Valor API devices:', error.message);
-    if (error.response?.data) {
-      console.error('Error response:', JSON.stringify(error.response.data, null, 2));
-    }
+export const cancelTransaction = async (reqTxnId, epi = null) => {
+  // Check credentials first
+  const credentialCheck = checkValorCredentials();
+  if (!credentialCheck.valid) {
     return {
       success: false,
-      error: error.response?.data?.message || error.response?.data?.error || error.message || 'Failed to fetch devices',
-      devices: []
+      error: credentialCheck.error
     };
   }
-};
 
-/**
- * Void a transaction via Valor API
- * @param {string} transactionId - Transaction ID to void
- * @param {string} terminalSerialNumber - Terminal serial number (optional)
- * @returns {Promise<Object>} Void result
- */
-export const voidTransaction = async (transactionId, terminalSerialNumber = null) => {
+  if (!reqTxnId) {
+    return {
+      success: false,
+      error: 'Transaction reference ID (reqTxnId) is required'
+    };
+  }
+
   try {
-    // Get Bearer token
-    const token = await getBearerToken();
+    // Valor Connect Cancel API endpoint
+    const requestBody = {
+      reqTxnId: reqTxnId
+    };
 
-    // Valor API void endpoint
-    let voidUrl;
-    if (terminalSerialNumber) {
-      voidUrl = `${VALOR_API_BASE_URL}/terminals/${terminalSerialNumber}/transactions/${transactionId}/void`;
-    } else {
-      voidUrl = `${VALOR_API_BASE_URL}/transactions/${transactionId}/void`;
+    // Add EPI if provided
+    if (epi) {
+      requestBody.EPI = epi.trim();
     }
 
-    const response = await axios.post(voidUrl, {}, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
+    const response = await axios.post(VALOR_CANCEL_URL, requestBody, {
+      headers: getValorHeaders(),
+      timeout: 30000
     });
 
     const result = response.data;
 
-    if (result && (result.status === 'SUCCESS' || result.status === 'VOIDED')) {
+    if (result && (result.status === 'SUCCESS' || result.status === 'CANCELLED' || result.status === 'CANCEL')) {
       return {
         success: true,
-        message: result.message || 'Transaction voided successfully',
-        transactionId: result.transactionId || transactionId
+        message: result.message || 'Transaction cancelled successfully',
+        transactionId: result.reqTxnId || reqTxnId,
+        reqTxnId: result.reqTxnId || reqTxnId
       };
     } else {
       return {
         success: false,
-        error: result?.message || result?.error || 'Failed to void transaction'
+        error: result?.message || result?.error || 'Failed to cancel transaction'
       };
     }
   } catch (error) {
-    console.error('Void Transaction Error:', error.message);
+    console.error('Cancel Transaction Error:', error.message);
     if (error.response?.data) {
       console.error('Error response:', JSON.stringify(error.response.data, null, 2));
     }
@@ -489,4 +502,41 @@ export const voidTransaction = async (transactionId, terminalSerialNumber = null
       error: error.response?.data?.message || error.response?.data?.error || error.message
     };
   }
+};
+
+/**
+ * Get list of devices/terminals registered with Valor API
+ * Note: This may not be available in all Valor Connect implementations
+ * @returns {Promise<Object>} List of devices/terminals
+ */
+export const getValorDevices = async () => {
+  // Check credentials first
+  const credentialCheck = checkValorCredentials();
+  if (!credentialCheck.valid) {
+    return {
+      success: false,
+      error: credentialCheck.error,
+      devices: []
+    };
+  }
+
+  // Note: Valor Connect may not have a devices endpoint
+  // Terminals are identified by EPI, which is configured in Settings
+  return {
+    success: true,
+    devices: [],
+    message: 'Valor Connect uses EPI (Equipment Profile Identifier) to target terminals. Configure EPI in Settings.'
+  };
+};
+
+/**
+ * Void a transaction via Valor API (legacy function - kept for compatibility)
+ * Note: Valor Connect may use cancel instead of void
+ * @param {string} transactionId - Transaction ID to void
+ * @param {string} epi - Equipment Profile Identifier (optional)
+ * @returns {Promise<Object>} Void result
+ */
+export const voidTransaction = async (transactionId, epi = null) => {
+  // For Valor Connect, use cancel instead of void
+  return await cancelTransaction(transactionId, epi);
 };

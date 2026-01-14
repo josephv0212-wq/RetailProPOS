@@ -108,7 +108,7 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
             Configure your WiFi receipt printer for this location. The printer should be on the same network and accessible via IP address (default port 9100).
           </p>
           <p className="font-semibold text-gray-900 dark:text-white mb-6">
-            Location: {locationId}
+            Location: {locationName}
           </p>
 
           {/* Test Print Button */}
@@ -163,17 +163,6 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
             <ValorApiConfig />
           </div>
 
-          {/* PAX Terminal Support - Main Configuration */}
-          <div className="mb-8 pb-8 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-              PAX VP100 Terminal (Valor Connect via Authorize.Net)
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              Cloud-to-cloud payment integration through Authorize.Net. Only Terminal number is required. IP and Port are not needed for Valor Connect.
-            </p>
-            <PAXTerminalConfig />
-          </div>
-
         </div>
 
         {/* System Information Section */}
@@ -189,7 +178,7 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
                 Location
               </label>
               <p className="font-bold text-gray-900 dark:text-white">
-                {locationId} - {locationName}
+                {locationName}
               </p>
             </div>
 
@@ -361,121 +350,6 @@ function ValorApiConfig() {
           }`}
         >
           {isSaving ? 'Saving...' : 'Save Terminal Settings'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// PAX Terminal Configuration Component (Valor Connect)
-function PAXTerminalConfig() {
-  const { user, refreshUser } = useAuth();
-  const { showToast } = useToast();
-  const [terminalNumber, setTerminalNumber] = useState(user?.terminalNumber || '');
-  const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    if (user?.terminalNumber) {
-      setTerminalNumber(user.terminalNumber);
-    }
-  }, [user?.terminalNumber]);
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const response = await authAPI.updateTerminalSettings(terminalNumber);
-      
-      if (response.success) {
-        showToast('PAX terminal settings saved successfully', 'success', 3000);
-        if (refreshUser) {
-          await refreshUser();
-        }
-      } else {
-        showToast(response.message || 'Failed to save terminal settings', 'error', 4000);
-      }
-    } catch (error: any) {
-      console.error('Error saving terminal settings:', error);
-      showToast(error.message || 'Failed to save terminal settings', 'error', 4000);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Test connection removed - not applicable for Valor Connect (cloud-to-cloud)
-
-  const isValidTerminalNumber = (num: string) => {
-    if (!num || num.trim() === '') return false; // Terminal number is REQUIRED
-    return /^[A-Za-z0-9\-_]+$/.test(num.trim());
-  };
-
-  const terminalNumberValid = isValidTerminalNumber(terminalNumber);
-  const canSave = terminalNumberValid && terminalNumber.trim() !== '';
-
-  return (
-    <div className="space-y-4">
-      {/* Terminal Number - Required for Valor Connect */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Terminal Number (Serial Number) <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="text"
-          value={terminalNumber}
-          onChange={(e) => setTerminalNumber(e.target.value)}
-          placeholder="VP100-123456"
-          required
-          className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
-            terminalNumber && terminalNumberValid
-              ? 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
-              : terminalNumber && !terminalNumberValid
-              ? 'border-red-300 dark:border-red-600 focus:ring-red-500'
-              : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
-          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
-        />
-        {!terminalNumberValid && terminalNumber !== '' && (
-          <p className="text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
-            <XCircle className="w-4 h-4" />
-            Invalid format. Use alphanumeric characters, dashes, or underscores.
-          </p>
-        )}
-        {!terminalNumber && (
-          <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-            ⚠️ Terminal number is required for Valor Connect payments. Enter your VP100 serial number.
-          </p>
-        )}
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          Find it on the device label or in Valor Portal/Authorize.Net
-        </p>
-      </div>
-
-      {/* Info Box - IP/Port Not Needed */}
-      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-        <p className="text-sm text-blue-900 dark:text-blue-200 font-medium mb-1">
-          ℹ️ Valor Connect (Cloud-to-Cloud)
-        </p>
-        <p className="text-xs text-blue-800 dark:text-blue-300">
-          IP Address and Port are <strong>not required</strong> for Valor Connect. The terminal communicates through Authorize.Net's cloud infrastructure. Only Terminal number is needed.
-        </p>
-      </div>
-
-      {/* Action Button */}
-      <div className="pt-2">
-        <button
-          onClick={handleSave}
-          disabled={isSaving || !terminalNumber || !terminalNumberValid}
-          className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Saving...</span>
-            </>
-          ) : (
-            <>
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Save Terminal Number</span>
-            </>
-          )}
         </button>
       </div>
     </div>

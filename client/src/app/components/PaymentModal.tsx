@@ -397,16 +397,18 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           5000
         );
         
-        // Get transaction ID from result
-        const transactionId = paymentResult.data?.transactionId || paymentResult.transactionId;
-        if (!transactionId) {
-          throw new Error('No transaction ID received from Valor API');
+        // Get transaction reference ID from result (reqTxnId is preferred for Valor Connect)
+        const reqTxnId = paymentResult.data?.reqTxnId || paymentResult.reqTxnId || 
+                        paymentResult.data?.transactionId || paymentResult.transactionId;
+        if (!reqTxnId) {
+          throw new Error('No transaction reference ID (reqTxnId) received from Valor Connect API');
         }
         
         // Start polling for payment status
         const finalStatus = await pollValorPaymentStatus(
-          transactionId,
-          terminalNumber,
+          reqTxnId,
+          terminalNumber, // EPI value
+          undefined, // terminalSerialNumber (not used, EPI is preferred)
           60, // maxAttempts: 2 minutes max (60 * 2 seconds)
           2000, // intervalMs: Poll every 2 seconds
           (status, attempt) => {
@@ -421,7 +423,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         if (!finalStatus.data?.pending && !finalStatus.pending) {
           if (finalStatus.success || finalStatus.data?.success) {
             // Payment approved - call onConfirmPayment to complete sale
-            paymentDetails.valorTransactionId = transactionId;
+            paymentDetails.valorTransactionId = reqTxnId;
             await onConfirmPayment(paymentDetails);
             showToast('Payment approved! Transaction completed.', 'success', 5000);
             setIsProcessing(false);
@@ -760,12 +762,12 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         </p>
                         <div className="mt-3 text-left bg-gray-50 rounded-lg p-3">
                           <p className="text-xs text-gray-600">
-                            <strong>Terminal Serial Number:</strong> {selectedTerminalNumber || userTerminalNumber || 'Not configured'}
+                            <strong>EPI (Equipment Profile Identifier):</strong> {selectedTerminalNumber || userTerminalNumber || 'Not configured'}
                           </p>
                         </div>
                         {!selectedTerminalNumber && !userTerminalNumber && (
                           <p className="text-xs text-red-600 mt-2 font-medium">
-                            ⚠️ Please configure Terminal serial number (VP100 serial number) in Settings
+                            ⚠️ Please configure EPI (Equipment Profile Identifier) in Settings. This is found in Valor Portal for your terminal.
                           </p>
                         )}
                       </div>
@@ -773,7 +775,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <p className="text-xs text-gray-600">
-                        <strong>How it works (Valor API - Direct Integration):</strong> When you click "Confirm Payment", the system sends the payment request <strong>directly to Valor API</strong> (no Authorize.Net required) with your Terminal serial number. Valor API routes the request to your VP100 terminal via cloud-to-connect. The customer will be prompted on the terminal to insert, swipe, or tap their card. The terminal processes the payment and returns the result through Valor API.
+                        <strong>How it works (Valor Connect API - Direct Integration):</strong> When you click "Confirm Payment", the system sends the payment request <strong>directly to Valor Connect API</strong> (no Authorize.Net required) with your EPI (Equipment Profile Identifier). Valor Connect API routes the request to your VP100 terminal via cloud-to-connect. The terminal automatically displays the payment prompt (tap/insert/swipe). The customer completes payment on the terminal, and the result is returned through Valor Connect API.
                       </p>
                     </div>
                   </div>

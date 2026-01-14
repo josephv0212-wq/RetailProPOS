@@ -2,9 +2,11 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import {
   authenticateValorApi,
+  checkEPI,
   initiateTerminalPayment,
   checkPaymentStatus,
   pollPaymentStatus,
+  cancelTransaction,
   getValorDevices,
   voidTransaction
 } from '../services/valorApiService.js';
@@ -85,12 +87,58 @@ router.get('/devices', async (req, res) => {
 });
 
 /**
+ * POST /valor/checkepi
+ * Check EPI (Equipment Profile Identifier) status
+ */
+router.post('/checkepi', async (req, res) => {
+  try {
+    const { epi } = req.body;
+    
+    if (!epi || epi.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'EPI (Equipment Profile Identifier) is required'
+      });
+    }
+    
+    const result = await checkEPI(epi.trim());
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: result.message || 'EPI is active',
+        data: result
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.error || 'EPI check failed',
+        data: result
+      });
+    }
+  } catch (error) {
+    console.error('Check EPI error:', error);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check EPI',
+      ...(isDevelopment && { error: error.message })
+    });
+  }
+});
+
+/**
  * POST /valor/payment
- * Process payment through VP100 terminal via Valor API (cloud-to-connect)
+ * Process payment through VP100 terminal via Valor Connect API (cloud-to-connect)
+ * Uses EPI (Equipment Profile Identifier) instead of terminal serial number
  */
 router.post('/payment', async (req, res) => {
   try {
-    const { amount, invoiceNumber, description, terminalSerialNumber } = req.body;
+    const { amount, invoiceNumber, description, epi, terminalSerialNumber } = req.body;
+    
+    // Support both EPI and terminalSerialNumber for backward compatibility
+    // EPI is the correct field for Valor Connect
+    const epiValue = epi || terminalSerialNumber;
     
     if (!amount || parseFloat(amount) <= 0) {
       return res.status(400).json({
@@ -99,10 +147,10 @@ router.post('/payment', async (req, res) => {
       });
     }
 
-    if (!terminalSerialNumber || terminalSerialNumber.trim() === '') {
+    if (!epiValue || epiValue.trim() === '') {
       return res.status(400).json({
         success: false,
-        message: 'Terminal serial number is required for Valor API payments'
+        message: 'EPI (Equipment Profile Identifier) is required for Valor Connect payments. Please configure your EPI in Settings.'
       });
     }
     
@@ -110,7 +158,7 @@ router.post('/payment', async (req, res) => {
       amount,
       invoiceNumber,
       description
-    }, terminalSerialNumber);
+    }, epiValue.trim());
     
     if (paymentResult.success) {
       res.json({
@@ -139,20 +187,24 @@ router.post('/payment', async (req, res) => {
 /**
  * GET /valor/status/:transactionId
  * Check payment status for a transaction
+ * Note: transactionId should be the reqTxnId from the payment response
  */
 router.get('/status/:transactionId', async (req, res) => {
   try {
     const { transactionId } = req.params;
-    const { terminalSerialNumber } = req.query;
+    const { epi, terminalSerialNumber } = req.query;
+    
+    // Support both EPI and terminalSerialNumber for backward compatibility
+    const epiValue = epi || terminalSerialNumber || null;
     
     if (!transactionId) {
       return res.status(400).json({
         success: false,
-        message: 'Transaction ID is required'
+        message: 'Transaction ID (reqTxnId) is required'
       });
     }
     
-    const status = await checkPaymentStatus(transactionId, terminalSerialNumber || null);
+    const status = await checkPaymentStatus(transactionId, epiValue);
     
     if (status.success !== undefined) {
       res.json({
@@ -180,16 +232,20 @@ router.get('/status/:transactionId', async (req, res) => {
 /**
  * POST /valor/poll/:transactionId
  * Poll payment status until completion or timeout
+ * Note: transactionId should be the reqTxnId from the payment response
  */
 router.post('/poll/:transactionId', async (req, res) => {
   try {
     const { transactionId } = req.params;
-    const { terminalSerialNumber, maxAttempts, intervalMs } = req.body;
+    const { epi, terminalSerialNumber, maxAttempts, intervalMs } = req.body;
+    
+    // Support both EPI and terminalSerialNumber for backward compatibility
+    const epiValue = epi || terminalSerialNumber || null;
     
     if (!transactionId) {
       return res.status(400).json({
         success: false,
-        message: 'Transaction ID is required'
+        message: 'Transaction ID (reqTxnId) is required'
       });
     }
     
@@ -198,7 +254,7 @@ router.post('/poll/:transactionId', async (req, res) => {
     
     const status = await pollPaymentStatus(
       transactionId,
-      terminalSerialNumber || null,
+      epiValue,
       maxAttemptsNum,
       intervalMsNum
     );
@@ -219,21 +275,74 @@ router.post('/poll/:transactionId', async (req, res) => {
 });
 
 /**
+ * POST /valor/cancel
+ * Cancel a pending transaction via Valor Connect API
+ */
+router.post('/cancel', async (req, res) => {
+  try {
+    const { transactionId, reqTxnId, epi, terminalSerialNumber } = req.body;
+    
+    // Use reqTxnId if provided, otherwise use transactionId
+    const txnId = reqTxnId || transactionId;
+    
+    // Support both EPI and terminalSerialNumber for backward compatibility
+    const epiValue = epi || terminalSerialNumber || null;
+    
+    if (!txnId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Transaction ID (reqTxnId) is required'
+      });
+    }
+    
+    const result = await cancelTransaction(txnId, epiValue);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: result.message || 'Transaction cancelled successfully',
+        data: result
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.error || 'Failed to cancel transaction',
+        data: result
+      });
+    }
+  } catch (error) {
+    console.error('Cancel transaction error:', error);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel transaction',
+      ...(isDevelopment && { error: error.message })
+    });
+  }
+});
+
+/**
  * POST /valor/void
- * Void a transaction via Valor API
+ * Void a transaction via Valor API (legacy endpoint - uses cancel internally)
  */
 router.post('/void', async (req, res) => {
   try {
-    const { transactionId, terminalSerialNumber } = req.body;
+    const { transactionId, reqTxnId, epi, terminalSerialNumber } = req.body;
     
-    if (!transactionId) {
+    // Use reqTxnId if provided, otherwise use transactionId
+    const txnId = reqTxnId || transactionId;
+    
+    // Support both EPI and terminalSerialNumber for backward compatibility
+    const epiValue = epi || terminalSerialNumber || null;
+    
+    if (!txnId) {
       return res.status(400).json({
         success: false,
         message: 'Transaction ID is required'
       });
     }
     
-    const result = await voidTransaction(transactionId, terminalSerialNumber || null);
+    const result = await voidTransaction(txnId, epiValue);
     
     if (result.success) {
       res.json({

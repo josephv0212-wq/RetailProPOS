@@ -1,8 +1,9 @@
-// Valor API Service for Frontend
-// Handles cloud-to-connect payment processing with VP100 PAX terminals via Valor API
+// Valor Connect API Service for Frontend
+// Handles cloud-to-connect payment processing with VP100 PAX terminals via Valor Connect API
 // 
-// IMPORTANT: This is a DIRECT integration with Valor API - NO Authorize.Net required!
-// Valor API is a standalone payment gateway that communicates directly with VP100 terminals.
+// IMPORTANT: This is a DIRECT integration with Valor Connect API - NO Authorize.Net required!
+// Valor Connect API is a standalone payment gateway that communicates directly with VP100 terminals.
+// Uses EPI (Equipment Profile Identifier) to target terminals.
 
 const getEnvVar = (key: string): string | undefined => {
   try {
@@ -26,6 +27,7 @@ interface ValorApiResponse<T = any> {
   error?: string;
   pending?: boolean;
   transactionId?: string;
+  reqTxnId?: string; // Transaction reference ID from Valor Connect
   status?: string;
 }
 
@@ -58,7 +60,41 @@ export const authenticateValorApi = async (): Promise<ValorApiResponse> => {
 };
 
 /**
+ * Check EPI (Equipment Profile Identifier) status
+ */
+export const checkValorEPI = async (epi: string): Promise<ValorApiResponse> => {
+  const token = getToken();
+  if (!token) {
+    return { success: false, error: 'Authentication token not found' };
+  }
+
+  if (!epi || epi.trim() === '') {
+    return { success: false, error: 'EPI is required' };
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/valor/checkepi`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ epi: epi.trim() }),
+    });
+
+    const data = await response.json();
+    return data;
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to check EPI status',
+    };
+  }
+};
+
+/**
  * Get list of registered terminals
+ * Note: Valor Connect uses EPI to target terminals, not a device list
  */
 export const getValorDevices = async (): Promise<ValorApiResponse> => {
   const token = getToken();
@@ -85,21 +121,30 @@ export const getValorDevices = async (): Promise<ValorApiResponse> => {
 };
 
 /**
- * Initiate a payment request via Valor API
+ * Initiate a payment request via Valor Connect API
+ * @param amount - Payment amount
+ * @param epi - Equipment Profile Identifier (required for Valor Connect)
+ * @param invoiceNumber - Optional invoice number
+ * @param description - Optional transaction description
+ * @param terminalSerialNumber - Optional, for backward compatibility (will be used as EPI if epi not provided)
  */
 export const initiateValorPayment = async (
   amount: number,
-  terminalSerialNumber: string,
+  epi: string,
   invoiceNumber?: string,
-  description?: string
+  description?: string,
+  terminalSerialNumber?: string
 ): Promise<ValorApiResponse> => {
   const token = getToken();
   if (!token) {
     return { success: false, error: 'Authentication token not found' };
   }
 
-  if (!terminalSerialNumber || terminalSerialNumber.trim() === '') {
-    return { success: false, error: 'Terminal serial number is required' };
+  // Use EPI if provided, otherwise fall back to terminalSerialNumber for backward compatibility
+  const epiValue = epi || terminalSerialNumber;
+  
+  if (!epiValue || epiValue.trim() === '') {
+    return { success: false, error: 'EPI (Equipment Profile Identifier) is required' };
   }
 
   try {
@@ -111,7 +156,9 @@ export const initiateValorPayment = async (
       },
       body: JSON.stringify({
         amount: amount.toFixed(2),
-        terminalSerialNumber: terminalSerialNumber.trim(),
+        epi: epiValue.trim(),
+        // Include terminalSerialNumber for backward compatibility
+        terminalSerialNumber: epiValue.trim(),
         invoiceNumber: invoiceNumber || `POS-${Date.now()}`,
         description: description || 'POS Sale - Terminal Payment',
       }),
@@ -129,9 +176,13 @@ export const initiateValorPayment = async (
 
 /**
  * Check payment status
+ * @param transactionId - Transaction ID (should be reqTxnId from payment response)
+ * @param epi - Optional EPI for lookup
+ * @param terminalSerialNumber - Optional, for backward compatibility
  */
 export const checkValorPaymentStatus = async (
   transactionId: string,
+  epi?: string,
   terminalSerialNumber?: string
 ): Promise<ValorApiResponse> => {
   const token = getToken();
@@ -141,7 +192,10 @@ export const checkValorPaymentStatus = async (
 
   try {
     const url = new URL(`${API_BASE_URL}/valor/status/${transactionId}`);
-    if (terminalSerialNumber) {
+    // Support both EPI and terminalSerialNumber for backward compatibility
+    if (epi) {
+      url.searchParams.append('epi', epi);
+    } else if (terminalSerialNumber) {
       url.searchParams.append('terminalSerialNumber', terminalSerialNumber);
     }
 
@@ -164,9 +218,13 @@ export const checkValorPaymentStatus = async (
 
 /**
  * Poll payment status until completion
+ * @param transactionId - Transaction ID (should be reqTxnId from payment response)
+ * @param epi - Optional EPI for lookup
+ * @param terminalSerialNumber - Optional, for backward compatibility
  */
 export const pollValorPaymentStatus = async (
   transactionId: string,
+  epi?: string,
   terminalSerialNumber?: string,
   maxAttempts: number = 60,
   intervalMs: number = 2000,
@@ -177,7 +235,7 @@ export const pollValorPaymentStatus = async (
   while (attempts < maxAttempts) {
     attempts++;
 
-    const status = await checkValorPaymentStatus(transactionId, terminalSerialNumber);
+    const status = await checkValorPaymentStatus(transactionId, epi, terminalSerialNumber);
 
     // Call status update callback if provided
     if (onStatusUpdate) {
@@ -203,10 +261,55 @@ export const pollValorPaymentStatus = async (
 };
 
 /**
- * Void a transaction
+ * Cancel a pending transaction via Valor Connect API
+ * @param reqTxnId - Transaction reference ID (from payment response)
+ * @param epi - Optional EPI
+ * @param terminalSerialNumber - Optional, for backward compatibility
+ */
+export const cancelValorTransaction = async (
+  reqTxnId: string,
+  epi?: string,
+  terminalSerialNumber?: string
+): Promise<ValorApiResponse> => {
+  const token = getToken();
+  if (!token) {
+    return { success: false, error: 'Authentication token not found' };
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/valor/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        reqTxnId,
+        epi: epi || terminalSerialNumber || null,
+      }),
+    });
+
+    const data = await response.json();
+    return data;
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to cancel transaction',
+    };
+  }
+};
+
+/**
+ * Void a transaction (legacy function - uses cancel internally)
+ * @param transactionId - Transaction ID
+ * @param reqTxnId - Transaction reference ID (preferred)
+ * @param epi - Optional EPI
+ * @param terminalSerialNumber - Optional, for backward compatibility
  */
 export const voidValorTransaction = async (
   transactionId: string,
+  reqTxnId?: string,
+  epi?: string,
   terminalSerialNumber?: string
 ): Promise<ValorApiResponse> => {
   const token = getToken();
@@ -223,7 +326,8 @@ export const voidValorTransaction = async (
       },
       body: JSON.stringify({
         transactionId,
-        terminalSerialNumber: terminalSerialNumber || null,
+        reqTxnId: reqTxnId || transactionId,
+        epi: epi || terminalSerialNumber || null,
       }),
     });
 
