@@ -155,6 +155,15 @@ router.post('/payment', async (req, res) => {
       });
     }
     
+    // Optional: Validate EPI before attempting payment
+    // This can help catch EPI issues early
+    const epiCheck = await checkEPI(epiValue.trim());
+    if (!epiCheck.success || !epiCheck.active) {
+      console.warn('⚠️ EPI check failed, but proceeding with payment attempt:', epiCheck);
+      // Don't fail here - let Valor Connect API handle the validation
+      // Some implementations might not support EPI check endpoint
+    }
+    
     const paymentResult = await initiateTerminalPayment({
       amount,
       invoiceNumber,
@@ -168,10 +177,19 @@ router.post('/payment', async (req, res) => {
         data: paymentResult
       });
     } else {
-      res.status(400).json({
+      // Include more detailed error information
+      const statusCode = paymentResult.errorCode && paymentResult.errorCode >= 400 && paymentResult.errorCode < 600 
+        ? paymentResult.errorCode 
+        : 400;
+      
+      res.status(statusCode).json({
         success: false,
         message: paymentResult.error || 'Payment processing failed',
-        data: paymentResult
+        data: {
+          ...paymentResult,
+          // Include error details if available
+          errorDetails: paymentResult.errorDetails
+        }
       });
     }
   } catch (error) {
@@ -180,7 +198,7 @@ router.post('/payment', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Payment processing failed',
-      ...(isDevelopment && { error: error.message })
+      ...(isDevelopment && { error: error.message, stack: error.stack })
     });
   }
 });

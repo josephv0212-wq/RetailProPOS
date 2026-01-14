@@ -306,10 +306,9 @@ export const initiateTerminalPayment = async (paymentData, epi) => {
     
     return {
       success: false,
-      error: error.response?.data?.message || 
-             error.response?.data?.error || 
-             error.message || 
-             'Failed to connect to Valor Connect API'
+      error: errorMessage,
+      errorCode: errorCode,
+      errorDetails: errorDetails || (error.response?.data ? error.response.data : null)
     };
   }
 };
