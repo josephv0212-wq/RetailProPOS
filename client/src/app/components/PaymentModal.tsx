@@ -141,7 +141,15 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
     // Validation
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
-      if (cardPaymentMethod === 'pax_terminal') {
+      if (cardPaymentMethod === 'valor_api') {
+        // Valor Connect API validation - EPI is required
+        const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
+        if (!terminalNumber || terminalNumber.trim() === '') {
+          setError('EPI (Equipment Profile Identifier) is required. Please configure your EPI in Settings.');
+          setIsProcessing(false);
+          return;
+        }
+      } else if (cardPaymentMethod === 'pax_terminal') {
         // PAX Terminal validation - Terminal number is required for Valor Connect
         const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
         if (!terminalNumber || terminalNumber.trim() === '') {
@@ -195,7 +203,23 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     };
 
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
-      if (cardPaymentMethod === 'pax_terminal') {
+      if (cardPaymentMethod === 'valor_api') {
+        // Valor Connect API mode - direct integration with Valor Connect API
+        const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
+        
+        if (!terminalNumber || terminalNumber.trim() === '') {
+          setError('EPI (Equipment Profile Identifier) is required. Please configure your EPI in Settings.');
+          setIsProcessing(false);
+          return;
+        }
+
+        paymentDetails.useValorApi = true;
+        paymentDetails.terminalNumber = terminalNumber.trim(); // EPI value
+        
+        // Valor Connect API handles payment directly - no card data needed
+        // Terminal will automatically display payment prompt
+        setCardReaderStatus('processing');
+      } else if (cardPaymentMethod === 'pax_terminal') {
         // PAX WiFi Terminal mode (Valor Connect - cloud-to-cloud)
         const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
         

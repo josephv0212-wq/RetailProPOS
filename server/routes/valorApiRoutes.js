@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import {
   authenticateValorApi,
+  checkValorCredentials,
   checkEPI,
   initiateTerminalPayment,
   checkPaymentStatus,
@@ -363,6 +364,62 @@ router.post('/void', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to void transaction',
+      ...(isDevelopment && { error: error.message })
+    });
+  }
+});
+
+/**
+ * POST /valor/test
+ * Test Valor Connect API connection and EPI status
+ */
+router.post('/test', async (req, res) => {
+  try {
+    const { epi } = req.body;
+    
+    // Check credentials first
+    const credentialCheck = checkValorCredentials();
+    if (!credentialCheck.valid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valor Connect API credentials not configured',
+        error: credentialCheck.error,
+        missing: credentialCheck.missing
+      });
+    }
+    
+    // If EPI provided, check it
+    if (epi) {
+      const epiResult = await checkEPI(epi.trim());
+      return res.json({
+        success: epiResult.success,
+        message: epiResult.success 
+          ? 'Valor Connect API credentials valid and EPI is active' 
+          : 'Valor Connect API credentials valid but EPI check failed',
+        data: {
+          credentialsValid: true,
+          epi: epi.trim(),
+          epiActive: epiResult.active || false,
+          epiCheck: epiResult
+        }
+      });
+    }
+    
+    // Just validate credentials
+    return res.json({
+      success: true,
+      message: 'Valor Connect API credentials are configured',
+      data: {
+        credentialsValid: true,
+        note: 'Provide EPI in request body to test EPI status'
+      }
+    });
+  } catch (error) {
+    console.error('Valor Connect API test error:', error);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    res.status(500).json({
+      success: false,
+      message: 'Valor Connect API test failed',
       ...(isDevelopment && { error: error.message })
     });
   }

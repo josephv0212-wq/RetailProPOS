@@ -56,7 +56,7 @@ if (!global.VALOR_API_ENDPOINT_LOGGED) {
  * Check if Valor API credentials are configured
  * @returns {Object} Validation result
  */
-const checkValorCredentials = () => {
+export const checkValorCredentials = () => {
   const missing = [];
   
   if (!VALOR_APP_ID) missing.push('VALOR_APP_ID');
