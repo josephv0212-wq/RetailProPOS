@@ -179,19 +179,8 @@ export const validateCreateUser = (req, res, next) => {
 };
 
 export const validateRegistration = (req, res, next) => {
-  const { username, password, locationId, registrationKey } = req.body;
+  const { username, password, locationId } = req.body;
   const errors = [];
-
-  // Check registration key
-  const requiredKey = process.env.REGISTRATION_KEY;
-  if (requiredKey) {
-    if (!registrationKey || registrationKey !== requiredKey) {
-      return res.status(403).json({
-        success: false,
-        message: 'Invalid registration key. Registration is restricted.'
-      });
-    }
-  }
 
   if (!username || typeof username !== 'string' || username.trim().length < 3) {
     errors.push('Username must be at least 3 characters');

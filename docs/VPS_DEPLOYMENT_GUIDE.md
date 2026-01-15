@@ -958,7 +958,6 @@ sudo systemctl reload nginx
 - ✅ Firewall configured (UFW)
 - ✅ SSL certificate installed and auto-renewing
 - ✅ Strong JWT_SECRET in .env
-- ✅ REGISTRATION_KEY set (if registration should be restricted)
 - ✅ NODE_ENV=production
 - ✅ Database credentials are secure
 - ✅ Only necessary ports are open (22, 80, 443)

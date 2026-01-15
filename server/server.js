@@ -38,7 +38,6 @@ if (DATABASE_SETTING === 'cloud') {
 
 const optionalButRecommended = [
   'DATABASE_SETTING', // 'local' for SQLite, 'cloud' for PostgreSQL (default: 'cloud')
-  'REGISTRATION_KEY', // Secret key required for user registration (if not set, registration is open)
   'ZOHO_CLIENT_ID',
   'ZOHO_CLIENT_SECRET',
   'ZOHO_REFRESH_TOKEN',

@@ -80,7 +80,6 @@ Quick checklist for deploying RetailPro POS to your VPS.
 ## Security
 
 - [ ] Strong `JWT_SECRET` set
-- [ ] `REGISTRATION_KEY` set (if needed)
 - [ ] Database credentials secure
 - [ ] `.env` file not in public directory
 - [ ] Only necessary ports open
