@@ -735,13 +735,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setCardPaymentMethod('manual')}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                    >
-                      Manual Entry
-                    </button>
-                    {cardPaymentMethod === 'manual' && (
+                    {cardPaymentMethod !== 'manual' ? (
+                      <button
+                        onClick={() => setCardPaymentMethod('manual')}
+                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      >
+                        Manual Entry
+                      </button>
+                    ) : (
                       <button
                         onClick={() => setCardPaymentMethod('valor_api')}
                         className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
