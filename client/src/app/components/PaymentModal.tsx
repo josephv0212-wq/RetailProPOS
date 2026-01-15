@@ -125,11 +125,11 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
   // Terminal discovery removed - Valor Connect only needs Terminal number (configured in Settings)
 
-  // Calculate convenience fee for card payments and stored payment methods (if credit card)
-  const isCardPayment = selectedMethod === 'credit_card' || selectedMethod === 'debit_card' || 
+  // Calculate convenience fee for CREDIT card payments and stored CREDIT card profiles
+  const isCreditCardPayment = selectedMethod === 'credit_card' || 
     (selectedMethod === 'stored_payment' && selectedPaymentProfileId && 
      paymentProfiles.find((p: any) => p.paymentProfileId === selectedPaymentProfileId)?.type === 'credit_card');
-  const convenienceFee = isCardPayment ? total * 0.03 : 0;
+  const convenienceFee = isCreditCardPayment ? total * 0.03 : 0;
   const finalTotal = total + convenienceFee;
 
   if (!isOpen) return null;
@@ -181,12 +181,9 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     // Simulate payment processing
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // Ensure card payments use credit_card (can be changed to debit_card if needed)
     // For stored_payment, determine type from selected profile
     let paymentMethod = selectedMethod;
-    if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
-      paymentMethod = 'credit_card';  // Default to credit_card, can add UI to select debit_card later
-    } else if (selectedMethod === 'stored_payment') {
+    if (selectedMethod === 'stored_payment') {
       // Determine payment type from selected profile
       const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === selectedPaymentProfileId);
       paymentMethod = selectedProfile?.type === 'ach' ? 'ach' : 'credit_card';
@@ -714,6 +711,32 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     <CreditCard className="w-7 h-7 text-white" />
                   </div>
                   <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
+                </div>
+
+                {/* Credit vs Debit selection */}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setSelectedMethod('credit_card')}
+                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-1 ${
+                      selectedMethod === 'credit_card'
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                    }`}
+                  >
+                    <span className="text-sm font-semibold">Credit (CC)</span>
+                    <span className={`text-xs ${selectedMethod === 'credit_card' ? 'text-blue-100' : 'text-gray-500'}`}>3% surcharge</span>
+                  </button>
+                  <button
+                    onClick={() => setSelectedMethod('debit_card')}
+                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-1 ${
+                      selectedMethod === 'debit_card'
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                    }`}
+                  >
+                    <span className="text-sm font-semibold">Debit (DC)</span>
+                    <span className={`text-xs ${selectedMethod === 'debit_card' ? 'text-blue-100' : 'text-gray-500'}`}>No surcharge</span>
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

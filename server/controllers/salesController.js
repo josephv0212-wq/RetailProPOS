@@ -174,8 +174,8 @@ export const createSale = async (req, res) => {
       }
     }
     
-    // 3% convenience fee applies to all card payments (credit and debit)
-    cardProcessingFee = (actualPaymentType === 'credit_card' || actualPaymentType === 'debit_card')
+    // 3% convenience fee applies to CREDIT card payments only (no surcharge for debit)
+    cardProcessingFee = (actualPaymentType === 'credit_card')
       ? calculateCreditCardFee(subtotal, taxAmount)
       : 0;
 
