@@ -748,7 +748,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         value={cardNumber}
                         onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, '').slice(0, 16))}
                         placeholder="1234 5678 9012 3456"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder:text-gray-400"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
                       />
                     </div>
                     
@@ -762,7 +762,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={cardExpiry}
                           onChange={(e) => setCardExpiry(e.target.value)}
                           placeholder="MM/YY"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder:text-gray-400"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
                         />
                       </div>
                       
@@ -775,7 +775,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={cardCvv}
                           onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
                           placeholder="123"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder:text-gray-400"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
                         />
                       </div>
                       
@@ -788,7 +788,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={cardZip}
                           onChange={(e) => setCardZip(e.target.value.slice(0, 5))}
                           placeholder="12345"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder:text-gray-400"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
                         />
                       </div>
                     </div>
@@ -922,7 +922,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         value={achName}
                         onChange={(e) => setAchName(e.target.value)}
                         placeholder="John Doe"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
                       />
                     </div>
                     
@@ -936,7 +936,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={achRouting}
                           onChange={(e) => setAchRouting(e.target.value.replace(/\D/g, '').slice(0, 9))}
                           placeholder="123456789"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
                         />
                       </div>
                       
@@ -949,7 +949,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={achAccount}
                           onChange={(e) => setAchAccount(e.target.value.replace(/\D/g, ''))}
                           placeholder="1234567890"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
                         />
                       </div>
                     </div>
@@ -962,7 +962,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         <select
                           value={achAccountType}
                           onChange={(e) => setAchAccountType(e.target.value as 'checking' | 'savings')}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900"
                         >
                           <option value="checking">Checking</option>
                           <option value="savings">Savings</option>
@@ -978,7 +978,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={achBankName}
                           onChange={(e) => setAchBankName(e.target.value)}
                           placeholder="Bank of America"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
                         />
                       </div>
                     </div>
