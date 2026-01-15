@@ -184,8 +184,9 @@ const fetchAllPages = async (endpoint, params = {}, dataKey) => {
 export const syncCustomersFromZoho = async (options = {}) => {
   try {
     const params = {
-      contact_type: 'customer',
-      filter_by: options.filter_by || 'Status.Active',
+      // Zoho Books returns customers/vendors via /contacts; restrict to customers via filter_by
+      // (per Zoho: filter_by=Status.Customers)
+      filter_by: options.filter_by || 'Status.Customers',
       sort_column: options.sort_column || 'contact_name',
       ...options.params
     };

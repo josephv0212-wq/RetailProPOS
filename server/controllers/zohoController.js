@@ -216,6 +216,10 @@ export const syncAll = async (req, res) => {
     let itemsUpdated = 0;
 
     for (const zohoCustomer of zohoCustomers) {
+      const contactType = (zohoCustomer.contact_type || 'customer').toLowerCase();
+      if (contactType !== 'customer') {
+        continue;
+      }
       const location = extractLocation(zohoCustomer);
       const paymentMethod = extractPaymentMethod(zohoCustomer);
       
@@ -225,6 +229,7 @@ export const syncAll = async (req, res) => {
         companyName: zohoCustomer.company_name || null,
         email: zohoCustomer.email || null,
         phone: zohoCustomer.phone || null,
+        contactType,
         locationId: location.locationId,
         locationName: location.locationName,
         isDefaultCustomer: isDefaultCustomer(zohoCustomer.contact_name),
