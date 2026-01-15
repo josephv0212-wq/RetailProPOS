@@ -1,6 +1,6 @@
 import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer } from '../models/index.js';
-import { processPayment, processAchPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
+import { processPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
 import { processTerminalPayment } from '../services/paxTerminalService.js';
 import { processTerminalPayment as processEBizChargePayment } from '../services/ebizchargeTerminalService.js';
 import { processBluetoothPayment } from '../services/bbposService.js';
@@ -417,26 +417,13 @@ export const createSale = async (req, res) => {
         transactionId = paymentResult.transactionId;
       }
     } else if (paymentType === 'ach') {
-      if (!paymentDetails) {
-        return sendValidationError(res, 'Payment details required for ACH transactions');
-      }
-
-      paymentResult = await processAchPayment({
-        amount: total,
-        routingNumber: paymentDetails.routingNumber,
-        accountNumber: paymentDetails.accountNumber,
-        accountType: paymentDetails.accountType,
-        nameOnAccount: paymentDetails.nameOnAccount,
-        bankName: paymentDetails.bankName,
-        description: `POS Sale - ${locationName}`,
-        invoiceNumber: `POS-${Date.now()}`
-      });
-
-      if (!paymentResult.success) {
-        return sendError(res, 'ACH payment processing failed', 400, paymentResult.error);
-      }
-
-      transactionId = paymentResult.transactionId;
+      // ACH payment - record only (no processing)
+      transactionId = `ACH-${Date.now()}`;
+      paymentResult = {
+        success: true,
+        message: 'ACH payment recorded',
+        transactionId
+      };
     } else if (paymentType === 'cash') {
       // Cash payment - no processing needed
       transactionId = `CASH-${Date.now()}`;

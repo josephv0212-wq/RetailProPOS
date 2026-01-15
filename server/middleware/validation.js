@@ -97,25 +97,8 @@ export const validateSale = (req, res, next) => {
         }
       }
     }
-  } else if (paymentType === 'ach') {
-    if (!paymentDetails) {
-      errors.push('Payment details required for ACH transactions');
-    } else {
-      if (!paymentDetails.nameOnAccount || paymentDetails.nameOnAccount.trim() === '') {
-        errors.push('Account holder name is required for ACH');
-      }
-      if (!paymentDetails.routingNumber || !/^\d{9}$/.test(paymentDetails.routingNumber)) {
-        errors.push('Routing number must be 9 digits');
-      }
-      if (!paymentDetails.accountNumber || !/^\d{4,17}$/.test(paymentDetails.accountNumber)) {
-        errors.push('Account number must be 4-17 digits');
-      }
-      if (paymentDetails.accountType && !['checking', 'savings'].includes(paymentDetails.accountType)) {
-        errors.push('Account type must be checking or savings for ACH');
-      }
-    }
   }
-  // Cash and Zelle payments require no additional validation
+  // Cash, Zelle, and ACH payments require no additional validation
 
   if (errors.length > 0) {
     return res.status(400).json({

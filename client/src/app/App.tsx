@@ -631,12 +631,6 @@ function AppContent() {
       paymentType = isAch ? 'ach' : 'credit_card';
     } else if (paymentDetails.method === 'zelle') {
       apiPaymentDetails.zelleConfirmation = paymentDetails.zelleConfirmation;
-    } else if (paymentDetails.method === 'ach') {
-      apiPaymentDetails.routingNumber = paymentDetails.achDetails?.routingNumber;
-      apiPaymentDetails.accountNumber = paymentDetails.achDetails?.accountNumber;
-      apiPaymentDetails.accountType = paymentDetails.achDetails?.accountType;
-      apiPaymentDetails.nameOnAccount = paymentDetails.achDetails?.name;
-      apiPaymentDetails.bankName = paymentDetails.achDetails?.bankName;
     }
 
     try {

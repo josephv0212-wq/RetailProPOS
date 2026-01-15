@@ -42,11 +42,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvv, setCardCvv] = useState('');
   const [cardZip, setCardZip] = useState('');
-  const [achName, setAchName] = useState('');
-  const [achRouting, setAchRouting] = useState('');
-  const [achAccount, setAchAccount] = useState('');
-  const [achAccountType, setAchAccountType] = useState<'checking' | 'savings'>('checking');
-  const [achBankName, setAchBankName] = useState('');
   // Default CC/DC to terminal flow; only show fields when user selects Manual Entry.
   const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'valor_api' | 'manual'>('valor_api');
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading' | 'processing'>('ready');
@@ -173,10 +168,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         setIsProcessing(false);
         return;
       }
-    } else if (selectedMethod === 'ach' && (!achName || !achRouting || !achAccount || !achBankName)) {
-      setError('Please fill in ACH details');
-      setIsProcessing(false);
-      return;
     }
 
     // Simulate payment processing
@@ -372,14 +363,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
       // Use stored payment method via CIM
       paymentDetails.useStoredPayment = true;
       paymentDetails.paymentProfileId = selectedPaymentProfileId;
-    } else if (selectedMethod === 'ach') {
-      paymentDetails.achDetails = {
-        name: achName,
-        routingNumber: achRouting,
-        accountNumber: achAccount,
-        accountType: achAccountType,
-        bankName: achBankName,
-      };
     }
 
     // For terminal payments, handle pending status and polling
@@ -713,26 +696,23 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             {selectedMethod === 'cash' && null}
 
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-400 rounded-xl p-6 space-y-4">
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <div />
-                  <div className="flex items-center gap-2">
-                    {cardPaymentMethod !== 'manual' ? (
-                      <button
-                        onClick={() => setCardPaymentMethod('manual')}
-                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                      >
-                        Manual Entry
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setCardPaymentMethod('valor_api')}
-                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                      >
-                        Use Terminal
-                      </button>
-                    )}
-                  </div>
+              <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-0">
+                <div className="flex justify-center">
+                  {cardPaymentMethod !== 'manual' ? (
+                    <button
+                      onClick={() => setCardPaymentMethod('manual')}
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                    >
+                      Manual Entry
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setCardPaymentMethod('valor_api')}
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                    >
+                      Use Terminal
+                    </button>
+                  )}
                 </div>
 
                 {cardPaymentMethod !== 'manual' ? null : (
@@ -889,79 +869,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               </div>
             )}
 
-            {selectedMethod === 'ach' && (
-              <div className="bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-400 rounded-xl p-6 space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Account Holder Name
-                  </label>
-                  <input
-                    type="text"
-                    value={achName}
-                    onChange={(e) => setAchName(e.target.value)}
-                    placeholder="John Doe"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Routing Number
-                    </label>
-                    <input
-                      type="text"
-                      value={achRouting}
-                      onChange={(e) => setAchRouting(e.target.value.replace(/\D/g, '').slice(0, 9))}
-                      placeholder="123456789"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Account Number
-                    </label>
-                    <input
-                      type="text"
-                      value={achAccount}
-                      onChange={(e) => setAchAccount(e.target.value.replace(/\D/g, ''))}
-                      placeholder="1234567890"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                    />
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Account Type
-                    </label>
-                    <select
-                      value={achAccountType}
-                      onChange={(e) => setAchAccountType(e.target.value as 'checking' | 'savings')}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900"
-                    >
-                      <option value="checking">Checking</option>
-                      <option value="savings">Savings</option>
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Bank Name
-                    </label>
-                    <input
-                      type="text"
-                      value={achBankName}
-                      onChange={(e) => setAchBankName(e.target.value)}
-                      placeholder="Bank of America"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
+            {selectedMethod === 'ach' && null}
           </div>
 
           {/* Error Display */}
