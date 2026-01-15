@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import React, { useState, useEffect } from 'react';
 import { PaymentMethod, PaymentDetails, CartItem } from '../types';
-import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2 } from 'lucide-react';
+import { X, CreditCard, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2 } from 'lucide-react';
 import { encryptCardData, loadAcceptJs, isAcceptJsAvailable } from '../../services/acceptJsService';
 import { connectAndReadCard, isWebSerialSupported } from '../../services/usbCardReaderService';
 // TerminalDiscoveryDialog removed - not needed for Valor Connect (only Terminal number required)
@@ -47,7 +47,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [achAccount, setAchAccount] = useState('');
   const [achAccountType, setAchAccountType] = useState<'checking' | 'savings'>('checking');
   const [achBankName, setAchBankName] = useState('');
-  const [showAchDetails, setShowAchDetails] = useState(false);
   // Default CC/DC to terminal flow; only show fields when user selects Manual Entry.
   const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'valor_api' | 'manual'>('valor_api');
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading' | 'processing'>('ready');
@@ -175,7 +174,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         return;
       }
     } else if (selectedMethod === 'ach' && (!achName || !achRouting || !achAccount || !achBankName)) {
-      setShowAchDetails(true);
       setError('Please fill in ACH details');
       setIsProcessing(false);
       return;
@@ -712,13 +710,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
           {/* Payment Details */}
           <div>
-            {selectedMethod === 'cash' && (
-              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-emerald-400 rounded-xl p-8 text-center">
-                <p className="text-gray-700 mb-2">
-                  Collect <span className="text-3xl font-bold text-emerald-600 mx-1">${finalTotal.toFixed(2)}</span> in cash from the customer.
-                </p>
-              </div>
-            )}
+            {selectedMethod === 'cash' && null}
 
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-400 rounded-xl p-6 space-y-4">
@@ -803,13 +795,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               </div>
             )}
 
-            {selectedMethod === 'zelle' && (
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-400 rounded-xl p-8 text-center">
-                <p className="text-gray-700 mb-2">
-                  Collect <span className="text-3xl font-bold text-purple-600 mx-1">${finalTotal.toFixed(2)}</span> via Zelle from the customer.
-                </p>
-              </div>
-            )}
+            {selectedMethod === 'zelle' && null}
 
             {selectedMethod === 'stored_payment' && (
               <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-400 rounded-xl p-6 space-y-3">
@@ -905,95 +891,75 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {selectedMethod === 'ach' && (
               <div className="bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-400 rounded-xl p-6 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div />
-                  <button
-                    onClick={() => setShowAchDetails(v => !v)}
-                    className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                  >
-                    {showAchDetails ? 'Hide Details' : 'Enter Details'}
-                  </button>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Account Holder Name
+                  </label>
+                  <input
+                    type="text"
+                    value={achName}
+                    onChange={(e) => setAchName(e.target.value)}
+                    placeholder="John Doe"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                  />
                 </div>
-
-                {!showAchDetails ? (
-                  <p className="text-gray-700 mb-2 text-center">
-                    To record an ACH payment of{' '}
-                    <span className="text-3xl font-bold text-orange-600 mx-1">${finalTotal.toFixed(2)}</span>
-                    , click <span className="font-semibold">Enter Details</span>.
-                  </p>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Account Holder Name
-                      </label>
-                      <input
-                        type="text"
-                        value={achName}
-                        onChange={(e) => setAchName(e.target.value)}
-                        placeholder="John Doe"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                      />
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Routing Number
-                        </label>
-                        <input
-                          type="text"
-                          value={achRouting}
-                          onChange={(e) => setAchRouting(e.target.value.replace(/\D/g, '').slice(0, 9))}
-                          placeholder="123456789"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Account Number
-                        </label>
-                        <input
-                          type="text"
-                          value={achAccount}
-                          onChange={(e) => setAchAccount(e.target.value.replace(/\D/g, ''))}
-                          placeholder="1234567890"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Account Type
-                        </label>
-                        <select
-                          value={achAccountType}
-                          onChange={(e) => setAchAccountType(e.target.value as 'checking' | 'savings')}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900"
-                        >
-                          <option value="checking">Checking</option>
-                          <option value="savings">Savings</option>
-                        </select>
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Bank Name
-                        </label>
-                        <input
-                          type="text"
-                          value={achBankName}
-                          onChange={(e) => setAchBankName(e.target.value)}
-                          placeholder="Bank of America"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Routing Number
+                    </label>
+                    <input
+                      type="text"
+                      value={achRouting}
+                      onChange={(e) => setAchRouting(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                      placeholder="123456789"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Account Number
+                    </label>
+                    <input
+                      type="text"
+                      value={achAccount}
+                      onChange={(e) => setAchAccount(e.target.value.replace(/\D/g, ''))}
+                      placeholder="1234567890"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                    />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Account Type
+                    </label>
+                    <select
+                      value={achAccountType}
+                      onChange={(e) => setAchAccountType(e.target.value as 'checking' | 'savings')}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900"
+                    >
+                      <option value="checking">Checking</option>
+                      <option value="savings">Savings</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Bank Name
+                    </label>
+                    <input
+                      type="text"
+                      value={achBankName}
+                      onChange={(e) => setAchBankName(e.target.value)}
+                      placeholder="Bank of America"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
