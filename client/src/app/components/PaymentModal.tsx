@@ -42,7 +42,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvv, setCardCvv] = useState('');
   const [cardZip, setCardZip] = useState('');
-  const [zelleConfirmation, setZelleConfirmation] = useState('');
   const [achName, setAchName] = useState('');
   const [achRouting, setAchRouting] = useState('');
   const [achAccount, setAchAccount] = useState('');
@@ -173,10 +172,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         setIsProcessing(false);
         return;
       }
-    } else if (selectedMethod === 'zelle' && !zelleConfirmation) {
-      setError('Please enter Zelle confirmation number');
-      setIsProcessing(false);
-      return;
     } else if (selectedMethod === 'ach' && (!achName || !achRouting || !achAccount || !achBankName)) {
       setError('Please fill in all ACH details');
       setIsProcessing(false);
@@ -379,8 +374,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
       // Use stored payment method via CIM
       paymentDetails.useStoredPayment = true;
       paymentDetails.paymentProfileId = selectedPaymentProfileId;
-    } else if (selectedMethod === 'zelle') {
-      paymentDetails.confirmationNumber = zelleConfirmation;
     } else if (selectedMethod === 'ach') {
       paymentDetails.achDetails = {
         name: achName,
@@ -950,30 +943,17 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             )}
 
             {selectedMethod === 'zelle' && (
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-400 rounded-xl p-6">
-                <div className="flex items-center gap-3 mb-4">
+              <div className="bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-400 rounded-xl p-8 text-center">
+                <div className="flex items-center gap-3 mb-6">
                   <div className="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center">
                     <Smartphone className="w-7 h-7 text-white" />
                   </div>
                   <h3 className="text-xl font-semibold text-gray-900">Zelle Payment</h3>
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Zelle Confirmation Number
-                  </label>
-                  <div className="relative">
-                    <Smartphone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type="text"
-                      value={zelleConfirmation}
-                      onChange={(e) => setZelleConfirmation(e.target.value)}
-                      placeholder="Enter confirmation number"
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-gray-900 placeholder:text-gray-400"
-                      autoFocus
-                    />
-                  </div>
-                </div>
+                
+                <p className="text-gray-700 mb-2">
+                  Collect <span className="text-3xl font-bold text-purple-600 mx-1">${finalTotal.toFixed(2)}</span> via Zelle from the customer.
+                </p>
               </div>
             )}
 

@@ -97,11 +97,6 @@ export const validateSale = (req, res, next) => {
         }
       }
     }
-  } else if (paymentType === 'zelle') {
-    // Zelle payment - validate confirmation number
-    if (!paymentDetails || !paymentDetails.zelleConfirmation || paymentDetails.zelleConfirmation.trim() === '') {
-      errors.push('Zelle confirmation number is required');
-    }
   } else if (paymentType === 'ach') {
     if (!paymentDetails) {
       errors.push('Payment details required for ACH transactions');
@@ -120,7 +115,7 @@ export const validateSale = (req, res, next) => {
       }
     }
   }
-  // Cash payment requires no additional validation
+  // Cash and Zelle payments require no additional validation
 
   if (errors.length > 0) {
     return res.status(400).json({

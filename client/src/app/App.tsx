@@ -593,7 +593,7 @@ function AppContent() {
     const total = subtotal + tax;
 
     // Prepare payment details for API
-    const paymentType = paymentDetails.method;
+    let paymentType = paymentDetails.method;
     const apiPaymentDetails: any = {};
 
     if (paymentDetails.method === 'cash') {

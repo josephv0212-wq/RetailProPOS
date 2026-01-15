@@ -446,17 +446,15 @@ export const createSale = async (req, res) => {
         transactionId: transactionId
       };
     } else if (paymentType === 'zelle') {
-      // Zelle payment - store confirmation number
-      if (paymentDetails && paymentDetails.zelleConfirmation) {
-        transactionId = `ZELLE-${paymentDetails.zelleConfirmation}`;
-        paymentResult = {
-          success: true,
-          message: 'Zelle payment recorded',
-          transactionId: transactionId
-        };
-      } else {
-        return sendValidationError(res, 'Zelle confirmation number required');
-      }
+      // Zelle payment - record like cash (no processing needed)
+      // If a confirmation number is provided (optional), include it in transactionId for traceability.
+      const zelleRef = paymentDetails?.zelleConfirmation?.trim();
+      transactionId = zelleRef ? `ZELLE-${zelleRef}` : `ZELLE-${Date.now()}`;
+      paymentResult = {
+        success: true,
+        message: 'Zelle payment recorded',
+        transactionId
+      };
     }
 
     // Warn if customer has no Zoho ID (for production error tracking)
