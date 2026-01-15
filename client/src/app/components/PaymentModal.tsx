@@ -743,30 +743,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   </div>
                 </div>
 
-                {cardPaymentMethod !== 'manual' ? (
-                  <div className="space-y-4">
-                    {/* Terminal Instructions */}
-                    <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
-                      <div>
-                        <p className="font-medium text-gray-900 mb-1">
-                          {cardReaderStatus === 'ready' && 'Terminal Ready'}
-                          {cardReaderStatus === 'processing' && 'Processing Payment...'}
-                        </p>
-                        {cardReaderStatus === 'ready' ? (
-                          <p className="text-gray-700 mb-2">
-                            Click <span className="font-semibold">Confirm Payment</span> to send{' '}
-                            <span className="text-3xl font-bold text-blue-600 mx-1">${finalTotal.toFixed(2)}</span>
-                            to the terminal.
-                          </p>
-                        ) : (
-                          <p className="text-sm text-gray-600 mb-2">
-                            Customer will be prompted on the VP100 terminal. Please wait...
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
+                {cardPaymentMethod !== 'manual' ? null : (
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">

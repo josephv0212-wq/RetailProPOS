@@ -54,8 +54,9 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
 
+        // Backend already scopes results to the authenticated user's location (requireLocation)
         const response = await salesAPI.getAll({
-          locationId: locationId || undefined,
+          locationId: undefined,
           startDate: start.toISOString(),
           endDate: end.toISOString(),
         }, true);
@@ -81,9 +82,7 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
       }
     };
 
-    if (userLocationId) {
-      loadSales();
-    }
+    loadSales();
   }, [startDate, endDate, userLocationId]);
 
   // Filter transactions based on filters
@@ -229,14 +228,14 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
             {/* Sales by Hour Tab */}
             {activeTab === 'salesByHour' && (
               <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">
-                <h2 className="font-semibold text-gray-900 dark:text-white mb-6">
-                  Sales by Hour
-                </h2>
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+                  <h2 className="font-semibold text-gray-900 dark:text-white">
+                    Sales by Hour
+                  </h2>
 
-                {/* Filters (moved here) */}
-                <div className="mb-6">
-                  <div className="flex flex-col lg:flex-row lg:items-end gap-4">
-                    <div className="flex items-center gap-2 flex-wrap">
+                  {/* Filters (right side) */}
+                  <div className="flex flex-col sm:flex-row sm:items-end sm:justify-end gap-3">
+                    <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
                       <button
                         onClick={() => setQuickRangeDays(0)}
                         className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
@@ -257,7 +256,7 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-3 flex-wrap justify-start sm:justify-end">
                       <div>
                         <label htmlFor="startDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                           From
@@ -465,12 +464,6 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
 
             {/* Zoho Sync Status Tab */}
             {activeTab === 'zoho' && (
-              // <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 shadow-sm">
-              //   <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-              //     Zoho Sync Status
-              //   </h2>
-              // </div>
-              
               <ZohoSyncDiagnostic />
             )}
           </>
