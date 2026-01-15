@@ -740,7 +740,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                 {cardPaymentMethod !== 'manual' ? null : (
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Card Number
                       </label>
                       <input
@@ -754,7 +754,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     
                     <div className="grid grid-cols-3 gap-3">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Expiry
                         </label>
                         <input
@@ -767,7 +767,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                       </div>
                       
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           CVV
                         </label>
                         <input
@@ -780,7 +780,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                       </div>
                       
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           ZIP
                         </label>
                         <input
@@ -914,7 +914,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                 {achEntryMode !== 'details' ? null : (
                   <>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Account Holder Name
                       </label>
                       <input
@@ -928,7 +928,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Routing Number
                         </label>
                         <input
@@ -941,7 +941,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                       </div>
                       
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Account Number
                         </label>
                         <input
@@ -956,7 +956,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Account Type
                         </label>
                         <select
@@ -970,7 +970,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                       </div>
                       
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Bank Name
                         </label>
                         <input
