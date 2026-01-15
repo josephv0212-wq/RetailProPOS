@@ -47,7 +47,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [achAccount, setAchAccount] = useState('');
   const [achAccountType, setAchAccountType] = useState<'checking' | 'savings'>('checking');
   const [achBankName, setAchBankName] = useState('');
-  // Default to terminal-style flow so we don't show manual-entry fields until explicitly selected
+  // Default CC/DC to terminal flow; only show fields when user selects Manual Entry.
   const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'valor_api' | 'manual'>('valor_api');
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading' | 'processing'>('ready');
   const [error, setError] = useState('');
@@ -629,7 +629,11 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               </button>
               
               <button
-                onClick={() => setSelectedMethod('credit_card')}
+                onClick={() => {
+                  setSelectedMethod('credit_card');
+                  setCardPaymentMethod('valor_api');
+                  setCardReaderStatus('ready');
+                }}
                 className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
                   selectedMethod === 'credit_card'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
@@ -641,7 +645,11 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               </button>
 
               <button
-                onClick={() => setSelectedMethod('debit_card')}
+                onClick={() => {
+                  setSelectedMethod('debit_card');
+                  setCardPaymentMethod('valor_api');
+                  setCardReaderStatus('ready');
+                }}
                 className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
                   selectedMethod === 'debit_card'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
@@ -726,65 +734,43 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <button
-                    onClick={() => setCardPaymentMethod('valor_api')}
-                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                      cardPaymentMethod === 'valor_api'
-                        ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                    }`}
-                  >
-                    <Wifi className="w-5 h-5" />
-                    <span className="text-xs font-medium">Valor API</span>
-                  </button>
-                  <button
-                    onClick={() => setCardPaymentMethod('pax_terminal')}
-                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                      cardPaymentMethod === 'pax_terminal'
-                        ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                    }`}
-                  >
-                    <Wifi className="w-5 h-5" />
-                    <span className="text-xs font-medium">PAX WiFi</span>
-                  </button>
-                  <button
-                    onClick={() => setCardPaymentMethod('usb_reader')}
-                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                      cardPaymentMethod === 'usb_reader'
-                        ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                    }`}
-                  >
-                    <CreditCard className="w-5 h-5" />
-                    <span className="text-xs font-medium">USB Reader</span>
-                  </button>
-                  <button
-                    onClick={() => setCardPaymentMethod('manual')}
-                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                      cardPaymentMethod === 'manual'
-                        ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                    }`}
-                  >
-                    <CreditCard className="w-5 h-5" />
-                    <span className="text-xs font-medium">Manual Entry</span>
-                  </button>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm text-gray-700">
+                    {selectedMethod === 'credit_card' ? (
+                      <span><strong>Credit (CC)</strong> selected. 3% surcharge applies.</span>
+                    ) : (
+                      <span><strong>Debit (DC)</strong> selected. No surcharge.</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCardPaymentMethod('manual')}
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                    >
+                      Manual Entry
+                    </button>
+                    <button
+                      onClick={handleConfirmPayment}
+                      disabled={isProcessing}
+                      className="px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Confirm Payment
+                    </button>
+                  </div>
                 </div>
 
-                {cardPaymentMethod === 'valor_api' ? (
+                {cardPaymentMethod !== 'manual' ? (
                   <div className="space-y-4">
-                    {/* Valor API Terminal Instructions */}
+                    {/* Terminal Instructions */}
                     <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
                       <Wifi className="w-12 h-12 text-blue-400 mx-auto" />
                       <div>
                         <p className="font-medium text-gray-900 mb-1">
-                          {cardReaderStatus === 'ready' && 'Valor API Terminal Ready'}
+                          {cardReaderStatus === 'ready' && 'Terminal Ready'}
                           {cardReaderStatus === 'processing' && 'Processing Payment...'}
                         </p>
                         <p className="text-sm text-gray-600 mb-2">
-                          {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to process payment via Valor API'}
+                          {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to send the request to the terminal'}
                           {cardReaderStatus === 'processing' && 'Customer will be prompted on the VP100 terminal. Please wait...'}
                         </p>
                         <div className="mt-3 text-left bg-gray-50 rounded-lg p-3">
@@ -802,98 +788,23 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <p className="text-xs text-gray-600">
-                        <strong>How it works (Valor Connect API - Direct Integration):</strong> When you click "Confirm Payment", the system sends the payment request <strong>directly to Valor Connect API</strong> (no Authorize.Net required) with your EPI (Equipment Profile Identifier). Valor Connect API routes the request to your VP100 terminal via cloud-to-connect. The terminal automatically displays the payment prompt (tap/insert/swipe). The customer completes payment on the terminal, and the result is returned through Valor Connect API.
+                        <strong>How it works:</strong> When you click "Confirm Payment", the system sends the payment request to your configured terminal. The terminal displays the prompt (tap/insert/swipe). The customer completes payment on the terminal, and the result is returned back to the app.
                       </p>
                     </div>
-                  </div>
-                ) : cardPaymentMethod === 'pax_terminal' ? (
-                  <div className="space-y-4">
-                    {/* PAX WiFi Terminal Instructions */}
-                    <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
-                      <Wifi className="w-12 h-12 text-blue-400 mx-auto" />
-                      <div>
-                        <p className="font-medium text-gray-900 mb-1">
-                          {cardReaderStatus === 'ready' && 'PAX WiFi Terminal Ready'}
-                          {cardReaderStatus === 'processing' && 'Processing Payment...'}
-                        </p>
-                        <p className="text-sm text-gray-600 mb-2">
-                          {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to process payment on PAX terminal'}
-                          {cardReaderStatus === 'processing' && 'Customer will be prompted on the PAX terminal. Please wait...'}
-                        </p>
-                        <div className="mt-3 text-left bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs text-gray-600">
-                            <strong>Terminal Number:</strong> {selectedTerminalNumber || userTerminalNumber || 'Not configured'}
-                          </p>
-                        </div>
-                        {!selectedTerminalNumber && !userTerminalNumber && (
-                          <p className="text-xs text-red-600 mt-2 font-medium">
-                            ⚠️ Please configure Terminal number (VP100 serial number) in Settings
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <p className="text-xs text-gray-600">
-                        <strong>How it works (Valor Connect):</strong> When you click "Confirm Payment", the system sends the payment request to Authorize.Net with your Terminal number. Authorize.Net routes the request to your VP100 terminal via Valor Connect (cloud-to-cloud). The customer will be prompted on the terminal to insert, swipe, or tap their card. The terminal processes the payment and returns the result.
-                      </p>
-                    </div>
-                  </div>
-                ) : cardPaymentMethod === 'usb_reader' ? (
-                  <div className="space-y-4">
-                    {/* USB Card Reader Instructions */}
-                    <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
-                      <CreditCard className="w-12 h-12 text-blue-400 mx-auto" />
-                      <div>
-                        <p className="font-medium text-gray-900 mb-1">
-                          {cardReaderStatus === 'ready' && 'USB Card Reader Ready'}
-                          {cardReaderStatus === 'connecting' && 'Connecting to Reader...'}
-                          {cardReaderStatus === 'reading' && 'Reading Card...'}
-                        </p>
-                        <p className="text-sm text-gray-600 mb-2">
-                          {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to connect to USB reader'}
-                          {cardReaderStatus === 'connecting' && 'Select USB card reader from device picker...'}
-                          {cardReaderStatus === 'reading' && 'Insert, swipe, or tap card on reader. Do not remove card.'}
-                        </p>
-                        {!serialSupported && (
-                          <p className="text-xs text-red-600 mt-2 font-medium">
-                            ⚠️ Web Serial API not supported. Please use Chrome, Edge, or Opera browser.
-                          </p>
-                        )}
-                        {serialSupported && (
-                          <p className="text-xs text-gray-500 mt-2">
-                            Ensure your BBPOS CHIPPER™ 3X reader is connected via USB cable
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {serialSupported ? (
-                      <div className="space-y-3">
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                          <p className="text-xs text-gray-600 mb-2">
-                            <strong>Note:</strong> When you click "Confirm Payment", you'll be asked to select the USB card reader from a device picker dialog. Then insert, swipe, or tap the card on the reader.
-                          </p>
-                          <p className="text-xs text-gray-600">
-                            Card data will be encrypted using Accept.js and processed securely through Authorize.Net.
-                          </p>
-                        </div>
-                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                          <p className="text-xs text-gray-700">
-                            <strong>⚠️ Important:</strong> BBPOS CHIPPER 3X may not appear in the device picker if it doesn't use standard serial communication. If you see "No compatible devices found", please use <strong>Manual Entry</strong> mode instead, or use the Authorize.Net 2.0 desktop app as a bridge.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                        <p className="text-xs text-gray-700">
-                          <strong>Browser Compatibility:</strong> USB card reader requires Web Serial API, which is only available in Chrome, Edge, or Opera browsers. For other browsers, please use Manual Entry mode instead.
-                        </p>
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm text-gray-700">
+                        <strong>Manual Entry</strong> selected.
+                      </div>
+                      <button
+                        onClick={() => setCardPaymentMethod('valor_api')}
+                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      >
+                        Use Terminal
+                      </button>
+                    </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Card Number
