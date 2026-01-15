@@ -33,6 +33,7 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
   const [isLoading, setIsLoading] = useState(initialLoading);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 15;
+  const [activeTab, setActiveTab] = useState<'salesByHour' | 'transactions' | 'zoho'>('transactions');
 
   // Keep location filter in sync with logged-in user location
   useEffect(() => {
@@ -239,42 +240,79 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
               </div>
             </div>
 
-            {/* Charts Section */}
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">
-              <h2 className="font-semibold text-gray-900 dark:text-white mb-6">
+            {/* Tabs */}
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 shadow-sm flex gap-2">
+              <button
+                onClick={() => setActiveTab('salesByHour')}
+                className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  activeTab === 'salesByHour'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
                 Sales by Hour
-              </h2>
-              <div className="h-[250px] flex items-end justify-between gap-2">
-                {salesByHour.map(({ hour, amount }) => {
-                  const heightPercentage = Math.max((amount / maxHourlySales) * 100, 2);
-                  return (
-                    <div
-                      key={hour}
-                      className="flex-1 flex flex-col items-center gap-2 group"
-                    >
-                      <div className="relative flex-1 flex items-end w-full">
-                        <div
-                          className="w-full bg-gradient-to-t from-purple-500 to-violet-400 rounded-t-md transition-all duration-200 group-hover:from-purple-600 group-hover:to-violet-500 relative"
-                          style={{ height: `${heightPercentage}%` }}
-                          title={`${hour}:00 - $${amount.toFixed(2)}`}
-                        >
-                          {/* Tooltip on hover */}
-                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                            {hour}:00 - ${amount.toFixed(2)}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="text-xs text-gray-500 font-medium">
-                        {hour}:00
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('transactions')}
+                className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  activeTab === 'transactions'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                Transactions
+              </button>
+              <button
+                onClick={() => setActiveTab('zoho')}
+                className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  activeTab === 'zoho'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                Zoho Sync Status
+              </button>
             </div>
 
-            {/* Transactions Table Section */}
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
+            {/* Sales by Hour Tab */}
+            {activeTab === 'salesByHour' && (
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">
+                <h2 className="font-semibold text-gray-900 dark:text-white mb-6">
+                  Sales by Hour
+                </h2>
+                <div className="h-[250px] flex items-end justify-between gap-2">
+                  {salesByHour.map(({ hour, amount }) => {
+                    const heightPercentage = Math.max((amount / maxHourlySales) * 100, 2);
+                    return (
+                      <div
+                        key={hour}
+                        className="flex-1 flex flex-col items-center gap-2 group"
+                      >
+                        <div className="relative flex-1 flex items-end w-full">
+                          <div
+                            className="w-full bg-gradient-to-t from-purple-500 to-violet-400 rounded-t-md transition-all duration-200 group-hover:from-purple-600 group-hover:to-violet-500 relative"
+                            style={{ height: `${heightPercentage}%` }}
+                            title={`${hour}:00 - $${amount.toFixed(2)}`}
+                          >
+                            {/* Tooltip on hover */}
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                              {hour}:00 - ${amount.toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-xs text-gray-500 font-medium">
+                          {hour}:00
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Transactions Tab */}
+            {activeTab === 'transactions' && (
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
                 <h2 className="font-semibold text-gray-900 dark:text-white">
                   Transactions
@@ -416,14 +454,17 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                 </div>
               )}
             </div>
+            )}
 
-            {/* Zoho Sync Diagnostic Section */}
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 shadow-sm">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-                Zoho Sync Diagnostic
-              </h2>
-              <ZohoSyncDiagnostic />
-            </div>
+            {/* Zoho Sync Status Tab */}
+            {activeTab === 'zoho' && (
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 shadow-sm">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+                  Zoho Sync Status
+                </h2>
+                <ZohoSyncDiagnostic />
+              </div>
+            )}
           </>
         )}
       </div>
