@@ -145,7 +145,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         // Valor Connect API validation - EPI is required
         const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
         if (!terminalNumber || terminalNumber.trim() === '') {
-          setError('EPI (Equipment Profile Identifier) is required. Please configure your EPI in Settings.');
+          setError('Terminal is not configured. Please configure it in Settings.');
           setIsProcessing(false);
           return;
         }
@@ -201,7 +201,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
         
         if (!terminalNumber || terminalNumber.trim() === '') {
-          setError('EPI (Equipment Profile Identifier) is required. Please configure your EPI in Settings.');
+          setError('Terminal is not configured. Please configure it in Settings.');
           setIsProcessing(false);
           return;
         }
@@ -727,11 +727,19 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-400 rounded-xl p-6 space-y-4">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
-                    <CreditCard className="w-7 h-7 text-white" />
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
+                      <CreditCard className="w-7 h-7 text-white" />
+                    </div>
+                    <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
                   </div>
-                  <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
+                  <button
+                    onClick={() => setCardPaymentMethod('manual')}
+                    className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                  >
+                    Manual Entry
+                  </button>
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
@@ -741,21 +749,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     ) : (
                       <span><strong>Debit (DC)</strong> selected. No surcharge.</span>
                     )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setCardPaymentMethod('manual')}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                    >
-                      Manual Entry
-                    </button>
-                    <button
-                      onClick={handleConfirmPayment}
-                      disabled={isProcessing}
-                      className="px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Confirm Payment
-                    </button>
                   </div>
                 </div>
 
@@ -773,23 +766,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to send the request to the terminal'}
                           {cardReaderStatus === 'processing' && 'Customer will be prompted on the VP100 terminal. Please wait...'}
                         </p>
-                        <div className="mt-3 text-left bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs text-gray-600">
-                            <strong>EPI (Equipment Profile Identifier):</strong> {selectedTerminalNumber || userTerminalNumber || 'Not configured'}
-                          </p>
-                        </div>
-                        {!selectedTerminalNumber && !userTerminalNumber && (
-                          <p className="text-xs text-red-600 mt-2 font-medium">
-                            ⚠️ Please configure EPI (Equipment Profile Identifier) in Settings. This is found in Valor Portal for your terminal.
-                          </p>
-                        )}
                       </div>
-                    </div>
-                    
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <p className="text-xs text-gray-600">
-                        <strong>How it works:</strong> When you click "Confirm Payment", the system sends the payment request to your configured terminal. The terminal displays the prompt (tap/insert/swipe). The customer completes payment on the terminal, and the result is returned back to the app.
-                      </p>
                     </div>
                   </div>
                 ) : (

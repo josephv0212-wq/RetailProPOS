@@ -63,7 +63,7 @@ export interface CartItem {
 }
 
 export interface PaymentMethod {
-  type: 'cash' | 'credit_card' | 'debit_card' | 'zelle' | 'ach';
+  type: 'cash' | 'credit_card' | 'debit_card' | 'stored_payment' | 'zelle' | 'ach';
   label: string;
 }
 
@@ -80,6 +80,9 @@ export interface PaymentDetails {
     accountType: 'checking' | 'savings';
     bankName: string;
   };
+  // Stored payment method via CIM (Authorize.net)
+  useStoredPayment?: boolean;
+  paymentProfileId?: string | null;
   // For card payments
   useTerminal?: boolean; // PAX Terminal via Authorize.Net Valor Connect
   useValorApi?: boolean; // Valor API direct cloud-to-connect
