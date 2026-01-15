@@ -28,17 +28,22 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
 
   const [startDate, setStartDate] = useState(defaultStartDate.toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(defaultEndDate.toISOString().split('T')[0]);
-  const [locationId, setLocationId] = useState(userLocationId);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [isLoading, setIsLoading] = useState(initialLoading);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 15;
   const [activeTab, setActiveTab] = useState<'salesByHour' | 'transactions' | 'zoho'>('transactions');
 
-  // Keep location filter in sync with logged-in user location
-  useEffect(() => {
-    setLocationId(userLocationId);
-  }, [userLocationId]);
+  // Use logged-in user's location (no manual location filter)
+  const locationId = userLocationId;
+
+  const setQuickRangeDays = (days: number) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - days);
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(end.toISOString().split('T')[0]);
+  };
 
   // Load sales from API
   useEffect(() => {
@@ -79,7 +84,7 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
     if (userLocationId) {
       loadSales();
     }
-  }, [startDate, endDate, locationId, userLocationId]);
+  }, [startDate, endDate, userLocationId]);
 
   // Filter transactions based on filters
   const filteredTransactions = useMemo(() => {
@@ -90,11 +95,9 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
       end.setHours(23, 59, 59, 999); // Include full end date
 
       const dateMatch = transactionDate >= start && transactionDate <= end;
-      const locationMatch = !locationId || transaction.locationId === locationId;
-
-      return dateMatch && locationMatch;
+      return dateMatch;
     });
-  }, [transactions, startDate, endDate, locationId]);
+  }, [transactions, startDate, endDate]);
 
   // Reset pagination when filters/data change
   useEffect(() => {
@@ -148,51 +151,54 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
       <div className="px-4 md:px-8 mt-6 md:mt-8 space-y-6 md:space-y-8">
         {/* Filters Section */}
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-6 shadow-sm">
-          <h2 className="font-semibold text-gray-900 dark:text-white mb-4">
-            Filters
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Start Date */}
-            <div>
-              <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Start Date
-              </label>
-              <input
-                type="date"
-                id="startDate"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
-              />
+          <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setQuickRangeDays(0)}
+                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
+              >
+                Today
+              </button>
+              <button
+                onClick={() => setQuickRangeDays(7)}
+                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
+              >
+                Last 7 days
+              </button>
+              <button
+                onClick={() => setQuickRangeDays(30)}
+                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
+              >
+                Last 30 days
+              </button>
             </div>
 
-            {/* End Date */}
-            <div>
-              <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                End Date
-              </label>
-              <input
-                type="date"
-                id="endDate"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
-              />
-            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div>
+                <label htmlFor="startDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  From
+                </label>
+                <input
+                  type="date"
+                  id="startDate"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
+                />
+              </div>
 
-            {/* Location */}
-            <div>
-              <label htmlFor="location" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Location
-              </label>
-              <input
-                type="text"
-                id="location"
-                value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
-                placeholder="Location ID"
-                className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
-              />
+              <div>
+                <label htmlFor="endDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  To
+                </label>
+                <input
+                  type="date"
+                  id="endDate"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -458,12 +464,13 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
 
             {/* Zoho Sync Status Tab */}
             {activeTab === 'zoho' && (
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 shadow-sm">
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-                  Zoho Sync Status
-                </h2>
-                <ZohoSyncDiagnostic />
-              </div>
+              // <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 shadow-sm">
+              //   <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+              //     Zoho Sync Status
+              //   </h2>
+              // </div>
+              
+              <ZohoSyncDiagnostic />
             )}
           </>
         )}
