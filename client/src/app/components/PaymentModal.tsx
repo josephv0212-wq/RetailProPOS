@@ -718,26 +718,23 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             {selectedMethod === 'cash' && null}
 
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-400 rounded-xl p-6 space-y-4">
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <div />
-                  <div className="flex items-center gap-2">
-                    {cardPaymentMethod !== 'manual' ? (
-                      <button
-                        onClick={() => setCardPaymentMethod('manual')}
-                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                      >
-                        Manual Entry
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setCardPaymentMethod('valor_api')}
-                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                      >
-                        Use Terminal
-                      </button>
-                    )}
-                  </div>
+              <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
+                <div className="flex justify-center">
+                  {cardPaymentMethod !== 'manual' ? (
+                    <button
+                      onClick={() => setCardPaymentMethod('manual')}
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                    >
+                      Manual Entry
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setCardPaymentMethod('valor_api')}
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                    >
+                      Use Terminal
+                    </button>
+                  )}
                 </div>
 
                 {cardPaymentMethod !== 'manual' ? null : (
@@ -895,7 +892,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             )}
 
             {selectedMethod === 'ach' && (
-              <div className="bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-400 rounded-xl p-6 space-y-4">
+              <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
                 <div className="flex justify-center">
                   {achEntryMode !== 'details' ? (
                     <button
