@@ -149,60 +149,6 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
       </div>
 
       <div className="px-4 md:px-8 mt-6 md:mt-8 space-y-6 md:space-y-8">
-        {/* Filters Section */}
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-6 shadow-sm">
-          <div className="flex flex-col lg:flex-row lg:items-end gap-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => setQuickRangeDays(0)}
-                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
-              >
-                Today
-              </button>
-              <button
-                onClick={() => setQuickRangeDays(7)}
-                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
-              >
-                Last 7 days
-              </button>
-              <button
-                onClick={() => setQuickRangeDays(30)}
-                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
-              >
-                Last 30 days
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3 flex-wrap">
-              <div>
-                <label htmlFor="startDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  From
-                </label>
-                <input
-                  type="date"
-                  id="startDate"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="endDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  To
-                </label>
-                <input
-                  type="date"
-                  id="endDate"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
         {isLoading ? (
           // Loading State
           <div className="flex flex-col items-center justify-center py-20">
@@ -286,6 +232,61 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                 <h2 className="font-semibold text-gray-900 dark:text-white mb-6">
                   Sales by Hour
                 </h2>
+
+                {/* Filters (moved here) */}
+                <div className="mb-6">
+                  <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => setQuickRangeDays(0)}
+                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
+                      >
+                        Today
+                      </button>
+                      <button
+                        onClick={() => setQuickRangeDays(7)}
+                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
+                      >
+                        Last 7 days
+                      </button>
+                      <button
+                        onClick={() => setQuickRangeDays(30)}
+                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
+                      >
+                        Last 30 days
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div>
+                        <label htmlFor="startDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                          From
+                        </label>
+                        <input
+                          type="date"
+                          id="startDate"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="endDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                          To
+                        </label>
+                        <input
+                          type="date"
+                          id="endDate"
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                          className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="h-[250px] flex items-end justify-between gap-2">
                   {salesByHour.map(({ hour, amount }) => {
                     const heightPercentage = Math.max((amount / maxHourlySales) * 100, 2);
