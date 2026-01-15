@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import React, { useState, useEffect } from 'react';
 import { PaymentMethod, PaymentDetails, CartItem } from '../types';
-import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2, Wifi } from 'lucide-react';
+import { X, CreditCard, DollarSign, Smartphone, Loader, Wallet, Building2, Banknote, CheckCircle2 } from 'lucide-react';
 import { encryptCardData, loadAcceptJs, isAcceptJsAvailable } from '../../services/acceptJsService';
 import { connectAndReadCard, isWebSerialSupported } from '../../services/usbCardReaderService';
 // TerminalDiscoveryDialog removed - not needed for Valor Connect (only Terminal number required)
@@ -47,6 +47,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [achAccount, setAchAccount] = useState('');
   const [achAccountType, setAchAccountType] = useState<'checking' | 'savings'>('checking');
   const [achBankName, setAchBankName] = useState('');
+  const [showAchDetails, setShowAchDetails] = useState(false);
   // Default CC/DC to terminal flow; only show fields when user selects Manual Entry.
   const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'valor_api' | 'manual'>('valor_api');
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading' | 'processing'>('ready');
@@ -174,7 +175,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         return;
       }
     } else if (selectedMethod === 'ach' && (!achName || !achRouting || !achAccount || !achBankName)) {
-      setError('Please fill in all ACH details');
+      setShowAchDetails(true);
+      setError('Please fill in ACH details');
       setIsProcessing(false);
       return;
     }
@@ -376,7 +378,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
       paymentDetails.achDetails = {
         name: achName,
         routingNumber: achRouting,
-        accountNumber: `****${achAccount.slice(-4)}`,
+        accountNumber: achAccount,
         accountType: achAccountType,
         bankName: achBankName,
       };
@@ -598,7 +600,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               <>
                 <div className="pt-2 border-t border-gray-200 dark:border-gray-600"></div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-400">Convenience Fee (3%)</span>
+                  <span className="text-gray-600 dark:text-gray-400">Credit Card Surcharge 3%</span>
                   <span className="text-gray-900 dark:text-white">${convenienceFee.toFixed(2)}</span>
                 </div>
               </>
@@ -712,13 +714,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           <div>
             {selectedMethod === 'cash' && (
               <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-emerald-400 rounded-xl p-8 text-center">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 bg-emerald-500 rounded-lg flex items-center justify-center">
-                    <DollarSign className="w-7 h-7 text-white" strokeWidth={3} />
-                  </div>
-                  <h3 className="text-xl font-semibold text-gray-900">Cash Payment</h3>
-                </div>
-                
                 <p className="text-gray-700 mb-2">
                   Collect <span className="text-3xl font-bold text-emerald-600 mx-1">${finalTotal.toFixed(2)}</span> in cash from the customer.
                 </p>
@@ -728,12 +723,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-400 rounded-xl p-6 space-y-4">
                 <div className="flex items-center justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
-                      <CreditCard className="w-7 h-7 text-white" />
-                    </div>
-                    <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
-                  </div>
+                  <div />
                   <div className="flex items-center gap-2">
                     {cardPaymentMethod !== 'manual' ? (
                       <button
@@ -757,16 +747,22 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   <div className="space-y-4">
                     {/* Terminal Instructions */}
                     <div className="bg-white border border-blue-200 rounded-lg p-6 text-center space-y-4">
-                      <Wifi className="w-12 h-12 text-blue-400 mx-auto" />
                       <div>
                         <p className="font-medium text-gray-900 mb-1">
                           {cardReaderStatus === 'ready' && 'Terminal Ready'}
                           {cardReaderStatus === 'processing' && 'Processing Payment...'}
                         </p>
-                        <p className="text-sm text-gray-600 mb-2">
-                          {cardReaderStatus === 'ready' && 'Click "Confirm Payment" to send the request to the terminal'}
-                          {cardReaderStatus === 'processing' && 'Customer will be prompted on the VP100 terminal. Please wait...'}
-                        </p>
+                        {cardReaderStatus === 'ready' ? (
+                          <p className="text-gray-700 mb-2">
+                            Click <span className="font-semibold">Confirm Payment</span> to send{' '}
+                            <span className="text-3xl font-bold text-blue-600 mx-1">${finalTotal.toFixed(2)}</span>
+                            to the terminal.
+                          </p>
+                        ) : (
+                          <p className="text-sm text-gray-600 mb-2">
+                            Customer will be prompted on the VP100 terminal. Please wait...
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -832,13 +828,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {selectedMethod === 'zelle' && (
               <div className="bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-400 rounded-xl p-8 text-center">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center">
-                    <Smartphone className="w-7 h-7 text-white" />
-                  </div>
-                  <h3 className="text-xl font-semibold text-gray-900">Zelle Payment</h3>
-                </div>
-                
                 <p className="text-gray-700 mb-2">
                   Collect <span className="text-3xl font-bold text-purple-600 mx-1">${finalTotal.toFixed(2)}</span> via Zelle from the customer.
                 </p>
@@ -939,82 +928,95 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {selectedMethod === 'ach' && (
               <div className="bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-400 rounded-xl p-6 space-y-3">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center">
-                    <Building2 className="w-7 h-7 text-white" />
-                  </div>
-                  <h3 className="text-xl font-semibold text-gray-900">ACH Payment</h3>
+                <div className="flex items-center justify-between gap-3">
+                  <div />
+                  <button
+                    onClick={() => setShowAchDetails(v => !v)}
+                    className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                  >
+                    {showAchDetails ? 'Hide Details' : 'Enter Details'}
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Account Holder Name
-                  </label>
-                  <input
-                    type="text"
-                    value={achName}
-                    onChange={(e) => setAchName(e.target.value)}
-                    placeholder="John Doe"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Routing Number
-                    </label>
-                    <input
-                      type="text"
-                      value={achRouting}
-                      onChange={(e) => setAchRouting(e.target.value.replace(/\D/g, '').slice(0, 9))}
-                      placeholder="123456789"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Account Number
-                    </label>
-                    <input
-                      type="text"
-                      value={achAccount}
-                      onChange={(e) => setAchAccount(e.target.value.replace(/\D/g, ''))}
-                      placeholder="1234567890"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                    />
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Account Type
-                    </label>
-                    <select
-                      value={achAccountType}
-                      onChange={(e) => setAchAccountType(e.target.value as 'checking' | 'savings')}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900"
-                    >
-                      <option value="checking">Checking</option>
-                      <option value="savings">Savings</option>
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Bank Name
-                    </label>
-                    <input
-                      type="text"
-                      value={achBankName}
-                      onChange={(e) => setAchBankName(e.target.value)}
-                      placeholder="Bank of America"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
-                    />
-                  </div>
-                </div>
+                {!showAchDetails ? (
+                  <p className="text-gray-700 mb-2 text-center">
+                    To record an ACH payment of{' '}
+                    <span className="text-3xl font-bold text-orange-600 mx-1">${finalTotal.toFixed(2)}</span>
+                    , click <span className="font-semibold">Enter Details</span>.
+                  </p>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Account Holder Name
+                      </label>
+                      <input
+                        type="text"
+                        value={achName}
+                        onChange={(e) => setAchName(e.target.value)}
+                        placeholder="John Doe"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Routing Number
+                        </label>
+                        <input
+                          type="text"
+                          value={achRouting}
+                          onChange={(e) => setAchRouting(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                          placeholder="123456789"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Account Number
+                        </label>
+                        <input
+                          type="text"
+                          value={achAccount}
+                          onChange={(e) => setAchAccount(e.target.value.replace(/\D/g, ''))}
+                          placeholder="1234567890"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Account Type
+                        </label>
+                        <select
+                          value={achAccountType}
+                          onChange={(e) => setAchAccountType(e.target.value as 'checking' | 'savings')}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900"
+                        >
+                          <option value="checking">Checking</option>
+                          <option value="savings">Savings</option>
+                        </select>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Bank Name
+                        </label>
+                        <input
+                          type="text"
+                          value={achBankName}
+                          onChange={(e) => setAchBankName(e.target.value)}
+                          placeholder="Bank of America"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 placeholder:text-gray-400"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
