@@ -734,20 +734,20 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     </div>
                     <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
                   </div>
-                  <button
-                    onClick={() => setCardPaymentMethod('manual')}
-                    className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                  >
-                    Manual Entry
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm text-gray-700">
-                    {selectedMethod === 'credit_card' ? (
-                      <span><strong>Credit (CC)</strong> selected. 3% surcharge applies.</span>
-                    ) : (
-                      <span><strong>Debit (DC)</strong> selected. No surcharge.</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCardPaymentMethod('manual')}
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                    >
+                      Manual Entry
+                    </button>
+                    {cardPaymentMethod === 'manual' && (
+                      <button
+                        onClick={() => setCardPaymentMethod('valor_api')}
+                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      >
+                        Use Terminal
+                      </button>
                     )}
                   </div>
                 </div>
@@ -771,17 +771,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm text-gray-700">
-                        <strong>Manual Entry</strong> selected.
-                      </div>
-                      <button
-                        onClick={() => setCardPaymentMethod('valor_api')}
-                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                      >
-                        Use Terminal
-                      </button>
-                    </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Card Number
