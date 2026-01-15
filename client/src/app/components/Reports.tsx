@@ -31,6 +31,8 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
   const [locationId, setLocationId] = useState(userLocationId);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [isLoading, setIsLoading] = useState(initialLoading);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 15;
 
   // Keep location filter in sync with logged-in user location
   useEffect(() => {
@@ -92,6 +94,16 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
       return dateMatch && locationMatch;
     });
   }, [transactions, startDate, endDate, locationId]);
+
+  // Reset pagination when filters/data change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [startDate, endDate, locationId, transactions.length]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const pagedTransactions = filteredTransactions.slice(startIndex, startIndex + pageSize);
 
   // Calculate KPIs
   const kpis = useMemo(() => {
@@ -287,6 +299,9 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                     <thead>
                       <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
                         <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">
+                          No
+                        </th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">
                           ID
                         </th>
                         <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">
@@ -310,8 +325,11 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                       </tr>
                     </thead>
                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                      {filteredTransactions.map((transaction) => (
+                      {pagedTransactions.map((transaction, idx) => (
                         <tr key={transaction.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                            {startIndex + idx + 1}
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-900 dark:text-white">
                             {transaction.id}
                           </td>
@@ -368,6 +386,33 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                       ))}
                     </tbody>
                   </table>
+
+                  {/* Pagination */}
+                  <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      Showing {filteredTransactions.length === 0 ? 0 : startIndex + 1}–
+                      {Math.min(startIndex + pageSize, filteredTransactions.length)} of {filteredTransactions.length}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={safePage <= 1}
+                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                      >
+                        Prev
+                      </button>
+                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                        Page {safePage} / {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={safePage >= totalPages}
+                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
