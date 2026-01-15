@@ -614,7 +614,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           {/* Payment Methods */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Payment Method</label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <button
                 onClick={() => setSelectedMethod('cash')}
                 className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
@@ -630,13 +630,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               <button
                 onClick={() => setSelectedMethod('credit_card')}
                 className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                  selectedMethod === 'credit_card' || selectedMethod === 'debit_card'
+                  selectedMethod === 'credit_card'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
                 }`}
               >
                 <CreditCard className="w-6 h-6" />
-                <span className="text-sm">Card</span>
+                <span className="text-sm">CC</span>
+              </button>
+
+              <button
+                onClick={() => setSelectedMethod('debit_card')}
+                className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                  selectedMethod === 'debit_card'
+                    ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}
+              >
+                <CreditCard className="w-6 h-6" />
+                <span className="text-sm">DC</span>
               </button>
               
               {customerId && paymentProfiles.length > 0 && (
@@ -711,32 +723,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     <CreditCard className="w-7 h-7 text-white" />
                   </div>
                   <h3 className="text-xl font-semibold text-gray-900">Card Payment</h3>
-                </div>
-
-                {/* Credit vs Debit selection */}
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setSelectedMethod('credit_card')}
-                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-1 ${
-                      selectedMethod === 'credit_card'
-                        ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                    }`}
-                  >
-                    <span className="text-sm font-semibold">Credit (CC)</span>
-                    <span className={`text-xs ${selectedMethod === 'credit_card' ? 'text-blue-100' : 'text-gray-500'}`}>3% surcharge</span>
-                  </button>
-                  <button
-                    onClick={() => setSelectedMethod('debit_card')}
-                    className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-1 ${
-                      selectedMethod === 'debit_card'
-                        ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                    }`}
-                  >
-                    <span className="text-sm font-semibold">Debit (DC)</span>
-                    <span className={`text-xs ${selectedMethod === 'debit_card' ? 'text-blue-100' : 'text-gray-500'}`}>No surcharge</span>
-                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
