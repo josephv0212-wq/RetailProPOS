@@ -67,7 +67,7 @@ async function apiRequest<T = any>(
   const cacheKey = `${options.method || 'GET'}:${url}`;
 
   // Check cache for GET requests
-  if (!noCache && options.method === 'GET' || !options.method) {
+  if (!noCache && (options.method === 'GET' || !options.method)) {
     const cached = requestCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
       return cached.data;
@@ -311,7 +311,7 @@ export const salesAPI = {
     startDate?: string;
     endDate?: string;
     syncedToZoho?: boolean;
-  }) => {
+  }, noCache: boolean = false) => {
     const queryParams = new URLSearchParams();
     if (params?.locationId) queryParams.append('locationId', params.locationId);
     if (params?.startDate) queryParams.append('startDate', params.startDate);
@@ -319,7 +319,7 @@ export const salesAPI = {
     if (params?.syncedToZoho !== undefined) queryParams.append('syncedToZoho', String(params.syncedToZoho));
     
     const query = queryParams.toString();
-    return apiRequest<{ sales: any[] }>(`/sales${query ? `?${query}` : ''}`);
+    return apiRequest<{ sales: any[] }>(`/sales${query ? `?${query}` : ''}`, {}, noCache);
   },
 
   getById: async (id: number) => {

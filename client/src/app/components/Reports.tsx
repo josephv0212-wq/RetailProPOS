@@ -32,6 +32,11 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [isLoading, setIsLoading] = useState(initialLoading);
 
+  // Keep location filter in sync with logged-in user location
+  useEffect(() => {
+    setLocationId(userLocationId);
+  }, [userLocationId]);
+
   // Load sales from API
   useEffect(() => {
     const loadSales = async () => {
@@ -45,12 +50,12 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
           locationId: locationId || undefined,
           startDate: start.toISOString(),
           endDate: end.toISOString(),
-        });
+        }, true);
 
         if (response.success && response.data?.sales) {
           // Transform API sales to Transaction format
           const transformedTransactions: Transaction[] = response.data.sales.map((sale: any) => ({
-            id: String(sale.id),
+            id: String(sale.transactionId || sale.id),
             date: new Date(sale.createdAt),
             paymentType: sale.paymentType,
             subtotal: parseFloat(sale.subtotal),
@@ -320,9 +325,32 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                             })}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium uppercase tracking-wide bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400">
-                              Card
-                            </span>
+                            {(() => {
+                              const type = transaction.paymentType;
+                              const label =
+                                type === 'cash' ? 'CASH' :
+                                type === 'credit_card' ? 'CC' :
+                                type === 'debit_card' ? 'DC' :
+                                type === 'zelle' ? 'ZELLE' :
+                                'ACH';
+
+                              const cls =
+                                type === 'cash'
+                                  ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-400'
+                                  : type === 'credit_card'
+                                    ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-400'
+                                    : type === 'debit_card'
+                                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400'
+                                      : type === 'zelle'
+                                        ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-400'
+                                        : 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400';
+
+                              return (
+                                <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium uppercase tracking-wide ${cls}`}>
+                                  {label}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right font-semibold text-gray-900 dark:text-white">
                             ${transaction.subtotal.toFixed(2)}
