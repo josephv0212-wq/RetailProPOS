@@ -1,5 +1,6 @@
 import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById } from '../services/zohoService.js';
-import { Customer, Item } from '../models/index.js';
+import { Customer, Item, Sale } from '../models/index.js';
+import { sequelize } from '../config/db.js';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
 
 const DEFAULT_CUSTOMERS = {
@@ -90,47 +91,84 @@ const isDefaultCustomer = (contactName) => {
 };
 
 // Helper function to sync customers (can be called without req/res)
-export const syncCustomersToDatabase = async () => {
+export const syncCustomersToDatabase = async (options = {}) => {
   try {
     const zohoCustomers = await syncCustomersFromZoho();
+    const customerContacts = (zohoCustomers || []).filter(c => (c?.contact_type || 'customer').toLowerCase() === 'customer');
     
     let created = 0;
     let updated = 0;
 
-    for (const zohoCustomer of zohoCustomers) {
-      const contactType = (zohoCustomer.contact_type || 'customer').toLowerCase();
-      if (contactType !== 'customer') {
-        continue;
-      }
-      const location = extractLocation(zohoCustomer);
-      const paymentMethod = extractPaymentMethod(zohoCustomer);
-      
-      const [customer, isNew] = await Customer.upsert({
-        zohoId: zohoCustomer.contact_id,
-        contactName: zohoCustomer.contact_name,
-        companyName: zohoCustomer.company_name || null,
-        email: zohoCustomer.email || null,
-        phone: zohoCustomer.phone || null,
-        contactType,
-        locationId: location.locationId,
-        locationName: location.locationName,
-        isDefaultCustomer: isDefaultCustomer(zohoCustomer.contact_name),
-        hasPaymentMethod: paymentMethod.hasPaymentMethod,
-        paymentMethodType: paymentMethod.paymentMethodType,
-        last_four_digits: paymentMethod.last_four_digits,
-        cardBrand: paymentMethod.cardBrand,
-        isActive: zohoCustomer.status === 'active',
-        lastSyncedAt: new Date()
+    // Manual sync option: delete all existing customers and insert fresh list
+    if (options.replaceAll === true) {
+      const now = new Date();
+      const rows = customerContacts.map(zohoCustomer => {
+        const contactType = (zohoCustomer.contact_type || 'customer').toLowerCase();
+        const location = extractLocation(zohoCustomer);
+        const paymentMethod = extractPaymentMethod(zohoCustomer);
+        return {
+          zohoId: zohoCustomer.contact_id,
+          contactName: zohoCustomer.contact_name,
+          companyName: zohoCustomer.company_name || null,
+          email: zohoCustomer.email || null,
+          phone: zohoCustomer.phone || null,
+          contactType,
+          locationId: location.locationId,
+          locationName: location.locationName,
+          isDefaultCustomer: isDefaultCustomer(zohoCustomer.contact_name),
+          hasPaymentMethod: paymentMethod.hasPaymentMethod,
+          paymentMethodType: paymentMethod.paymentMethodType,
+          last_four_digits: paymentMethod.last_four_digits,
+          cardBrand: paymentMethod.cardBrand,
+          isActive: zohoCustomer.status === 'active',
+          lastSyncedAt: now
+        };
       });
 
-      if (isNew) created++;
-      else updated++;
+      await sequelize.transaction(async (t) => {
+        // Avoid FK issues: detach existing Sales from Customers before deleting
+        await Sale.update({ customerId: null }, { where: {}, transaction: t });
+        await Customer.destroy({ where: {}, truncate: true, transaction: t });
+        if (rows.length > 0) {
+          await Customer.bulkCreate(rows, { transaction: t });
+        }
+      });
+
+      created = rows.length;
+      updated = 0;
+    } else {
+      for (const zohoCustomer of customerContacts) {
+        const contactType = (zohoCustomer.contact_type || 'customer').toLowerCase();
+        const location = extractLocation(zohoCustomer);
+        const paymentMethod = extractPaymentMethod(zohoCustomer);
+        
+        const [customer, isNew] = await Customer.upsert({
+          zohoId: zohoCustomer.contact_id,
+          contactName: zohoCustomer.contact_name,
+          companyName: zohoCustomer.company_name || null,
+          email: zohoCustomer.email || null,
+          phone: zohoCustomer.phone || null,
+          contactType,
+          locationId: location.locationId,
+          locationName: location.locationName,
+          isDefaultCustomer: isDefaultCustomer(zohoCustomer.contact_name),
+          hasPaymentMethod: paymentMethod.hasPaymentMethod,
+          paymentMethodType: paymentMethod.paymentMethodType,
+          last_four_digits: paymentMethod.last_four_digits,
+          cardBrand: paymentMethod.cardBrand,
+          isActive: zohoCustomer.status === 'active',
+          lastSyncedAt: new Date()
+        });
+
+        if (isNew) created++;
+        else updated++;
+      }
     }
 
     return {
       success: true,
       message: 'Customers synced successfully',
-      stats: { total: zohoCustomers.length, created, updated }
+      stats: { total: customerContacts.length, created, updated }
     };
   } catch (err) {
     console.error('Customer sync error:', err);
@@ -140,7 +178,7 @@ export const syncCustomersToDatabase = async () => {
 
 export const syncZohoCustomers = async (req, res) => {
   try {
-    const result = await syncCustomersToDatabase();
+    const result = await syncCustomersToDatabase({ replaceAll: true });
     res.json({ 
       success: result.success,
       message: result.message,
@@ -205,45 +243,16 @@ export const syncZohoItems = async (req, res) => {
 
 export const syncAll = async (req, res) => {
   try {
-    const [zohoCustomers, zohoItems] = await Promise.all([
-      syncCustomersFromZoho(),
+    // For manual sync-all, replace customer list completely
+    const [customerResult, zohoItems] = await Promise.all([
+      syncCustomersToDatabase({ replaceAll: true }),
       syncItemsFromZoho()
     ]);
 
-    let customersCreated = 0;
-    let customersUpdated = 0;
+    let customersCreated = customerResult?.stats?.created || 0;
+    let customersUpdated = customerResult?.stats?.updated || 0;
     let itemsCreated = 0;
     let itemsUpdated = 0;
-
-    for (const zohoCustomer of zohoCustomers) {
-      const contactType = (zohoCustomer.contact_type || 'customer').toLowerCase();
-      if (contactType !== 'customer') {
-        continue;
-      }
-      const location = extractLocation(zohoCustomer);
-      const paymentMethod = extractPaymentMethod(zohoCustomer);
-      
-      const [customer, isNew] = await Customer.upsert({
-        zohoId: zohoCustomer.contact_id,
-        contactName: zohoCustomer.contact_name,
-        companyName: zohoCustomer.company_name || null,
-        email: zohoCustomer.email || null,
-        phone: zohoCustomer.phone || null,
-        contactType,
-        locationId: location.locationId,
-        locationName: location.locationName,
-        isDefaultCustomer: isDefaultCustomer(zohoCustomer.contact_name),
-        hasPaymentMethod: paymentMethod.hasPaymentMethod,
-        paymentMethodType: paymentMethod.paymentMethodType,
-        last_four_digits: paymentMethod.last_four_digits,
-        cardBrand: paymentMethod.cardBrand,
-        isActive: zohoCustomer.status === 'active',
-        lastSyncedAt: new Date()
-      });
-
-      if (isNew) customersCreated++;
-      else customersUpdated++;
-    }
 
     for (const zohoItem of zohoItems) {
       const [item, isNew] = await Item.upsert({
@@ -268,7 +277,7 @@ export const syncAll = async (req, res) => {
       success: true,
       message: 'Zoho data synced successfully',
       data: {
-        customers: { total: zohoCustomers.length, created: customersCreated, updated: customersUpdated },
+        customers: { total: customerResult?.stats?.total || 0, created: customersCreated, updated: customersUpdated },
         items: { total: zohoItems.length, created: itemsCreated, updated: itemsUpdated }
       }
     });
