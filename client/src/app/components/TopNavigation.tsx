@@ -1,7 +1,8 @@
 import { Store, Calendar, Clock, RefreshCw, Printer, LogOut, Users, BarChart3, Settings, ShoppingCart, ChevronDown, User, Shield, MapPin, Moon, Sun } from 'lucide-react';
 import React, { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
-import { printerAPI } from '../../services/api';
+import { printerAPI, zohoAPI } from '../../services/api';
+import { useToast } from '../contexts/ToastContext';
 
 interface TopNavigationProps {
   storeName: string;
@@ -20,7 +21,9 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [printerStatus, setPrinterStatus] = useState<'online' | 'offline' | 'unknown'>('unknown');
+  const [isSyncingZoho, setIsSyncingZoho] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const { showToast } = useToast();
   
   // Update time every second
   useEffect(() => {
@@ -61,6 +64,24 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
     minute: '2-digit',
     second: '2-digit'
   });
+
+  const handleZohoSync = async () => {
+    if (isSyncingZoho) return;
+    setIsSyncingZoho(true);
+    try {
+      const response = await zohoAPI.syncAll();
+      if (response.success) {
+        showToast('Zoho sync started successfully.', 'success', 4000);
+      } else {
+        showToast(response.message || 'Zoho sync failed.', 'error', 5000);
+      }
+    } catch (err: any) {
+      console.error('Zoho sync failed:', err);
+      showToast(err?.message || 'Zoho sync failed.', 'error', 5000);
+    } finally {
+      setIsSyncingZoho(false);
+    }
+  };
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -154,8 +175,13 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
           
           <div className="h-6 w-px bg-gray-300 dark:bg-gray-600" />
           
-          <button className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300">
-            <RefreshCw className="w-4 h-4" />
+          <button
+            onClick={handleZohoSync}
+            disabled={isSyncingZoho}
+            title={isSyncingZoho ? 'Syncing Zoho...' : 'Sync Zoho'}
+            className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncingZoho ? 'animate-spin' : ''}`} />
           </button>
           
           <div className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg ${
