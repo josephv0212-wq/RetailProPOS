@@ -47,7 +47,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [achAccount, setAchAccount] = useState('');
   const [achAccountType, setAchAccountType] = useState<'checking' | 'savings'>('checking');
   const [achBankName, setAchBankName] = useState('');
-  const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'valor_api' | 'manual'>('manual');
+  // Default to terminal-style flow so we don't show manual-entry fields until explicitly selected
+  const [cardPaymentMethod, setCardPaymentMethod] = useState<'usb_reader' | 'pax_terminal' | 'valor_api' | 'manual'>('valor_api');
   const [cardReaderStatus, setCardReaderStatus] = useState<'ready' | 'connecting' | 'reading' | 'processing'>('ready');
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
