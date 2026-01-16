@@ -31,10 +31,10 @@ export const validateSale = (req, res, next) => {
 
   // Validate payment details based on payment type
   if (paymentType === 'credit_card' || paymentType === 'debit_card') {
-    const useTerminal = req.body.useTerminal;
     const useValorApi = req.body.useValorApi;
+    const useOpaqueData = req.body.useOpaqueData;
+    // Backward compatibility: older clients used "useBluetoothReader" + "bluetoothPayload" for Accept.js opaqueData
     const useBluetoothReader = req.body.useBluetoothReader;
-    const useEBizChargeTerminal = req.body.useEBizChargeTerminal;
     
     if (useValorApi) {
       // Valor API mode - validate terminalNumber and valorTransactionId
@@ -51,33 +51,10 @@ export const validateSale = (req, res, next) => {
       if (!req.body.valorTransactionId || req.body.valorTransactionId.trim() === '') {
         errors.push('Valor API transaction ID is required. Payment must be processed via Valor API in the frontend first.');
       }
-    } else if (useBluetoothReader) {
-      // USB Card Reader mode (BBPOS) - validate opaqueData/bluetoothPayload
-      if (!req.body.bluetoothPayload || !req.body.bluetoothPayload.descriptor || !req.body.bluetoothPayload.value) {
-        errors.push('USB card reader payment data is required. Please scan the card with the USB reader.');
-      }
-    } else if (useTerminal) {
-      // PAX Terminal mode (Valor Connect - cloud-to-cloud) - validate terminalNumber
-      if (!req.body.terminalNumber || req.body.terminalNumber.trim() === '') {
-        errors.push('Terminal number is required for PAX terminal payment. Please configure your VP100 serial number in Settings.');
-      } else {
-        // Basic Terminal number validation (alphanumeric, dashes, underscores)
-        const terminalNumberTrimmed = req.body.terminalNumber.trim();
-        if (!/^[A-Za-z0-9\-_]+$/.test(terminalNumberTrimmed)) {
-          errors.push('Invalid Terminal number format. Use alphanumeric characters, dashes, or underscores only.');
-        }
-      }
-    } else if (useEBizChargeTerminal) {
-      // EBizCharge Terminal mode - validate terminal IP
-      if (!req.body.terminalIP) {
-        errors.push('Terminal IP address is required for EBizCharge terminal payment');
-      } else {
-        // Basic IP validation (allow localhost for USB terminals)
-        const ipTrimmed = req.body.terminalIP.trim();
-        const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-        if (ipTrimmed !== 'localhost' && ipTrimmed !== '127.0.0.1' && !ipRegex.test(ipTrimmed)) {
-          errors.push('Invalid terminal IP address format');
-        }
+    } else if (useOpaqueData || useBluetoothReader) {
+      const payload = req.body.opaqueDataPayload || req.body.bluetoothPayload;
+      if (!payload || !payload.descriptor || !payload.value) {
+        errors.push('Encrypted card payload (opaqueData) is required.');
       }
     } else {
       // Manual Entry mode - validate card details

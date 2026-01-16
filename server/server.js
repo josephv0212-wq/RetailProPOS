@@ -8,10 +8,6 @@ import zohoRoutes from './routes/zohoRoutes.js';
 import itemRoutes from './routes/itemRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import printerRoutes from './routes/printerRoutes.js';
-import paxRoutes from './routes/paxRoutes.js';
-import paymentRoutes from './routes/paymentRoutes.js';
-import bbposRoutes from './routes/bbposRoutes.js';
-import ebizchargeRoutes from './routes/ebizchargeRoutes.js';
 import valorApiRoutes from './routes/valorApiRoutes.js';
 import { sequelize } from './config/db.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
@@ -169,8 +165,6 @@ app.get('/', (req, res) => {
         customers: '/customers',
         zoho: '/zoho',
         printer: '/printer',
-        pax: '/pax',
-        bbpos: '/bbpos',
         health: '/health'
       }
   });
@@ -182,10 +176,6 @@ app.use('/items', itemRoutes);
 app.use('/customers', customerRoutes);
 app.use('/zoho', zohoRoutes);
 app.use('/printer', printerRoutes);
-app.use('/pax', paxRoutes);
-app.use('/payment', paymentRoutes);
-app.use('/bbpos', bbposRoutes);
-app.use('/ebizcharge', ebizchargeRoutes);
 app.use('/valor', valorApiRoutes);
 
 // Error handler (must be last)
@@ -280,247 +270,162 @@ const enableSQLiteForeignKeys = async () => {
   }
 };
 
-// Ensure new imageData column exists on Items table (for SQLite / auto-sync disabled)
-const ensureItemImageColumn = async () => {
+const isSQLite = DATABASE_SETTING === 'local';
+
+const ensureColumn = async ({
+  table,
+  column,
+  sqliteType,
+  pgType,
+  successMessage,
+  existsMessage,
+  warnMessage
+}) => {
+  const msg = {
+    success: successMessage || `Added ${column} column to ${table} table`,
+    exists: existsMessage || `${column} column already exists on ${table} table`,
+    warn: warnMessage || `Could not ensure ${column} column on ${table} table`
+  };
+
   try {
-    // This ALTER is safe to run repeatedly; on second run it will throw
-    // "duplicate column name", which we catch and ignore.
-    await sequelize.query('ALTER TABLE `Items` ADD COLUMN `imageData` TEXT');
-    logSuccess('Added imageData column to Items table');
-  } catch (err) {
-    const msg = err?.message || '';
-    if (msg.includes('duplicate column name') || msg.includes('duplicate column')) {
-      logInfo('imageData column already exists on Items table');
-      return;
+    if (isSQLite) {
+      try {
+        await sequelize.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${sqliteType}`);
+        logSuccess(msg.success);
+      } catch (err) {
+        const e = err?.message || '';
+        if (e.includes('duplicate column name') || e.includes('duplicate column')) {
+          logInfo(msg.exists);
+          return;
+        }
+        throw err;
+      }
+    } else {
+      try {
+        await sequelize.query(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "${column}" ${pgType}`);
+        logSuccess(msg.success);
+      } catch (err) {
+        logWarning(`${msg.warn}: ${err.message}`);
+      }
     }
-    // If the table doesn't exist or other error, log but don't crash server
-    logWarning(`Could not ensure imageData column on Items table: ${msg}`);
+  } catch (err) {
+    logWarning(`${msg.warn}: ${err.message}`);
   }
 };
+
+// Ensure new imageData column exists on Items table (for SQLite / auto-sync disabled)
+const ensureItemImageColumn = async () =>
+  ensureColumn({
+    table: 'Items',
+    column: 'imageData',
+    sqliteType: 'TEXT',
+    pgType: 'TEXT',
+    successMessage: 'Added imageData column to Items table',
+    existsMessage: 'imageData column already exists on Items table',
+    warnMessage: 'Could not ensure imageData column on Items table'
+  });
 
 // Ensure bankAccountLast4 column exists on Customers table (for SQLite / auto-sync disabled)
-const ensureBankAccountColumn = async () => {
-  try {
-    if (DATABASE_SETTING === 'local') {
-      // SQLite syntax - Add bankAccountLast4 column
-      try {
-        await sequelize.query('ALTER TABLE `Customers` ADD COLUMN `bankAccountLast4` VARCHAR(255) NULL');
-        logSuccess('Added bankAccountLast4 column to Customers table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('bankAccountLast4 column already exists on Customers table');
-      }
-    } else {
-      // PostgreSQL syntax - Add bankAccountLast4 column
-      try {
-        await sequelize.query('ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "bankAccountLast4" VARCHAR(255) NULL');
-        logSuccess('Added bankAccountLast4 column to Customers table');
-      } catch (err) {
-        logWarning(`Could not ensure bankAccountLast4 column: ${err.message}`);
-      }
-    }
-  } catch (err) {
-    logWarning(`Could not ensure bankAccountLast4 column on Customers table: ${err.message}`);
-  }
-};
+const ensureBankAccountColumn = async () =>
+  ensureColumn({
+    table: 'Customers',
+    column: 'bankAccountLast4',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added bankAccountLast4 column to Customers table',
+    existsMessage: 'bankAccountLast4 column already exists on Customers table',
+    warnMessage: 'Could not ensure bankAccountLast4 column on Customers table'
+  });
 
-// Ensure customerProfileId and customerPaymentProfileId columns exist on Customers table (for SQLite / auto-sync disabled)
+// Ensure customerProfileId and customerPaymentProfileId columns exist on Customers table
 const ensureCustomerProfileColumns = async () => {
-  try {
-    if (DATABASE_SETTING === 'local') {
-      // SQLite syntax - Add customerProfileId column
-      try {
-        await sequelize.query('ALTER TABLE `Customers` ADD COLUMN `customerProfileId` VARCHAR(255) NULL');
-        logSuccess('Added customerProfileId column to Customers table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('customerProfileId column already exists on Customers table');
-      }
-      
-      // SQLite syntax - Add customerPaymentProfileId column
-      try {
-        await sequelize.query('ALTER TABLE `Customers` ADD COLUMN `customerPaymentProfileId` VARCHAR(255) NULL');
-        logSuccess('Added customerPaymentProfileId column to Customers table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('customerPaymentProfileId column already exists on Customers table');
-      }
-    } else {
-      // PostgreSQL syntax - Add customerProfileId column
-      try {
-        await sequelize.query('ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "customerProfileId" VARCHAR(255) NULL');
-        logSuccess('Added customerProfileId column to Customers table');
-      } catch (err) {
-        logWarning(`Could not ensure customerProfileId column: ${err.message}`);
-      }
-      
-      // PostgreSQL syntax - Add customerPaymentProfileId column
-      try {
-        await sequelize.query('ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "customerPaymentProfileId" VARCHAR(255) NULL');
-        logSuccess('Added customerPaymentProfileId column to Customers table');
-      } catch (err) {
-        logWarning(`Could not ensure customerPaymentProfileId column: ${err.message}`);
-      }
-    }
-  } catch (err) {
-    logWarning(`Could not ensure customer profile columns on Customers table: ${err.message}`);
-  }
+  await ensureColumn({
+    table: 'Customers',
+    column: 'customerProfileId',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added customerProfileId column to Customers table',
+    existsMessage: 'customerProfileId column already exists on Customers table',
+    warnMessage: 'Could not ensure customerProfileId column on Customers table'
+  });
+  await ensureColumn({
+    table: 'Customers',
+    column: 'customerPaymentProfileId',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added customerPaymentProfileId column to Customers table',
+    existsMessage: 'customerPaymentProfileId column already exists on Customers table',
+    warnMessage: 'Could not ensure customerPaymentProfileId column on Customers table'
+  });
 };
 
-// Ensure status column exists on Customers table (for SQLite / auto-sync disabled)
-const ensureCustomerStatusColumn = async () => {
-  try {
-    if (DATABASE_SETTING === 'local') {
-      try {
-        await sequelize.query('ALTER TABLE `Customers` ADD COLUMN `status` VARCHAR(255) NULL');
-        logSuccess('Added status column to Customers table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('status column already exists on Customers table');
-      }
-    } else {
-      try {
-        await sequelize.query('ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "status" VARCHAR(255) NULL');
-        logSuccess('Added status column to Customers table');
-      } catch (err) {
-        logWarning(`Could not ensure status column: ${err.message}`);
-      }
-    }
-  } catch (err) {
-    logWarning(`Could not ensure status column on Customers table: ${err.message}`);
-  }
-};
+// Ensure status column exists on Customers table
+const ensureCustomerStatusColumn = async () =>
+  ensureColumn({
+    table: 'Customers',
+    column: 'status',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added status column to Customers table',
+    existsMessage: 'status column already exists on Customers table',
+    warnMessage: 'Could not ensure status column on Customers table'
+  });
 
-// Ensure terminalIP, terminalPort, and terminalNumber columns exist on Users table (for SQLite / auto-sync disabled)
+// Ensure terminalIP, terminalPort, and terminalNumber columns exist on Users table
 const ensureTerminalColumns = async () => {
-  try {
-    if (DATABASE_SETTING === 'local') {
-      // SQLite syntax - Add terminalIP column
-      try {
-        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalIP` VARCHAR(255) NULL');
-        logSuccess('Added terminalIP column to Users table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('terminalIP column already exists on Users table');
-      }
-      
-      // SQLite syntax - Add terminalPort column
-      try {
-        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalPort` INTEGER NULL');
-        logSuccess('Added terminalPort column to Users table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('terminalPort column already exists on Users table');
-      }
-      
-      // SQLite syntax - Add terminalNumber column
-      try {
-        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `terminalNumber` VARCHAR(255) NULL');
-        logSuccess('Added terminalNumber column to Users table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('terminalNumber column already exists on Users table');
-      }
-    } else {
-      // PostgreSQL syntax - Add terminalIP column
-      try {
-        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalIP" VARCHAR(255) NULL');
-        logSuccess('Added terminalIP column to Users table');
-      } catch (err) {
-        logWarning(`Could not ensure terminalIP column: ${err.message}`);
-      }
-      
-      // PostgreSQL syntax - Add terminalPort column
-      try {
-        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalPort" INTEGER NULL');
-        logSuccess('Added terminalPort column to Users table');
-      } catch (err) {
-        logWarning(`Could not ensure terminalPort column: ${err.message}`);
-      }
-      
-      // PostgreSQL syntax - Add terminalNumber column
-      try {
-        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "terminalNumber" VARCHAR(255) NULL');
-        logSuccess('Added terminalNumber column to Users table');
-      } catch (err) {
-        logWarning(`Could not ensure terminalNumber column: ${err.message}`);
-      }
-    }
-  } catch (err) {
-    logWarning(`Could not ensure terminal columns on Users table: ${err.message}`);
-  }
+  await ensureColumn({
+    table: 'Users',
+    column: 'terminalIP',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added terminalIP column to Users table',
+    existsMessage: 'terminalIP column already exists on Users table',
+    warnMessage: 'Could not ensure terminalIP column on Users table'
+  });
+  await ensureColumn({
+    table: 'Users',
+    column: 'terminalPort',
+    sqliteType: 'INTEGER NULL',
+    pgType: 'INTEGER NULL',
+    successMessage: 'Added terminalPort column to Users table',
+    existsMessage: 'terminalPort column already exists on Users table',
+    warnMessage: 'Could not ensure terminalPort column on Users table'
+  });
+  await ensureColumn({
+    table: 'Users',
+    column: 'terminalNumber',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added terminalNumber column to Users table',
+    existsMessage: 'terminalNumber column already exists on Users table',
+    warnMessage: 'Could not ensure terminalNumber column on Users table'
+  });
 };
 
-// Ensure zohoTaxId column exists on Users table (for SQLite / auto-sync disabled)
-const ensureZohoTaxIdColumn = async () => {
-  try {
-    if (DATABASE_SETTING === 'local') {
-      // SQLite syntax - Add zohoTaxId column
-      try {
-        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `zohoTaxId` VARCHAR(255) NULL');
-        logSuccess('Added zohoTaxId column to Users table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('zohoTaxId column already exists on Users table');
-      }
-    } else {
-      // PostgreSQL syntax - Add zohoTaxId column
-      try {
-        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "zohoTaxId" VARCHAR(255) NULL');
-        logSuccess('Added zohoTaxId column to Users table');
-      } catch (err) {
-        logWarning(`Could not ensure zohoTaxId column: ${err.message}`);
-      }
-    }
-  } catch (err) {
-    logWarning(`Could not ensure zohoTaxId column on Users table: ${err.message}`);
-  }
-};
+// Ensure zohoTaxId column exists on Users table
+const ensureZohoTaxIdColumn = async () =>
+  ensureColumn({
+    table: 'Users',
+    column: 'zohoTaxId',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added zohoTaxId column to Users table',
+    existsMessage: 'zohoTaxId column already exists on Users table',
+    warnMessage: 'Could not ensure zohoTaxId column on Users table'
+  });
 
-// Ensure taxId column exists on SaleItems table (for SQLite / auto-sync disabled)
+// Ensure taxId column exists on SaleItems table
 // This persists the Zoho Books tax_id used on each line item (needed for retry sync and historical data).
-const ensureSaleItemTaxIdColumn = async () => {
-  try {
-    if (DATABASE_SETTING === 'local') {
-      // SQLite syntax - Add taxId column
-      try {
-        await sequelize.query('ALTER TABLE `SaleItems` ADD COLUMN `taxId` VARCHAR(255) NULL');
-        logSuccess('Added taxId column to SaleItems table');
-      } catch (err) {
-        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
-          throw err;
-        }
-        logInfo('taxId column already exists on SaleItems table');
-      }
-    } else {
-      // PostgreSQL syntax - Add taxId column
-      try {
-        await sequelize.query('ALTER TABLE "SaleItems" ADD COLUMN IF NOT EXISTS "taxId" VARCHAR(255) NULL');
-        logSuccess('Added taxId column to SaleItems table');
-      } catch (err) {
-        logWarning(`Could not ensure taxId column on SaleItems table: ${err.message}`);
-      }
-    }
-  } catch (err) {
-    logWarning(`Could not ensure taxId column on SaleItems table: ${err.message}`);
-  }
-};
+const ensureSaleItemTaxIdColumn = async () =>
+  ensureColumn({
+    table: 'SaleItems',
+    column: 'taxId',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added taxId column to SaleItems table',
+    existsMessage: 'taxId column already exists on SaleItems table',
+    warnMessage: 'Could not ensure taxId column on SaleItems table'
+  });
 
 // Admin user creation is handled by bootstrap login mechanism in authController.js
 // Bootstrap credentials: accounting@subzeroiceservices.com / dryice000

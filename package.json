@@ -8,7 +8,6 @@
     "dev": "npm run server && npm run frontend",
     "server": "cd server && npm run dev",
     "frontend": "cd client && npm run dev",
-    "setup-users": "cd server && npm run setup-users",
     "test-backend": "cd server && npm run test",
     "get-zoho-token": "cd server && npm run get-zoho-token",
     "build:client": "cd client && npm run build"

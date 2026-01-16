@@ -1,9 +1,6 @@
 import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer } from '../models/index.js';
-import { processPayment, processAchPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
-import { processTerminalPayment } from '../services/paxTerminalService.js';
-import { processTerminalPayment as processEBizChargePayment } from '../services/ebizchargeTerminalService.js';
-import { processBluetoothPayment } from '../services/bbposService.js';
+import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
 import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
@@ -30,7 +27,7 @@ const resolveTaxPercentage = (user) => {
 
 export const createSale = async (req, res) => {
   try {
-    const { items, customerId, paymentType, paymentDetails, notes, terminalIP, useTerminal, useValorApi, useEBizChargeTerminal, useBluetoothReader, bluetoothPayload, customerTaxPreference, useStoredPayment, paymentProfileId, terminalNumber, valorTransactionId } = req.body;
+    const { items, customerId, paymentType, paymentDetails, notes, useValorApi, useOpaqueData, useBluetoothReader, bluetoothPayload, opaqueDataPayload, customerTaxPreference, useStoredPayment, paymentProfileId, terminalNumber, valorTransactionId } = req.body;
     const userId = req.user.id;
     const locationId = req.user.locationId;
     const locationName = req.user.locationName;
@@ -302,25 +299,28 @@ export const createSale = async (req, res) => {
       // Update paymentType to actual type determined from profile
       paymentType = actualPaymentType;
     } else if (paymentType === 'credit_card' || paymentType === 'debit_card') {
-      if (useBluetoothReader) {
-        // Bluetooth Card Reader mode - process using opaqueData from reader
-        if (!bluetoothPayload || !bluetoothPayload.descriptor || !bluetoothPayload.value) {
-          return sendValidationError(res, 'Bluetooth reader payment data is required. Please pair and scan the card with the Bluetooth reader.');
+      // Accept.js / opaqueData flow (preferred for PCI); keep legacy flags for backward compatibility.
+      const usingOpaqueData = !!useOpaqueData || !!useBluetoothReader;
+      const opaquePayload = opaqueDataPayload || bluetoothPayload;
+
+      if (usingOpaqueData) {
+        if (!opaquePayload || !opaquePayload.descriptor || !opaquePayload.value) {
+          return sendValidationError(res, 'Encrypted card payload (opaqueData) is required for this payment method.');
         }
 
-        paymentResult = await processBluetoothPayment({
+        paymentResult = await processOpaqueDataPayment({
           amount: total,
           opaqueData: {
-            descriptor: bluetoothPayload.descriptor,
-            value: bluetoothPayload.value
+            descriptor: opaquePayload.descriptor,
+            value: opaquePayload.value
           },
-          deviceSessionId: bluetoothPayload.sessionId,
+          deviceSessionId: opaquePayload.sessionId,
           invoiceNumber: `POS-${Date.now()}`,
           description: `POS Sale - ${locationName}`
         });
 
         if (!paymentResult.success) {
-          return sendError(res, 'Bluetooth reader payment processing failed', 400, paymentResult.error);
+          return sendError(res, 'Card payment processing failed', 400, paymentResult.error);
         }
 
         transactionId = paymentResult.transactionId;
@@ -343,70 +343,6 @@ export const createSale = async (req, res) => {
           transactionId: valorTransactionId,
           message: 'Payment processed successfully via Valor API'
         };
-      } else if (useEBizChargeTerminal) {
-        // EBizCharge Terminal mode - process through EBizCharge WiFi terminal
-        if (!terminalIP) {
-          return sendValidationError(res, 'Terminal IP address is required for EBizCharge terminal payments');
-        }
-        
-        paymentResult = await processEBizChargePayment({
-          amount: total,
-          invoiceNumber: `POS-${Date.now()}`,
-          description: `POS Sale - ${locationName}`
-        }, terminalIP);
-
-        if (!paymentResult.success) {
-          return sendError(res, 'EBizCharge terminal payment processing failed', 400, paymentResult.error);
-        }
-
-        transactionId = paymentResult.transactionId;
-      } else if (useTerminal) {
-        // PAX Terminal mode - process through Authorize.Net Valor Connect (cloud-to-cloud)
-        // Flow: App -> Authorize.Net -> VP100 Terminal (via Valor Connect) -> Authorize.Net -> App (polling)
-        const { initiateTerminalPayment } = await import('../services/authorizeNetTerminalService.js');
-        
-        // Get terminalNumber from user settings (VP100 serial number registered in Valor Portal/Authorize.Net)
-        const terminalNumber = req.user.terminalNumber;
-        
-        if (!terminalNumber) {
-          return sendError(res, 'Terminal number is required for PAX WiFi terminal payments. Please configure your VP100 serial number in Settings. The terminal must be registered in Valor Portal/Authorize.Net.', 400);
-        }
-        
-        // Initiate payment request to Authorize.Net with terminalNumber
-        // Authorize.Net routes to VP100 via Valor Connect (WebSocket/TCP)
-        paymentResult = await initiateTerminalPayment({
-          amount: total,
-          invoiceNumber: `POS-${Date.now()}`,
-          description: `POS Sale - ${locationName}`
-        }, terminalNumber); // terminalNumber is the VP100 serial number
-
-        if (!paymentResult.success) {
-          console.error('❌ Terminal payment initiation failed:', {
-            error: paymentResult.error,
-            errorCode: paymentResult.errorCode,
-            terminalNumber: terminalNumber
-          });
-          return sendError(res, paymentResult.error || 'Failed to initiate terminal payment', 400, paymentResult);
-        }
-
-        // If payment is pending (waiting for terminal), return pending status
-        // Frontend will poll for status
-        if (paymentResult.pending) {
-          return res.status(202).json({
-            success: true,
-            pending: true,
-            message: paymentResult.message || 'Payment request sent to terminal. Waiting for customer to complete payment on VP100 device.',
-            data: {
-              transactionId: paymentResult.transactionId,
-              refId: paymentResult.refId,
-              status: 'pending',
-              sale: null // Sale will be created after payment confirmation
-            }
-          });
-        }
-
-        // If payment completed immediately (unlikely for terminal)
-        transactionId = paymentResult.transactionId;
       } else {
         // Card-not-present mode - process through API
         // Validation is now handled by middleware, but keep as backup

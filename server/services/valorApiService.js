@@ -43,28 +43,6 @@ const VALOR_CANCEL_URL = process.env.VALOR_CANCEL_URL || 'https://securelink-sta
 const VALOR_APP_ID = process.env.VALOR_APP_ID;
 const VALOR_APP_KEY = process.env.VALOR_APP_KEY;
 
-// Log which endpoint is being used (only once at startup)
-if (!global.VALOR_API_ENDPOINT_LOGGED) {
-  console.log(`💳 Valor Connect API endpoints configured (${process.env.NODE_ENV || 'development'})`);
-  console.log(`   Publish: ${VALOR_PUBLISH_URL}`);
-  console.log(`   Status: ${VALOR_TXN_STATUS_URL}`);
-  console.log(`   Cancel: ${VALOR_CANCEL_URL}`);
-  
-  // Check if credentials are configured
-  if (!VALOR_APP_ID || !VALOR_APP_KEY) {
-    console.error('❌ Valor API credentials NOT configured!');
-    console.error('   VALOR_APP_ID:', VALOR_APP_ID ? 'SET' : 'MISSING');
-    console.error('   VALOR_APP_KEY:', VALOR_APP_KEY ? 'SET' : 'MISSING');
-    console.error('   Please set VALOR_APP_ID and VALOR_APP_KEY in your .env file');
-  } else {
-    console.log('✅ Valor API credentials configured');
-    console.log(`   App ID: ${VALOR_APP_ID.substring(0, 10)}...`);
-    console.log(`   App Key: ${VALOR_APP_KEY.substring(0, 10)}...`);
-  }
-  
-  global.VALOR_API_ENDPOINT_LOGGED = true;
-}
-
 /**
  * Check if Valor API credentials are configured
  * @returns {Object} Validation result

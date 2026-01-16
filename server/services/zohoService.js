@@ -86,6 +86,11 @@ const getAccessToken = async () => {
   return accessToken;
 };
 
+// Intentionally exported for CLI/debug scripts (e.g. `npm run get-zoho-token`).
+export const getZohoAccessToken = async () => {
+  return await getAccessToken();
+};
+
 const makeZohoRequest = async (endpoint, method = 'GET', data = null, params = {}, retryCount = 0) => {
   const token = await getAccessToken();
   const url = `${ZOHO_BOOKS_API_BASE}${endpoint}`;
@@ -228,21 +233,6 @@ export const syncItemsFromZoho = async (options = {}) => {
   }
 };
 
-export const getItemById = async (itemId) => {
-  try {
-    const response = await makeZohoRequest(`/items/${itemId}`);
-    
-    if (response.code === 0) {
-      return response.item;
-    } else {
-      throw new Error(response.message || 'Failed to fetch item');
-    }
-  } catch (error) {
-    console.error(`Failed to fetch item ${itemId}:`, error.message);
-    throw error;
-  }
-};
-
 // Lookup a sales receipt by number (search_text) to recover missing IDs
 const findSalesReceiptByNumber = async (salesReceiptNumber) => {
   const params = {
@@ -259,22 +249,6 @@ const findSalesReceiptByNumber = async (salesReceiptNumber) => {
 
   const receipts = response.salesreceipts || [];
   return receipts[0] || null;
-};
-
-export const searchItems = async (searchText, filters = {}) => {
-  try {
-    const params = {
-      search_text: searchText,
-      filter_by: filters.filter_by || 'Status.Active',
-      ...filters
-    };
-    
-    const response = await makeZohoRequest('/items', 'GET', null, params);
-    return response.items || [];
-  } catch (error) {
-    console.error('Failed to search items:', error.message);
-    throw error;
-  }
 };
 
 export const createSalesReceipt = async (saleData) => {
@@ -705,86 +679,6 @@ export const getCustomerCards = async (customerId) => {
   }
 };
 
-export const createItem = async (itemData) => {
-  try {
-    const response = await makeZohoRequest('/items', 'POST', itemData);
-    
-    if (response.code === 0) {
-      return {
-        success: true,
-        item: response.item
-      };
-    } else {
-      console.error(`❌ Item creation failed: ${response.message}`);
-      return {
-        success: false,
-        error: response.message
-      };
-    }
-  } catch (error) {
-    console.error('Failed to create item in Zoho:', error.response?.data || error.message);
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message
-    };
-  }
-};
-
-export const updateItem = async (itemId, itemData) => {
-  try {
-    const response = await makeZohoRequest(`/items/${itemId}`, 'PUT', itemData);
-    
-    if (response.code === 0) {
-      return {
-        success: true,
-        item: response.item
-      };
-    } else {
-      console.error(`❌ Item update failed: ${response.message}`);
-      return {
-        success: false,
-        error: response.message
-      };
-    }
-  } catch (error) {
-    console.error('Failed to update item in Zoho:', error.response?.data || error.message);
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message
-    };
-  }
-};
-
-export const markItemActive = async (itemId) => {
-  try {
-    const response = await makeZohoRequest(`/items/${itemId}/active`, 'POST');
-    
-    if (response.code === 0) {
-      return { success: true, message: response.message };
-    } else {
-      return { success: false, error: response.message };
-    }
-  } catch (error) {
-    console.error('Failed to mark item as active:', error.message);
-    return { success: false, error: error.message };
-  }
-};
-
-export const markItemInactive = async (itemId) => {
-  try {
-    const response = await makeZohoRequest(`/items/${itemId}/inactive`, 'POST');
-    
-    if (response.code === 0) {
-      return { success: true, message: response.message };
-    } else {
-      return { success: false, error: response.message };
-    }
-  } catch (error) {
-    console.error('Failed to mark item as inactive:', error.message);
-    return { success: false, error: error.message };
-  }
-};
-
 export const getPricebooks = async () => {
   try {
     const pricebooks = await fetchAllPages('/pricebooks', {}, 'pricebooks');
@@ -1191,4 +1085,254 @@ export const getInvoiceById = async (invoiceId) => {
     }
     throw error;
   }
+};
+
+/**
+ * List sales orders (paginated).
+ * Uses Zoho Books API: GET /books/v3/salesorders
+ * @param {object} params - Zoho query params (filter_by, sort_column, etc.)
+ * @returns {Promise<Array>} Array of salesorders
+ */
+export const listSalesOrders = async (params = {}) => {
+  try {
+    const salesOrders = await fetchAllPages('/salesorders', params, 'salesorders');
+    return salesOrders || [];
+  } catch (error) {
+    console.error('❌ Failed to list sales orders from Zoho:', error.message);
+    throw error;
+  }
+};
+
+/**
+ * Update a sales order by ID.
+ * Uses Zoho Books API: PUT /books/v3/salesorders/{salesorder_id}
+ * @param {string} salesorderId
+ * @param {object} payload
+ * @param {object} params
+ * @returns {Promise<object>} Zoho response
+ */
+export const updateSalesOrder = async (salesorderId, payload, params = {}) => {
+  try {
+    const response = await makeZohoRequest(`/salesorders/${salesorderId}`, 'PUT', payload, params);
+    if (response.code === 0) return response;
+
+    const errorMsg = response.message || 'Failed to update sales order';
+    console.error(`❌ Failed to update sales order ${salesorderId}:`, errorMsg);
+    throw new Error(errorMsg);
+  } catch (error) {
+    console.error(`❌ Failed to update sales order ${salesorderId}:`, error.message);
+    if (error.response) {
+      console.error('   Response status:', error.response.status);
+      console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    throw error;
+  }
+};
+
+const normalizeName = (v) => String(v || '').trim().toLowerCase();
+
+const calcLineItemAmount = (li) => {
+  const itemTotal = parseFloat(li?.item_total);
+  if (!Number.isNaN(itemTotal) && Number.isFinite(itemTotal)) return itemTotal;
+
+  const qty = parseFloat(li?.quantity) || 0;
+  const rate = parseFloat(li?.rate) || 0;
+  const raw = qty * rate;
+  if (!Number.isFinite(raw)) return 0;
+  return raw;
+};
+
+const mapSalesOrderLineItemForUpdate = (li) => {
+  // Keep only fields relevant for update. line_item_id is critical to avoid duplication.
+  const mapped = {
+    line_item_id: li?.line_item_id,
+    item_id: li?.item_id,
+    name: li?.name,
+    description: li?.description,
+    rate: li?.rate,
+    quantity: li?.quantity,
+    discount: li?.discount,
+    tax_id: li?.tax_id,
+    unit: li?.unit
+  };
+
+  // Remove undefined keys to keep payload clean.
+  Object.keys(mapped).forEach((k) => {
+    if (mapped[k] === undefined) delete mapped[k];
+  });
+
+  return mapped;
+};
+
+/**
+ * Organize Zoho sales orders: move "Fuel Surcharge 4%" from a line item into an adjustment
+ * so it displays under Sub Total.
+ *
+ * Implementation notes:
+ * - We remove the matching line item from line_items (Zoho deletes it when omitted).
+ * - We compute Fuel Surcharge as 4% of Sub Total (excluding the fuel line item), then move it into `shipping_charge`
+ *   so it typically displays between Sub Total and Tax in Zoho templates.
+ * - We attempt to tax the shipping_charge using `shipping_charge_tax_id` (Zoho Books). If your org doesn't support
+ *   this field, Zoho will return an error and the order will be listed in `errors`.
+ * - We intentionally DO NOT trust existing fuel line-item amount; we recompute per the requested formula:
+ *   Fuel = subTotal * 0.04, Tax = (subTotal + Fuel) * 0.07, Total = subTotal + Fuel + Tax.
+ * - To preview the exact payloads without updating Zoho, call with dryRun=true. The response will include `payloads`.
+ */
+export const organizeZohoSalesOrdersFuelSurcharge = async (options = {}) => {
+  const {
+    filter_by = 'Status.Open',
+    sort_column = 'date',
+    sort_order,
+    search_text,
+    maxOrders = 500,
+    dryRun = false,
+    fuelItemName = 'Fuel Surcharge 4%'
+  } = options;
+
+  const params = {
+    filter_by,
+    sort_column
+  };
+  if (sort_order) params.sort_order = sort_order;
+  if (search_text) params.search_text = search_text;
+
+  const orders = await listSalesOrders(params);
+  const slice = Array.isArray(orders) ? orders.slice(0, Math.max(0, maxOrders)) : [];
+
+  const result = {
+    scanned: slice.length,
+    matched: 0,
+    updated: 0,
+    skipped: 0,
+    dryRun: !!dryRun,
+    errors: [],
+    // Only filled when dryRun=true so you can inspect what we'd send to Zoho.
+    payloads: []
+  };
+
+  // Backward compatible matching:
+  // Some existing orders may have the line item named "Fuel Surcharge" (without the percent).
+  const needles = Array.from(
+    new Set([fuelItemName, 'Fuel Surcharge'].map(normalizeName).filter(Boolean))
+  );
+
+  const round2 = (n) => parseFloat((parseFloat(n || 0) || 0).toFixed(2));
+
+  for (const so of slice) {
+    const salesorderId = so?.salesorder_id || so?.id;
+    if (!salesorderId) {
+      result.skipped++;
+      continue;
+    }
+
+    try {
+      const full = await getSalesOrderById(String(salesorderId));
+      if (!full || !Array.isArray(full.line_items)) {
+        result.skipped++;
+        continue;
+      }
+
+      const fuelItems = full.line_items.filter((li) => {
+        const name = normalizeName(li?.name || li?.item_name || li?.item?.name);
+        return needles.some((n) => name === n || name.includes(n));
+      });
+
+      // Detect orders that already have Fuel after tax (commonly represented via adjustment)
+      const existingAdj = parseFloat(full?.adjustment);
+      const hasExistingAdj = !Number.isNaN(existingAdj) && Number.isFinite(existingAdj) && existingAdj !== 0;
+      const existingDesc = String(full?.adjustment_description || '').trim();
+      const hasFuelInDesc = needles.some((n) => normalizeName(existingDesc).includes(n));
+
+      // We update when:
+      // - Fuel exists as a line item, OR
+      // - Fuel exists as an adjustment (Fuel after tax), OR
+      // - shipping_charge already equals a previous fuel value (we still recalc to correct it)
+      const hasFuelLineItem = fuelItems.length > 0;
+      const hasFuelAdjustment = hasExistingAdj && hasFuelInDesc;
+      if (!hasFuelLineItem && !hasFuelAdjustment) {
+        result.skipped++;
+        continue;
+      }
+
+      // Remove fuel line item if present (delete by omission)
+      const removedFuelLineItemId = hasFuelLineItem ? fuelItems[0]?.line_item_id : null;
+      const remaining = removedFuelLineItemId
+        ? full.line_items.filter((li) => li?.line_item_id !== removedFuelLineItemId)
+        : full.line_items;
+
+      if (!Array.isArray(remaining) || remaining.length === 0) {
+        result.skipped++;
+        continue;
+      }
+
+      // Compute subtotal EXCLUDING fuel line item (based on remaining items)
+      const computedSubTotal = round2(
+        remaining.reduce((sum, li) => sum + calcLineItemAmount(li), 0)
+      );
+
+      if (!Number.isFinite(computedSubTotal) || computedSubTotal <= 0) {
+        result.skipped++;
+        continue;
+      }
+
+      // Fuel surcharge = 4% of subtotal (requested)
+      const computedFuel = round2(computedSubTotal * 0.04);
+
+      // Determine a 7% tax_id from existing line items (preferred) or fallback to lookup by percentage
+      let taxId7 = null;
+      const firstTaxId = remaining.find(li => li?.tax_id)?.tax_id || null;
+      if (firstTaxId) {
+        taxId7 = String(firstTaxId).trim();
+      } else {
+        try {
+          const lookedUp = await getZohoTaxIdForPercentage(7);
+          if (lookedUp) taxId7 = String(lookedUp).trim();
+        } catch (e) {
+          // Best-effort; if we can't find it, we'll still update shipping_charge and let org settings decide tax on shipping.
+        }
+      }
+
+      // Build payload: Fuel goes into shipping_charge so it renders between Sub Total and Tax.
+      const updatePayload = {
+        customer_id: full.customer_id,
+        date: full.date,
+        line_items: remaining.map(mapSalesOrderLineItemForUpdate),
+        shipping_charge: computedFuel,
+        adjustment: 0.04,
+        adjustment_description: 'Fuel SurCharge 4%'
+      };
+
+      // Attempt to tax shipping at 7% so tax becomes (SubTotal + Fuel) * 0.07
+      if (taxId7) {
+        updatePayload.shipping_charge_tax_id = taxId7;
+      }
+
+      if (dryRun) {
+        result.matched++;
+        result.payloads.push({
+          salesorder_id: String(salesorderId),
+          salesorder_number: full?.salesorder_number || so?.salesorder_number || null,
+          computed: {
+            subTotal: computedSubTotal,
+            fuelSurcharge: computedFuel,
+            expectedTax: round2((computedSubTotal + computedFuel) * 0.07),
+            expectedTotal: round2(computedSubTotal + computedFuel + ((computedSubTotal + computedFuel) * 0.07))
+          },
+          payload: updatePayload
+        });
+        continue;
+      }
+
+      result.matched++;
+      await updateSalesOrder(String(salesorderId), updatePayload);
+      result.updated++;
+    } catch (err) {
+      result.errors.push({
+        salesorder_id: String(salesorderId),
+        message: err?.response?.data?.message || err?.message || 'Unknown error'
+      });
+    }
+  }
+
+  return result;
 };

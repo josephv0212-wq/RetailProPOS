@@ -1,4 +1,4 @@
-import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById } from '../services/zohoService.js';
+import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById, organizeZohoSalesOrdersFuelSurcharge as organizeZohoSalesOrdersFuelSurchargeService } from '../services/zohoService.js';
 import { Customer, Item, Sale } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
@@ -533,6 +533,43 @@ export const getInvoiceDetails = async (req, res) => {
       ...(isDevelopment && { 
         error: err.message,
         details: err.response?.data 
+      })
+    });
+  }
+};
+
+export const organizeZohoSalesOrdersFuelSurcharge = async (req, res) => {
+  try {
+    const {
+      filter_by,
+      sort_column,
+      sort_order,
+      search_text,
+      maxOrders,
+      dryRun,
+      fuelItemName
+    } = req.body || {};
+
+    const result = await organizeZohoSalesOrdersFuelSurchargeService({
+      filter_by,
+      sort_column,
+      sort_order,
+      search_text,
+      maxOrders,
+      dryRun,
+      fuelItemName
+    });
+
+    return sendSuccess(res, { result }, 'Zoho sales orders organized successfully');
+  } catch (err) {
+    console.error('❌ Organize Zoho sales orders (fuel surcharge) error:', err);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to organize Zoho sales orders',
+      ...(isDevelopment && {
+        error: err.message,
+        details: err.response?.data
       })
     });
   }

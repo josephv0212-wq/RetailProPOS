@@ -8,12 +8,6 @@ const AUTHORIZE_NET_ENDPOINT = process.env.NODE_ENV === 'production'
   ? 'https://api.authorize.net/xml/v1/request.api'  // Production endpoint
   : 'https://apitest.authorize.net/xml/v1/request.api';  // Sandbox endpoint (development)
 
-// Log which endpoint is being used (only once at startup)
-if (!global.AUTHORIZE_NET_ENDPOINT_LOGGED) {
-  console.log(`💳 Authorize.Net endpoint: ${AUTHORIZE_NET_ENDPOINT} (${process.env.NODE_ENV || 'development'})`);
-  global.AUTHORIZE_NET_ENDPOINT_LOGGED = true;
-}
-
 export const processPayment = async (paymentData) => {
   const { amount, cardNumber, expirationDate, cvv, description, invoiceNumber } = paymentData;
 
@@ -71,6 +65,93 @@ export const processPayment = async (paymentData) => {
     return {
       success: false,
       error: error.response?.data?.message || error.message
+    };
+  }
+};
+
+/**
+ * Process a card payment using Accept.js / Accept Mobile opaqueData.
+ * This is the preferred PCI-friendly approach (no raw PAN stored/handled long-term).
+ */
+export const processOpaqueDataPayment = async (paymentData) => {
+  const { amount, opaqueData, deviceSessionId, invoiceNumber, description } = paymentData;
+
+  const paymentAmount = parseFloat(amount);
+  if (isNaN(paymentAmount) || paymentAmount <= 0) {
+    return { success: false, error: `Invalid payment amount: ${amount}. Amount must be a positive number.` };
+  }
+
+  if (!opaqueData || !opaqueData.descriptor || !opaqueData.value) {
+    return {
+      success: false,
+      error: 'Invalid opaqueData. Both descriptor and value are required.'
+    };
+  }
+
+  const requestBody = {
+    createTransactionRequest: {
+      merchantAuthentication: {
+        name: process.env.AUTHORIZE_NET_API_LOGIN_ID,
+        transactionKey: process.env.AUTHORIZE_NET_TRANSACTION_KEY
+      },
+      transactionRequest: {
+        transactionType: 'authCaptureTransaction',
+        amount: paymentAmount.toFixed(2),
+        payment: {
+          opaqueData: {
+            dataDescriptor: opaqueData.descriptor,
+            dataValue: opaqueData.value
+          }
+        },
+        order: {
+          invoiceNumber: invoiceNumber || `POS-${Date.now()}`,
+          description: description || 'POS Sale'
+        }
+      }
+    }
+  };
+
+  if (deviceSessionId) {
+    requestBody.createTransactionRequest.transactionRequest.deviceSessionId = deviceSessionId;
+  }
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, requestBody, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const result = response.data.transactionResponse;
+
+    if (result && result.responseCode === '1') {
+      return {
+        success: true,
+        transactionId: result.transId,
+        authCode: result.authCode,
+        accountNumber: result.accountNumber,
+        message: result.messages?.[0]?.description || 'Transaction approved',
+        paymentMethod: 'opaque_data'
+      };
+    }
+
+    const errorMessage =
+      result?.errors?.[0]?.errorText ||
+      result?.messages?.[0]?.description ||
+      'Transaction failed';
+
+    return {
+      success: false,
+      error: errorMessage,
+      errorCode: result?.errors?.[0]?.errorCode,
+      responseCode: result?.responseCode
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error.response?.data?.message ||
+        error.response?.data?.messages?.[0]?.text ||
+        error.message ||
+        'Card payment processing failed'
     };
   }
 };

@@ -460,6 +460,25 @@ export const zohoAPI = {
       `/zoho/invoices/${encodeURIComponent(invoiceId)}`
     );
   },
+
+  organizeZohoSalesOrdersFuelSurcharge: async (data?: {
+    filter_by?: string;
+    sort_column?: string;
+    sort_order?: string;
+    search_text?: string;
+    maxOrders?: number;
+    dryRun?: boolean;
+    fuelItemName?: string;
+  }) => {
+    return apiRequest<{ result: any }>(
+      '/zoho/salesorders/organize-fuel-surcharge',
+      {
+        method: 'POST',
+        body: JSON.stringify(data || {}),
+      },
+      true
+    );
+  },
 };
 
 // Payment Status API (for terminal payments)

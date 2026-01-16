@@ -1,11 +1,13 @@
 /**
  * Database Configuration
- * Manages the Datasetting variable to determine database type
+ * Manages the database setting variable to determine database type
  * - 'local' = SQLite database
  * - 'cloud' = PostgreSQL database
  */
 
-// Get Datasetting from environment variable or localStorage, default to 'cloud'
+const STORAGE_KEYS = ['DatabaseSetting', 'Datasetting'] as const;
+
+// Get database setting from environment variable or localStorage, default to 'cloud'
 const getDatabaseSetting = (): string => {
   // Check environment variable first (for build-time configuration)
   if (import.meta.env.VITE_DATABASE_SETTING) {
@@ -13,26 +15,30 @@ const getDatabaseSetting = (): string => {
   }
   
   // Check localStorage (for runtime configuration)
-  const stored = localStorage.getItem('Datasetting');
-  if (stored) {
-    return stored.toLowerCase();
+  for (const key of STORAGE_KEYS) {
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      return stored.toLowerCase();
+    }
   }
   
   // Default to 'cloud' (PostgreSQL)
   return 'cloud';
 };
 
-// Set Datasetting in localStorage
+// Set database setting in localStorage
 export const setDatabaseSetting = (setting: string): boolean => {
   const normalized = setting.toLowerCase();
   if (normalized === 'local' || normalized === 'cloud') {
+    // Prefer the correct key, but keep backward compatibility for existing installs.
+    localStorage.setItem('DatabaseSetting', normalized);
     localStorage.setItem('Datasetting', normalized);
     return true;
   }
   return false;
 };
 
-// Get current Datasetting
+// Get current database setting
 export const getDatabaseSettingValue = (): string => {
   return getDatabaseSetting();
 };

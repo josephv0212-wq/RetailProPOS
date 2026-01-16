@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Printer, Loader2, CreditCard, CheckCircle2, XCircle } from 'lucide-react';
 import { useAlert } from '../contexts/AlertContext';
-import { printerAPI, authAPI, paymentAPI } from '../../services/api';
+import { printerAPI, authAPI, paymentAPI, zohoAPI } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -19,6 +19,7 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
   const { showToast } = useToast();
   const [printerStatus, setPrinterStatus] = useState<PrinterStatus>('checking');
   const [isTestingPrint, setIsTestingPrint] = useState(false);
+  const [isOrganizingZohoSalesOrders, setIsOrganizingZohoSalesOrders] = useState(false);
 
   // Check printer status on mount
   useEffect(() => {
@@ -77,6 +78,41 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
   };
 
   const printerConfig = getPrinterStatusConfig();
+  const isAdmin = userRole === 'admin';
+
+  const handleOrganizeZohoSalesOrders = async () => {
+    if (!isAdmin || isOrganizingZohoSalesOrders) return;
+    const confirmed = window.confirm(
+      'This will fetch Zoho sales orders, find ones with "Fuel Surcharge 4%", and update them so the surcharge appears under Sub Total. Continue?'
+    );
+    if (!confirmed) return;
+
+    setIsOrganizingZohoSalesOrders(true);
+    try {
+      const response = await zohoAPI.organizeZohoSalesOrdersFuelSurcharge({
+        filter_by: 'Status.Open',
+        maxOrders: 500,
+        dryRun: false,
+        fuelItemName: 'Fuel Surcharge 4%',
+      });
+
+      if (response.success) {
+        const r = (response.data as any)?.result;
+        showToast(
+          `Zoho sales orders organized. Scanned ${r?.scanned ?? 0}, matched ${r?.matched ?? 0}, updated ${r?.updated ?? 0}, errors ${r?.errors?.length ?? 0}.`,
+          'success',
+          6000
+        );
+      } else {
+        showToast(response.message || 'Failed to organize Zoho sales orders', 'error', 6000);
+      }
+    } catch (error: any) {
+      console.error('Error organizing Zoho sales orders:', error);
+      showToast(error?.message || 'Failed to organize Zoho sales orders', 'error', 6000);
+    } finally {
+      setIsOrganizingZohoSalesOrders(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-8">
@@ -164,6 +200,39 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
           </div>
 
         </div>
+
+        {/* Admin Tools Section */}
+        {isAdmin && (
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 shadow-sm">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              Admin Tools
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Maintenance actions that affect Zoho and system data.
+            </p>
+
+            <div className="space-y-3">
+              <button
+                onClick={handleOrganizeZohoSalesOrders}
+                disabled={isOrganizingZohoSalesOrders}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isOrganizingZohoSalesOrders ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Organizing...</span>
+                  </>
+                ) : (
+                  <span>Organize Zoho Sales Order</span>
+                )}
+              </button>
+
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                Finds sales orders containing <strong>Fuel Surcharge 4%</strong> (or <strong>Fuel Surcharge</strong>) as a line item and recalculates it as <strong>4% of Sub Total</strong>, then moves it to <strong>shipping_charge</strong> so it appears under Sub Total before tax.
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* System Information Section */}
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 shadow-sm">
