@@ -4,7 +4,7 @@ import { processPayment, processAchPayment, calculateCreditCardFee, chargeCustom
 import { processTerminalPayment } from '../services/paxTerminalService.js';
 import { processTerminalPayment as processEBizChargePayment } from '../services/ebizchargeTerminalService.js';
 import { processBluetoothPayment } from '../services/bbposService.js';
-import { createSalesReceipt, getCustomerById as getZohoCustomerById } from '../services/zohoService.js';
+import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
@@ -42,6 +42,20 @@ export const createSale = async (req, res) => {
     // But set to 0 if customer is tax exempt
     const userTaxPercentage = isTaxExempt ? 0 : resolveTaxPercentage(req.user);
     const taxRate = userTaxPercentage / 100;
+
+    // Resolve the Zoho tax_id that corresponds to the user's/location tax rate.
+    // This ensures Zoho applies the correct tax (even if individual items don't carry a matching tax_id).
+    let userZohoTaxId = null;
+    if (!isTaxExempt && userTaxPercentage > 0) {
+      try {
+        userZohoTaxId = await getZohoTaxIdForPercentage(userTaxPercentage);
+        if (!userZohoTaxId) {
+          console.warn(`⚠️ No Zoho tax_id found for user tax rate ${userTaxPercentage}%. Falling back to tax_percentage only.`);
+        }
+      } catch (taxLookupErr) {
+        console.warn(`⚠️ Failed to lookup Zoho tax_id for user tax rate ${userTaxPercentage}%: ${taxLookupErr.message}`);
+      }
+    }
     
 
     // Validation is now handled by middleware, but keep as backup
@@ -74,8 +88,6 @@ export const createSale = async (req, res) => {
       const lineSubtotal = price * quantity;
       // Use user's location tax rate instead of item's tax percentage
       const itemTax = lineSubtotal * taxRate;
-      // Only send Zoho tax_id when it matches the applied tax rate; otherwise let Zoho use our explicit percentage
-      const includeTaxId = item.taxId && Math.abs((parseFloat(item.taxPercentage) || 0) - userTaxPercentage) < 0.0001;
       
       subtotal += lineSubtotal;
       taxAmount += itemTax;
@@ -89,7 +101,8 @@ export const createSale = async (req, res) => {
         taxPercentage: userTaxPercentage, // Use user's location tax rate
         taxAmount: itemTax,
         lineTotal: lineSubtotal + itemTax,
-        taxId: includeTaxId ? item.taxId : null
+        // Send the user's/location tax_id for taxable line items, so Zoho uses the correct tax rule.
+        taxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null
       });
     }
 

@@ -10,6 +10,7 @@ const RETRY_DELAY = 2000;
 const DEFAULT_PER_PAGE = 200;
 
 import { tokenCache } from '../utils/cache.js';
+import { zohoCache } from '../utils/cache.js';
 
 let accessToken = null;
 let tokenExpiry = null;
@@ -829,6 +830,15 @@ export const getItemsFromPricebookByName = async (pricebookName) => {
 
 export const getTaxRates = async (options = {}) => {
   try {
+    // Cache tax rates (they change rarely). Keeps checkout fast.
+    const cacheKey = 'zoho_tax_rates_v1';
+    if (!options?.filter_by && !options?.params) {
+      const cached = zohoCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     // Build params - organization_id is added automatically by makeZohoRequest
     // Only add filter_by if explicitly provided
     const params = {};
@@ -874,7 +884,12 @@ export const getTaxRates = async (options = {}) => {
       
       return mappedTax;
     });
-    
+
+    if (!options?.filter_by && !options?.params) {
+      // 30 minutes
+      zohoCache.set(cacheKey, mappedTaxes, 30 * 60 * 1000);
+    }
+
     return mappedTaxes;
   } catch (error) {
     console.error('❌ Failed to fetch tax rates from Zoho:', error.message);
@@ -884,6 +899,32 @@ export const getTaxRates = async (options = {}) => {
     }
     throw error;
   }
+};
+
+/**
+ * Resolve a Zoho tax_id from a tax percentage (best-effort).
+ * Used to attach the user's/location tax_id to sales receipt line items.
+ * @param {number|string} taxPercentage
+ * @returns {Promise<string|null>}
+ */
+export const getZohoTaxIdForPercentage = async (taxPercentage) => {
+  const pct = parseFloat(taxPercentage);
+  if (Number.isNaN(pct) || !Number.isFinite(pct) || pct <= 0) return null;
+
+  const taxes = await getTaxRates();
+  if (!Array.isArray(taxes) || taxes.length === 0) return null;
+
+  // Prefer active taxes that match by percentage (within a tiny tolerance)
+  const matches = taxes.filter(t => {
+    const tp = parseFloat(t?.taxPercentage);
+    return Number.isFinite(tp) && Math.abs(tp - pct) < 0.0001;
+  });
+
+  if (matches.length === 0) return null;
+
+  const active = matches.find(t => t?.isActive);
+  const chosen = active || matches[0];
+  return chosen?.taxId || null;
 };
 
 /**
