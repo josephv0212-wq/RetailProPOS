@@ -280,9 +280,11 @@ export const searchItems = async (searchText, filters = {}) => {
 export const createSalesReceipt = async (saleData) => {
   const { 
     customerId, // This MUST be the customer's zohoId from Zoho Books
-    date, 
+    date,
+    receipt_date,
     lineItems, 
     locationId,
+    location_id,
     locationName,
     customerLocation, // Customer's location from Zoho (place_of_contact) - used to enforce correct tax rate
     taxAmount,
@@ -290,7 +292,18 @@ export const createSalesReceipt = async (saleData) => {
     total,
     paymentType,
     notes,
-    saleId
+    saleId,
+    // Optional Zoho fields/params
+    zohoTaxId, // preferred tax_id to apply to taxable line items
+    receipt_number,
+    receiptNumber,
+    ignore_auto_number_generation,
+    ignoreAutoNumberGeneration,
+    can_send_in_mail,
+    canSendInMail,
+    deposit_to_account_id,
+    depositToAccountId,
+    terms
   } = saleData;
 
   // Validate that customerId is provided (must be Zoho customer ID)
@@ -320,6 +333,29 @@ export const createSalesReceipt = async (saleData) => {
   const processingFee = parseFloat(ccFee || 0) || 0;
   const expectedTotal = parseFloat(total || 0);
 
+  // Zoho allows forcing the receipt number when auto-numbering is disabled.
+  const forcedReceiptNumber =
+    (receipt_number && String(receipt_number).trim() !== '' ? String(receipt_number).trim() : null) ||
+    (receiptNumber && String(receiptNumber).trim() !== '' ? String(receiptNumber).trim() : null);
+  const ignoreAutoNumber =
+    (ignore_auto_number_generation !== undefined ? !!ignore_auto_number_generation : undefined) ??
+    (ignoreAutoNumberGeneration !== undefined ? !!ignoreAutoNumberGeneration : undefined);
+  const resolvedCanSendInMail =
+    (can_send_in_mail !== undefined ? !!can_send_in_mail : undefined) ??
+    (canSendInMail !== undefined ? !!canSendInMail : undefined);
+
+  if (ignoreAutoNumber && !forcedReceiptNumber) {
+    console.error('❌ Cannot create sales receipt: ignore_auto_number_generation=true requires receipt_number');
+    return {
+      success: false,
+      error: 'receipt_number is required when ignore_auto_number_generation is true'
+    };
+  }
+
+  const resolvedDate = date || receipt_date || null;
+  const resolvedLocationId = location_id || locationId || null;
+  const resolvedDepositToAccountId = deposit_to_account_id || depositToAccountId || null;
+
   // Use customer's location (place_of_contact) if available to enforce correct tax rate
   // Zoho uses place_of_contact to determine which tax rate to apply
   // If customer has a different assigned tax rate, we must use their location
@@ -327,34 +363,51 @@ export const createSalesReceipt = async (saleData) => {
 
   const salesReceiptData = {
     customer_id: customerId, // Zoho Books customer ID (contact_id from Zoho)
-    salesreceipt_number: `POS-${saleId}`,
-    date: date || new Date().toISOString().split('T')[0],
+    salesreceipt_number: forcedReceiptNumber || `POS-${saleId}`,
+    date: resolvedDate || new Date().toISOString().split('T')[0],
     payment_mode: paymentMode,
     line_items: lineItems.map(item => {
       const taxRate = Number(item.taxPercentage ?? 0);
       const isTaxable = !Number.isNaN(taxRate) && taxRate > 0;
+      const effectiveTaxId = (item.taxId || zohoTaxId || null) ? String(item.taxId || zohoTaxId).trim() : null;
       const lineItem = {
         name: item.itemName || item.name || 'Item',
         description: item.description || '',
-        rate: parseFloat(item.price),
-        quantity: parseFloat(item.quantity),
+        rate: parseFloat(item.rate ?? item.price),
+        quantity: parseFloat(item.quantity ?? 1),
         is_taxable: isTaxable,
         tax_percentage: isTaxable ? taxRate : 0
       };
       // Only include item_id if it exists (Zoho allows line items without item_id)
-      if (item.zohoItemId) {
+      if (item.item_id) {
+        lineItem.item_id = item.item_id;
+      } else if (item.zohoItemId) {
         lineItem.item_id = item.zohoItemId;
       }
       
       // If we know the tax for this item, let Zoho calculate it so totals match the POS
-      if (isTaxable && item.taxId) {
-        lineItem.tax_id = item.taxId;
+      if (isTaxable && effectiveTaxId) {
+        lineItem.tax_id = effectiveTaxId;
       }
       
       return lineItem;
     }),
     notes: notes || `Sale from POS - Location: ${locationName || locationId || 'Unknown'}`
   };
+
+  // Zoho Books: associate the receipt with a specific location (if locations feature is enabled)
+  if (resolvedLocationId && String(resolvedLocationId).trim() !== '') {
+    salesReceiptData.location_id = String(resolvedLocationId).trim();
+  }
+
+  // Zoho Books: deposit account for the received payment (optional)
+  if (resolvedDepositToAccountId && String(resolvedDepositToAccountId).trim() !== '') {
+    salesReceiptData.deposit_to_account_id = String(resolvedDepositToAccountId).trim();
+  }
+
+  if (terms && String(terms).trim() !== '') {
+    salesReceiptData.terms = String(terms);
+  }
 
   // Set place_of_contact to customer's location to enforce correct tax rate
   // This ensures Zoho applies the tax rate associated with the customer's location
@@ -397,7 +450,11 @@ export const createSalesReceipt = async (saleData) => {
     console.log(`➡️ Sending Zoho sales receipt for POS-${saleId}`);
     console.log(JSON.stringify(salesReceiptData, null, 2));
 
-    const response = await makeZohoRequest('/salesreceipts', 'POST', salesReceiptData);
+    const zohoParams = {};
+    if (ignoreAutoNumber !== undefined) zohoParams.ignore_auto_number_generation = ignoreAutoNumber;
+    if (resolvedCanSendInMail !== undefined) zohoParams.can_send_in_mail = resolvedCanSendInMail;
+
+    const response = await makeZohoRequest('/salesreceipts', 'POST', salesReceiptData, zohoParams);
     
     if (response.code === 0) {
       const salesReceipt = response.salesreceipt || {};

@@ -9,6 +9,7 @@ interface User {
   locationId?: string;
   locationName?: string;
   taxRate?: number;
+  zohoTaxId?: string | null;
   role: 'admin' | 'cashier';
   status: 'active' | 'pending';
 }
@@ -18,6 +19,12 @@ interface Location {
   name: string;
   taxRate: number;
   isPrimary?: boolean;
+}
+
+interface Tax {
+  taxId: string;
+  taxName: string;
+  taxPercentage: number;
 }
 
 interface Item {
@@ -36,14 +43,17 @@ interface AdminPageProps {
 export function AdminPage({ currentUser }: AdminPageProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [taxes, setTaxes] = useState<Tax[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [isLoadingLocations, setIsLoadingLocations] = useState(false);
+  const [isLoadingTaxes, setIsLoadingTaxes] = useState(false);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [isSyncingZoho, setIsSyncingZoho] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editLocationId, setEditLocationId] = useState<string>('');
   const [editTaxRate, setEditTaxRate] = useState<number>(0);
+  const [editZohoTaxId, setEditZohoTaxId] = useState<string>('');
   
   const { showToast } = useToast();
 
@@ -70,6 +80,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
               locationId: u.locationId,
               locationName: u.locationName,
               taxRate: u.taxPercentage,
+              zohoTaxId: u.zohoTaxId ?? null,
               role: u.role,
               status: u.isActive ? 'active' : 'pending',
             }));
@@ -118,6 +129,27 @@ export function AdminPage({ currentUser }: AdminPageProps) {
         console.error('Failed to load locations:', err);
       } finally {
         setIsLoadingLocations(false);
+      }
+
+      // Load taxes (Zoho Books settings/taxes)
+      setIsLoadingTaxes(true);
+      try {
+        const response = await zohoAPI.getTaxRates();
+        if (response.success && response.data?.taxes) {
+          const transformedTaxes: Tax[] = response.data.taxes
+            .map((t: any) => ({
+              taxId: String(t.taxId ?? t.tax_id ?? ''),
+              taxName: String(t.taxName ?? t.tax_name ?? 'Tax'),
+              taxPercentage: Number(t.taxPercentage ?? t.tax_percentage ?? 0),
+            }))
+            .filter(t => t.taxId && Number.isFinite(t.taxPercentage))
+            .sort((a, b) => a.taxName.localeCompare(b.taxName));
+          setTaxes(transformedTaxes);
+        }
+      } catch (err) {
+        console.error('Failed to load taxes:', err);
+      } finally {
+        setIsLoadingTaxes(false);
       }
 
       // Load items
@@ -228,7 +260,17 @@ export function AdminPage({ currentUser }: AdminPageProps) {
     const user = users.find(u => u.id === userId);
     setEditingUserId(userId);
     setEditLocationId(user?.locationId || '');
-    setEditTaxRate(user?.taxRate || 0);
+    const userTaxRate = user?.taxRate || 0;
+    setEditTaxRate(userTaxRate);
+
+    // Prefer stored zohoTaxId; fallback to first tax matching by percentage.
+    const storedId = user?.zohoTaxId ? String(user.zohoTaxId) : '';
+    if (storedId) {
+      setEditZohoTaxId(storedId);
+    } else {
+      const match = taxes.find(t => Math.abs(t.taxPercentage - userTaxRate) < 0.0001);
+      setEditZohoTaxId(match?.taxId || '');
+    }
   };
 
   const handleLocationChange = (locationId: string) => {
@@ -239,6 +281,14 @@ export function AdminPage({ currentUser }: AdminPageProps) {
     }
   };
 
+  const handleTaxChange = (taxId: string) => {
+    setEditZohoTaxId(taxId);
+    const tax = taxes.find(t => t.taxId === taxId);
+    if (tax) {
+      setEditTaxRate(tax.taxPercentage);
+    }
+  };
+
   const handleSaveLocation = async (userId: string) => {
     const location = locations.find(l => l.id === editLocationId);
     try {
@@ -246,6 +296,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
         locationId: editLocationId,
         locationName: location?.name,
         taxPercentage: editTaxRate,
+        zohoTaxId: editZohoTaxId || null,
       });
       if (response.success) {
         setUsers(users.map(u => 
@@ -254,7 +305,8 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                 ...u, 
                 locationId: editLocationId, 
                 locationName: location?.name,
-                taxRate: editTaxRate 
+                taxRate: editTaxRate,
+                zohoTaxId: editZohoTaxId || null,
               } 
             : u
         ));
@@ -273,6 +325,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
     setEditingUserId(null);
     setEditLocationId('');
     setEditTaxRate(0);
+    setEditZohoTaxId('');
   };
 
   const handleImageUpload = async (itemId: string, event: ChangeEvent<HTMLInputElement>) => {
@@ -403,15 +456,21 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                       
                       <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
                         {editingUserId === user.id ? (
-                          <input
-                            type="number"
-                            value={editTaxRate}
-                            onChange={(e) => setEditTaxRate(parseFloat(e.target.value) || 0)}
-                            step="0.01"
-                            min="0"
-                            max="100"
-                            className="w-20 px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
-                          />
+                          <select
+                            value={editZohoTaxId}
+                            onChange={(e) => handleTaxChange(e.target.value)}
+                            disabled={isLoadingTaxes}
+                            className="min-w-[220px] px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                          >
+                            <option value="">
+                              {isLoadingTaxes ? 'Loading taxes...' : 'Select tax rate'}
+                            </option>
+                            {taxes.map(t => (
+                              <option key={t.taxId} value={t.taxId}>
+                                {t.taxName} ({t.taxPercentage.toFixed(2)}%)
+                              </option>
+                            ))}
+                          </select>
                         ) : (
                           <span className="text-gray-900 dark:text-white">{user.taxRate ? `${user.taxRate.toFixed(2)}%` : '—'}</span>
                         )}

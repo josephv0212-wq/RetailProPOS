@@ -133,6 +133,7 @@ export const authAPI = {
     locationId: string;
     locationName: string;
     taxPercentage: number;
+    zohoTaxId?: string | null;
   }) => {
     return apiRequest('/auth/register', {
       method: 'POST',
@@ -170,6 +171,7 @@ export const authAPI = {
     locationId: string;
     locationName: string;
     taxPercentage: number;
+    zohoTaxId?: string | null;
   }) => {
     return apiRequest('/auth/users', {
       method: 'POST',
@@ -183,6 +185,7 @@ export const authAPI = {
     locationId?: string;
     locationName?: string;
     taxPercentage?: number;
+    zohoTaxId?: string | null;
   }) => {
     return apiRequest(`/auth/users/${id}`, {
       method: 'PATCH',

@@ -39,6 +39,11 @@ export const SaleItem = sequelize.define('SaleItem', {
     type: DataTypes.DECIMAL(10, 2),
     defaultValue: 0
   },
+  // Zoho Books tax_id used when creating sales receipts (persists the user's/location tax rule)
+  taxId: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
   lineTotal: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false

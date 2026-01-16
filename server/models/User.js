@@ -31,6 +31,12 @@ export const User = sequelize.define('User', {
     type: DataTypes.DECIMAL(5, 2),
     defaultValue: 7.5
   },
+  // Zoho Books Settings > Taxes tax_id that corresponds to this user's location tax rate
+  // Used when creating Zoho sales receipts so line items get the correct tax rule.
+  zohoTaxId: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
   isActive: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

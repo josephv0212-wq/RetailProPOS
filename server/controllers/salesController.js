@@ -43,10 +43,10 @@ export const createSale = async (req, res) => {
     const userTaxPercentage = isTaxExempt ? 0 : resolveTaxPercentage(req.user);
     const taxRate = userTaxPercentage / 100;
 
-    // Resolve the Zoho tax_id that corresponds to the user's/location tax rate.
-    // This ensures Zoho applies the correct tax (even if individual items don't carry a matching tax_id).
-    let userZohoTaxId = null;
-    if (!isTaxExempt && userTaxPercentage > 0) {
+    // Prefer the user's saved Zoho tax_id; fallback to lookup-by-percentage.
+    // This ensures Zoho applies the correct tax rule for the user's location.
+    let userZohoTaxId = req.user?.zohoTaxId || null;
+    if (!userZohoTaxId && !isTaxExempt && userTaxPercentage > 0) {
       try {
         userZohoTaxId = await getZohoTaxIdForPercentage(userTaxPercentage);
         if (!userZohoTaxId) {
@@ -518,6 +518,8 @@ export const createSale = async (req, res) => {
           total: parseFloat(sale.total),
           paymentType: sale.paymentType,
           notes: sale.notes,
+          // Provide user's/location Zoho tax_id so the Zoho service can enforce tax_id on all taxable line items.
+          zohoTaxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null,
           saleId: sale.id
         });
 
@@ -692,6 +694,23 @@ export const retryZohoSync = async (req, res) => {
       return sendValidationError(res, `Customer "${sale.customer.contactName}" has no Zoho ID. Please sync customers from Zoho first.`);
     }
 
+    // Prefer the user's saved Zoho tax_id; fallback to lookup-by-percentage.
+    // Retry-sync may run long after the original sale; if historical SaleItems didn't persist taxId,
+    // this ensures Zoho sales receipts still receive the correct tax rule.
+    const saleTaxPct = parseFloat(sale.taxPercentage);
+    const isTaxableSale = !Number.isNaN(saleTaxPct) && Number.isFinite(saleTaxPct) && saleTaxPct > 0;
+    let userZohoTaxId = req.user?.zohoTaxId || null;
+    if (!userZohoTaxId && isTaxableSale) {
+      try {
+        userZohoTaxId = await getZohoTaxIdForPercentage(saleTaxPct);
+        if (!userZohoTaxId) {
+          console.warn(`⚠️ No Zoho tax_id found for sale tax rate ${saleTaxPct}%. Falling back to tax_percentage only.`);
+        }
+      } catch (taxLookupErr) {
+        console.warn(`⚠️ Failed to lookup Zoho tax_id for sale tax rate ${saleTaxPct}%: ${taxLookupErr.message}`);
+      }
+    }
+
     // Only customer contacts are eligible for Zoho sales receipts
     const contactType = sale.customer.contactType?.toLowerCase();
     if (contactType && contactType !== 'customer') {
@@ -711,7 +730,8 @@ export const retryZohoSync = async (req, res) => {
       taxPercentage: item.taxPercentage,
       taxAmount: item.taxAmount,
       lineTotal: item.lineTotal,
-      taxId: item.taxId
+      // If historical SaleItems didn't persist taxId, inject the current user's/location tax_id.
+      taxId: isTaxableSale ? (item.taxId || userZohoTaxId || null) : null
     }));
 
     // Fetch customer's location from Zoho to enforce correct tax rate
@@ -755,6 +775,8 @@ export const retryZohoSync = async (req, res) => {
       total: parseFloat(sale.total),
       paymentType: sale.paymentType,
       notes: sale.notes,
+      // Ensure Zoho line items always get tax_id when applicable (see mapping in zohoService)
+      zohoTaxId: isTaxableSale ? (userZohoTaxId || null) : null,
       saleId: sale.id
     });
 

@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { User } from '../models/index.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
-import { getLocationById } from '../services/zohoService.js';
+import { getLocationById, getTaxRates, getZohoTaxIdForPercentage } from '../services/zohoService.js';
 
 // Normalize a user's tax percentage, falling back to numbers embedded in the
 // location name (e.g., "Miami Dade Sales Tax (7%)") before using the default.
@@ -22,6 +22,37 @@ const resolveTaxPercentage = (user) => {
   }
 
   return 7.5;
+};
+
+// Resolve (taxPercentage, zohoTaxId) for a user from an explicit Zoho tax selection (preferred)
+// or a raw percentage (fallback). Never fails registration if Zoho is down.
+const resolveUserTaxSelection = async ({ zohoTaxId, taxPercentage }) => {
+  // Prefer explicit Zoho tax_id
+  if (zohoTaxId && String(zohoTaxId).trim() !== '') {
+    try {
+      const taxes = await getTaxRates();
+      const match = (taxes || []).find(t => String(t.taxId) === String(zohoTaxId));
+      if (match?.taxPercentage !== undefined && match?.taxId) {
+        return { zohoTaxId: match.taxId, taxPercentage: parseFloat(match.taxPercentage) };
+      }
+      // If tax_id not found, still store the ID and fall back to provided percentage/default
+      const pct = taxPercentage !== undefined ? parseFloat(taxPercentage) : 7.5;
+      return { zohoTaxId: String(zohoTaxId), taxPercentage: Number.isFinite(pct) ? pct : 7.5 };
+    } catch (e) {
+      const pct = taxPercentage !== undefined ? parseFloat(taxPercentage) : 7.5;
+      return { zohoTaxId: String(zohoTaxId), taxPercentage: Number.isFinite(pct) ? pct : 7.5 };
+    }
+  }
+
+  // Otherwise, use percentage and try to resolve a matching Zoho tax_id
+  const pct = taxPercentage !== undefined ? parseFloat(taxPercentage) : 7.5;
+  const finalPct = Number.isFinite(pct) ? pct : 7.5;
+  try {
+    const resolvedId = await getZohoTaxIdForPercentage(finalPct);
+    return { zohoTaxId: resolvedId || null, taxPercentage: finalPct };
+  } catch (e) {
+    return { zohoTaxId: null, taxPercentage: finalPct };
+  }
 };
 
 export const login = async (req, res) => {
@@ -74,7 +105,8 @@ export const login = async (req, res) => {
           role: newAdmin.role,
           locationId: newAdmin.locationId,
           locationName: newAdmin.locationName,
-          taxPercentage: resolveTaxPercentage(newAdmin)
+          taxPercentage: resolveTaxPercentage(newAdmin),
+          zohoTaxId: newAdmin.zohoTaxId || null
         }
       }, 'Bootstrap admin created and logged in successfully');
     }
@@ -124,6 +156,7 @@ export const login = async (req, res) => {
         locationId: user.locationId,
         locationName: user.locationName,
         taxPercentage: resolveTaxPercentage(user),
+        zohoTaxId: user.zohoTaxId || null,
         terminalIP: user.terminalIP,
         terminalPort: user.terminalPort,
         terminalNumber: user.terminalNumber
@@ -136,7 +169,7 @@ export const login = async (req, res) => {
 };
 
 export const createUser = async (req, res) => {
-  const { username, password, role, locationId, locationName, taxPercentage } = req.body;
+  const { username, password, role, locationId, locationName, taxPercentage, zohoTaxId } = req.body;
   
   try {
     const existingUser = await User.findOne({ where: { username } });
@@ -149,6 +182,8 @@ export const createUser = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    const taxSelection = await resolveUserTaxSelection({ zohoTaxId, taxPercentage });
     
     const user = await User.create({
       username,
@@ -156,7 +191,8 @@ export const createUser = async (req, res) => {
       role: role || 'cashier',
       locationId,
       locationName,
-      taxPercentage: taxPercentage ? parseFloat(taxPercentage) : 7.5
+      taxPercentage: taxSelection.taxPercentage,
+      zohoTaxId: taxSelection.zohoTaxId
     });
 
     return sendSuccess(res, {
@@ -166,7 +202,8 @@ export const createUser = async (req, res) => {
         role: user.role,
         locationId: user.locationId,
         locationName: user.locationName,
-        taxPercentage: resolveTaxPercentage(user)
+        taxPercentage: resolveTaxPercentage(user),
+        zohoTaxId: user.zohoTaxId || null
       }
     }, 'User created successfully', 201);
   } catch (err) {
@@ -176,7 +213,7 @@ export const createUser = async (req, res) => {
 };
 
 export const register = async (req, res) => {
-  const { username, password, role, locationId, locationName, taxPercentage } = req.body;
+  const { username, password, role, locationId, locationName, taxPercentage, zohoTaxId } = req.body;
   
   try {
     const existingUser = await User.findOne({ where: { username } });
@@ -212,6 +249,8 @@ export const register = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    const taxSelection = await resolveUserTaxSelection({ zohoTaxId, taxPercentage });
     
     const user = await User.create({
       username,
@@ -219,7 +258,8 @@ export const register = async (req, res) => {
       role: role || 'cashier',
       locationId: finalLocationId,
       locationName: finalLocationName,
-      taxPercentage: taxPercentage ? parseFloat(taxPercentage) : 7.5,
+      taxPercentage: taxSelection.taxPercentage,
+      zohoTaxId: taxSelection.zohoTaxId,
       // New registrations are inactive until approved by an admin
       isActive: false
     });
@@ -231,7 +271,8 @@ export const register = async (req, res) => {
         role: user.role,
         locationId: user.locationId,
         locationName: user.locationName,
-        taxPercentage: resolveTaxPercentage(user)
+        taxPercentage: resolveTaxPercentage(user),
+        zohoTaxId: user.zohoTaxId || null
       }
     }, 'User registered successfully', 201);
   } catch (err) {
@@ -312,7 +353,7 @@ export const getAllUsers = async (req, res) => {
 export const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { role, isActive, locationId, locationName, taxPercentage, terminalIP } = req.body;
+    const { role, isActive, locationId, locationName, taxPercentage, zohoTaxId, terminalIP } = req.body;
 
     const user = await User.findByPk(id);
 
@@ -349,8 +390,13 @@ export const updateUser = async (req, res) => {
     }
 
     // Update taxPercentage if provided
-    if (taxPercentage !== undefined) {
-      user.taxPercentage = parseFloat(taxPercentage);
+    if (taxPercentage !== undefined || zohoTaxId !== undefined) {
+      const taxSelection = await resolveUserTaxSelection({
+        zohoTaxId: zohoTaxId !== undefined ? zohoTaxId : user.zohoTaxId,
+        taxPercentage: taxPercentage !== undefined ? taxPercentage : user.taxPercentage
+      });
+      user.taxPercentage = taxSelection.taxPercentage;
+      user.zohoTaxId = taxSelection.zohoTaxId;
     }
 
     // Update terminalIP if provided

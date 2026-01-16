@@ -465,6 +465,63 @@ const ensureTerminalColumns = async () => {
   }
 };
 
+// Ensure zohoTaxId column exists on Users table (for SQLite / auto-sync disabled)
+const ensureZohoTaxIdColumn = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      // SQLite syntax - Add zohoTaxId column
+      try {
+        await sequelize.query('ALTER TABLE `Users` ADD COLUMN `zohoTaxId` VARCHAR(255) NULL');
+        logSuccess('Added zohoTaxId column to Users table');
+      } catch (err) {
+        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
+          throw err;
+        }
+        logInfo('zohoTaxId column already exists on Users table');
+      }
+    } else {
+      // PostgreSQL syntax - Add zohoTaxId column
+      try {
+        await sequelize.query('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "zohoTaxId" VARCHAR(255) NULL');
+        logSuccess('Added zohoTaxId column to Users table');
+      } catch (err) {
+        logWarning(`Could not ensure zohoTaxId column: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    logWarning(`Could not ensure zohoTaxId column on Users table: ${err.message}`);
+  }
+};
+
+// Ensure taxId column exists on SaleItems table (for SQLite / auto-sync disabled)
+// This persists the Zoho Books tax_id used on each line item (needed for retry sync and historical data).
+const ensureSaleItemTaxIdColumn = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      // SQLite syntax - Add taxId column
+      try {
+        await sequelize.query('ALTER TABLE `SaleItems` ADD COLUMN `taxId` VARCHAR(255) NULL');
+        logSuccess('Added taxId column to SaleItems table');
+      } catch (err) {
+        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
+          throw err;
+        }
+        logInfo('taxId column already exists on SaleItems table');
+      }
+    } else {
+      // PostgreSQL syntax - Add taxId column
+      try {
+        await sequelize.query('ALTER TABLE "SaleItems" ADD COLUMN IF NOT EXISTS "taxId" VARCHAR(255) NULL');
+        logSuccess('Added taxId column to SaleItems table');
+      } catch (err) {
+        logWarning(`Could not ensure taxId column on SaleItems table: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    logWarning(`Could not ensure taxId column on SaleItems table: ${err.message}`);
+  }
+};
+
 // Admin user creation is handled by bootstrap login mechanism in authController.js
 // Bootstrap credentials: accounting@subzeroiceservices.com / dryice000
 // This only works when database is empty (first-time setup)
@@ -483,12 +540,16 @@ const startServer = async () => {
   if (DATABASE_SETTING === 'local') {
     await ensureItemImageColumn();
     await ensureTerminalColumns();
+    await ensureZohoTaxIdColumn();
+    await ensureSaleItemTaxIdColumn();
     await ensureBankAccountColumn();
     await ensureCustomerProfileColumns();
     await ensureCustomerStatusColumn();
   } else {
     // For PostgreSQL, also ensure columns exist
     await ensureTerminalColumns();
+    await ensureZohoTaxIdColumn();
+    await ensureSaleItemTaxIdColumn();
     await ensureBankAccountColumn();
     await ensureCustomerProfileColumns();
     await ensureCustomerStatusColumn();
