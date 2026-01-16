@@ -373,6 +373,32 @@ const ensureCustomerProfileColumns = async () => {
   }
 };
 
+// Ensure status column exists on Customers table (for SQLite / auto-sync disabled)
+const ensureCustomerStatusColumn = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      try {
+        await sequelize.query('ALTER TABLE `Customers` ADD COLUMN `status` VARCHAR(255) NULL');
+        logSuccess('Added status column to Customers table');
+      } catch (err) {
+        if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate column')) {
+          throw err;
+        }
+        logInfo('status column already exists on Customers table');
+      }
+    } else {
+      try {
+        await sequelize.query('ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "status" VARCHAR(255) NULL');
+        logSuccess('Added status column to Customers table');
+      } catch (err) {
+        logWarning(`Could not ensure status column: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    logWarning(`Could not ensure status column on Customers table: ${err.message}`);
+  }
+};
+
 // Ensure terminalIP, terminalPort, and terminalNumber columns exist on Users table (for SQLite / auto-sync disabled)
 const ensureTerminalColumns = async () => {
   try {
@@ -459,11 +485,13 @@ const startServer = async () => {
     await ensureTerminalColumns();
     await ensureBankAccountColumn();
     await ensureCustomerProfileColumns();
+    await ensureCustomerStatusColumn();
   } else {
     // For PostgreSQL, also ensure columns exist
     await ensureTerminalColumns();
     await ensureBankAccountColumn();
     await ensureCustomerProfileColumns();
+    await ensureCustomerStatusColumn();
   }
 
   // Admin user creation handled by bootstrap login (see authController.js)

@@ -72,6 +72,11 @@ export const Customer = sequelize.define('Customer', {
     type: DataTypes.BOOLEAN,
     defaultValue: true
   },
+  status: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Raw Zoho contact status (e.g., active/inactive)'
+  },
   lastSyncedAt: {
     type: DataTypes.DATE
   }

@@ -121,6 +121,7 @@ export const syncCustomersToDatabase = async (options = {}) => {
           last_four_digits: paymentMethod.last_four_digits,
           cardBrand: paymentMethod.cardBrand,
           isActive: zohoCustomer.status === 'active',
+          status: zohoCustomer.status || null,
           lastSyncedAt: now
         };
       });
@@ -157,6 +158,7 @@ export const syncCustomersToDatabase = async (options = {}) => {
           last_four_digits: paymentMethod.last_four_digits,
           cardBrand: paymentMethod.cardBrand,
           isActive: zohoCustomer.status === 'active',
+          status: zohoCustomer.status || null,
           lastSyncedAt: new Date()
         });
 

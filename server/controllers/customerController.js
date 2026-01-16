@@ -154,6 +154,7 @@ export const getCustomers = async (req, res) => {
             last_four_digits: paymentMethod.last_four_digits,
             cardBrand: paymentMethod.cardBrand,
             isActive: zohoCustomer.status === 'active',
+            status: zohoCustomer.status || null,
             lastSyncedAt: new Date()
           });
         }
