@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Loader2, BarChart3, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { salesAPI } from '../../services/api';
-import { ZohoSyncDiagnostic } from './ZohoSyncDiagnostic';
 import { useToast } from '../contexts/ToastContext';
 
 interface Transaction {
@@ -39,8 +38,9 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 15;
-  const [activeTab, setActiveTab] = useState<'salesByHour' | 'transactions' | 'zoho'>('transactions');
   const [cancellingSaleId, setCancellingSaleId] = useState<number | null>(null);
+  const [syncStatus, setSyncStatus] = useState<any>(null);
+  const [loadingSyncStatus, setLoadingSyncStatus] = useState(false);
 
   // Use logged-in user's location (no manual location filter)
   const locationId = userLocationId;
@@ -53,7 +53,7 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
     setEndDate(end.toISOString().split('T')[0]);
   };
 
-  // Load sales from API - extracted to a reusable function
+  // Load transactions from transactions table - extracted to a reusable function
   const loadSales = useCallback(async (showRefreshing = false) => {
     if (showRefreshing) {
       setIsRefreshing(true);
@@ -61,63 +61,58 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
       setIsLoading(true);
     }
     try {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      // Fetch from transactions table directly without date filters
+      const response = await salesAPI.getTransactions();
 
-      // Backend already scopes results to the authenticated user's location (requireLocation)
-      // Always bypass cache to get latest data
-      const response = await salesAPI.getAll({
-        locationId: undefined,
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-      }, true);
-
-      if (response.success && response.data?.sales) {
-        // Transform API sales to Transaction format
-        const transformedTransactions: Transaction[] = response.data.sales.map((sale: any) => ({
-          id: String(sale.transactionId || sale.id),
-          saleId: sale.id, // Keep original sale ID for cancel action
-          date: new Date(sale.createdAt),
-          paymentType: sale.paymentType,
-          subtotal: parseFloat(sale.subtotal),
-          tax: parseFloat(sale.taxAmount),
-          fee: parseFloat(sale.ccFee || '0'),
-          total: parseFloat(sale.total),
-          locationId: sale.locationId,
-          syncedToZoho: sale.syncedToZoho || false,
-          zohoSalesReceiptId: sale.zohoSalesReceiptId || null,
-          cancelledInZoho: sale.cancelledInZoho || false,
-        }));
-        setTransactions(transformedTransactions);
+      if (response.success && response.data?.transactions) {
+        // Transactions are already in the correct format from the backend
+        setTransactions(response.data.transactions);
       } else {
-        // If no sales returned, set empty array
+        // If no transactions returned, set empty array
         setTransactions([]);
       }
     } catch (err) {
-      console.error('Failed to load sales:', err);
+      logger.error('Failed to load transactions', err);
       showToast('Failed to load transactions from database', 'error', 3000);
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (showRefreshing) {
+        setIsRefreshing(false);
+      } else {
+        setIsLoading(false);
+      }
     }
-  }, [startDate, endDate, userLocationId, showToast]);
+  }, [showToast]);
+
+  // Load sync status
+  const loadSyncStatus = useCallback(async () => {
+    setLoadingSyncStatus(true);
+    try {
+      const response = await salesAPI.getSyncStatus(20);
+      if (response.success && response.data) {
+        setSyncStatus(response.data);
+      }
+    } catch (err) {
+      console.error('Failed to load sync status:', err);
+    } finally {
+      setLoadingSyncStatus(false);
+    }
+  }, []);
 
   // Load sales on mount and when filters change
   useEffect(() => {
     loadSales();
-  }, [loadSales]);
+    loadSyncStatus();
+  }, [loadSales, loadSyncStatus]);
 
-  // Auto-refresh transactions every 30 seconds when on transactions tab
+  // Auto-refresh transactions every 30 seconds
   useEffect(() => {
-    if (activeTab === 'transactions') {
-      const interval = setInterval(() => {
-        loadSales(true); // Silent refresh
-      }, 30000); // 30 seconds
+    const interval = setInterval(() => {
+      loadSales(true); // Silent refresh
+      loadSyncStatus(); // Also refresh sync status
+    }, 30000); // 30 seconds
 
-      return () => clearInterval(interval);
-    }
-  }, [activeTab, loadSales]);
+    return () => clearInterval(interval);
+  }, [loadSales, loadSyncStatus]);
 
   const handleCancelZohoTransaction = async (saleId: number) => {
     if (!window.confirm('Are you sure you want to cancel this transaction in Zoho? This action cannot be undone.')) {
@@ -136,7 +131,7 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
         showToast(response.message || 'Failed to cancel transaction in Zoho', 'error', 4000);
       }
     } catch (error: any) {
-      console.error('Failed to cancel Zoho transaction:', error);
+      logger.error('Failed to cancel Zoho transaction', error);
       showToast(error.message || 'Failed to cancel transaction in Zoho', 'error', 4000);
     } finally {
       setCancellingSaleId(null);
@@ -145,25 +140,18 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
 
   const handleRefresh = () => {
     loadSales(false); // Show loading state
+    loadSyncStatus(); // Also refresh sync status
   };
 
-  // Filter transactions based on filters
+  // No filtering - show all transactions
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(transaction => {
-      const transactionDate = new Date(transaction.date);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999); // Include full end date
+    return transactions;
+  }, [transactions]);
 
-      const dateMatch = transactionDate >= start && transactionDate <= end;
-      return dateMatch;
-    });
-  }, [transactions, startDate, endDate]);
-
-  // Reset pagination when filters/data change
+  // Reset pagination when data changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [startDate, endDate, locationId, transactions.length]);
+  }, [transactions.length]);
 
   const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
@@ -180,35 +168,10 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
     return { totalSales, totalTax, totalFees, transactionCount };
   }, [filteredTransactions]);
 
-  // Calculate sales by hour
-  const salesByHour = useMemo(() => {
-    const hourlyData = Array(13).fill(0).map((_, i) => ({ hour: i, amount: 0 }));
-
-    filteredTransactions.forEach(transaction => {
-      const hour = new Date(transaction.date).getHours();
-      if (hour >= 0 && hour <= 12) {
-        hourlyData[hour].amount += transaction.total;
-      }
-    });
-
-    return hourlyData;
-  }, [filteredTransactions]);
-
-  const maxHourlySales = Math.max(...salesByHour.map(h => h.amount), 1);
 
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-8">
-      {/* Page Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 md:px-8 py-6 md:py-8">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
-          Reports
-        </h1>
-        <p className="text-sm md:text-base text-gray-600 dark:text-gray-400">
-          Sales analytics and transaction history
-        </p>
-      </div>
-
       <div className="px-4 md:px-8 mt-6 md:mt-8 space-y-6 md:space-y-8">
         {isLoading ? (
           // Loading State
@@ -253,146 +216,53 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
               </div>
             </div>
 
-            {/* Tabs */}
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 shadow-sm flex gap-2">
-              <button
-                onClick={() => setActiveTab('salesByHour')}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                  activeTab === 'salesByHour'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-              >
-                Sales by Hour
-              </button>
-              <button
-                onClick={() => setActiveTab('transactions')}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                  activeTab === 'transactions'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-              >
-                Transactions
-              </button>
-              <button
-                onClick={() => setActiveTab('zoho')}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                  activeTab === 'zoho'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-              >
-                Zoho Sync Status
-              </button>
-            </div>
-
-            {/* Sales by Hour Tab */}
-            {activeTab === 'salesByHour' && (
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
-                  <h2 className="font-semibold text-gray-900 dark:text-white">
-                    Sales by Hour
-                  </h2>
-
-                  {/* Filters (right side) */}
-                  <div className="flex flex-col sm:flex-row sm:items-end sm:justify-end gap-3">
-                    <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
-                      <button
-                        onClick={() => setQuickRangeDays(0)}
-                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
-                      >
-                        Today
-                      </button>
-                      <button
-                        onClick={() => setQuickRangeDays(7)}
-                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
-                      >
-                        Last 7 days
-                      </button>
-                      <button
-                        onClick={() => setQuickRangeDays(30)}
-                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium"
-                      >
-                        Last 30 days
-                      </button>
+            {/* Zoho Sync Status Summary */}
+            {syncStatus && syncStatus.summary && (
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm p-6">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Zoho Sync Status</h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {syncStatus.summary.total}
                     </div>
-
-                    <div className="flex items-center gap-3 flex-wrap justify-start sm:justify-end">
-                      <div>
-                        <label htmlFor="startDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          From
-                        </label>
-                        <input
-                          type="date"
-                          id="startDate"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
-                        />
-                      </div>
-
-                      <div>
-                        <label htmlFor="endDate" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          To
-                        </label>
-                        <input
-                          type="date"
-                          id="endDate"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-white"
-                        />
-                      </div>
-                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Total Sales</div>
                   </div>
-                </div>
-
-                <div className="h-[250px] flex items-end justify-between gap-2">
-                  {salesByHour.map(({ hour, amount }) => {
-                    const heightPercentage = Math.max((amount / maxHourlySales) * 100, 2);
-                    return (
-                      <div
-                        key={hour}
-                        className="flex-1 flex flex-col items-center gap-2 group"
-                      >
-                        <div className="relative flex-1 flex items-end w-full">
-                          <div
-                            className="w-full bg-gradient-to-t from-purple-500 to-violet-400 rounded-t-md transition-all duration-200 group-hover:from-purple-600 group-hover:to-violet-500 relative"
-                            style={{ height: `${heightPercentage}%` }}
-                            title={`${hour}:00 - $${amount.toFixed(2)}`}
-                          >
-                            {/* Tooltip on hover */}
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                              {hour}:00 - ${amount.toFixed(2)}
-                            </div>
-                          </div>
-                        </div>
-                        <span className="text-xs text-gray-500 font-medium">
-                          {hour}:00
-                        </span>
-                      </div>
-                    );
-                  })}
+                  <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                      {syncStatus.summary.synced}
+                    </div>
+                    <div className="text-sm text-green-700 dark:text-green-300">Synced</div>
+                  </div>
+                  <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+                      {syncStatus.summary.failed}
+                    </div>
+                    <div className="text-sm text-red-700 dark:text-red-300">Failed</div>
+                  </div>
+                  <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                    <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                      {syncStatus.summary.noZohoId}
+                    </div>
+                    <div className="text-sm text-yellow-700 dark:text-yellow-300">No Zoho ID</div>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Transactions Tab */}
-            {activeTab === 'transactions' && (
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
+            {/* Transactions Section */}
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                 <h2 className="font-semibold text-gray-900 dark:text-white">
                   Transactions
                 </h2>
                 <button
                   onClick={handleRefresh}
-                  disabled={isLoading || isRefreshing}
+                  disabled={isLoading || isRefreshing || loadingSyncStatus}
                   className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   title="Refresh transactions"
                 >
-                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-                  {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                  <RefreshCw className={`w-4 h-4 ${isRefreshing || loadingSyncStatus ? 'animate-spin' : ''}`} />
+                  {isRefreshing || loadingSyncStatus ? 'Refreshing...' : 'Refresh'}
                 </button>
               </div>
 
@@ -572,12 +442,6 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                 </div>
               )}
             </div>
-            )}
-
-            {/* Zoho Sync Status Tab */}
-            {activeTab === 'zoho' && (
-              <ZohoSyncDiagnostic />
-            )}
           </>
         )}
       </div>

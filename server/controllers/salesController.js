@@ -6,7 +6,7 @@ import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxI
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
-// Best-effort loader for legacy "transactionsdb" SQLite tables.
+// Best-effort loader for legacy "transactions" SQLite tables.
 // This keeps the Reports > Transactions tab working when older installs stored history
 // in a separate SQLite schema/table rather than the current Sequelize `Sale` table.
 const fetchLegacyTransactionsForReports = async ({ locationId, startDate, endDate }) => {
@@ -699,6 +699,55 @@ export const createSale = async (req, res) => {
       ]
     });
 
+    // Record sale to transactions table
+    try {
+      const isSQLite = sequelize.getDialect() === 'sqlite';
+      const now = new Date().toISOString();
+      
+      // Use appropriate column quoting for SQLite vs PostgreSQL
+      const quote = isSQLite ? '' : '"';
+      
+      await sequelize.query(`
+        INSERT INTO transactions (
+          ${quote}transactionId${quote}, ${quote}createdAt${quote}, ${quote}updatedAt${quote}, ${quote}subtotal${quote}, ${quote}taxAmount${quote}, ${quote}taxPercentage${quote}, 
+          ${quote}ccFee${quote}, ${quote}total${quote}, ${quote}paymentType${quote}, ${quote}locationId${quote}, ${quote}locationName${quote}, ${quote}customerId${quote}, 
+          ${quote}zohoCustomerId${quote}, ${quote}userId${quote}, ${quote}zohoSalesReceiptId${quote}, ${quote}syncedToZoho${quote}, ${quote}syncError${quote}, 
+          ${quote}notes${quote}, ${quote}cancelledInZoho${quote}
+        ) VALUES (
+          :transactionId, :createdAt, :updatedAt, :subtotal, :taxAmount, :taxPercentage,
+          :ccFee, :total, :paymentType, :locationId, :locationName, :customerId,
+          :zohoCustomerId, :userId, :zohoSalesReceiptId, :syncedToZoho, :syncError,
+          :notes, :cancelledInZoho
+        )
+      `, {
+        replacements: {
+          transactionId: sale.transactionId || String(sale.id),
+          createdAt: now,
+          updatedAt: now,
+          subtotal: parseFloat(sale.subtotal),
+          taxAmount: parseFloat(sale.taxAmount),
+          taxPercentage: sale.taxPercentage,
+          ccFee: parseFloat(sale.ccFee || 0),
+          total: parseFloat(sale.total),
+          paymentType: sale.paymentType,
+          locationId: sale.locationId,
+          locationName: sale.locationName || null,
+          customerId: sale.customerId || null,
+          zohoCustomerId: sale.zohoCustomerId || null,
+          userId: sale.userId,
+          zohoSalesReceiptId: completeSale.zohoSalesReceiptId || null,
+          syncedToZoho: completeSale.syncedToZoho ? (isSQLite ? 1 : true) : (isSQLite ? 0 : false),
+          syncError: completeSale.syncError || null,
+          notes: sale.notes || null,
+          cancelledInZoho: isSQLite ? 0 : false
+        }
+      });
+      console.log(`✅ Recorded sale ${sale.id} to transactions table`);
+    } catch (txnError) {
+      // Log error but don't fail the sale - transaction recording is secondary
+      console.error(`⚠️ Failed to record sale ${sale.id} to transactions table:`, txnError.message);
+    }
+
     // Print receipt (non-blocking - sale completes successfully even if print fails)
     // This runs asynchronously and will not block or fail the sale
     printReceipt({
@@ -768,12 +817,12 @@ export const getSales = async (req, res) => {
       include: [
         { association: 'items' },
         { association: 'customer' },
-        { association: 'user', attributes: ['username'] }
+        { association: 'user', attributes: ['useremail'] }
       ],
       order: [['createdAt', 'DESC']]
     });
 
-    // Include legacy transactions (older "transactionsdb" history) in local SQLite mode.
+    // Include legacy transactions (older "transactions" history) in local SQLite mode.
     // Frontend Reports tab reads from /sales and maps rows to "Transaction".
     const legacySales = await fetchLegacyTransactionsForReports({
       locationId: effectiveLocationId,
@@ -807,6 +856,73 @@ export const getSales = async (req, res) => {
   }
 };
 
+// Get transactions from transactions table
+export const getTransactions = async (req, res) => {
+  try {
+    const { startDate, endDate, syncedToZoho } = req.query;
+    const userLocationId = req.user?.locationId;
+
+    if (!userLocationId) {
+      return sendError(res, 'User location not found', 400);
+    }
+
+    const isSQLite = sequelize.getDialect() === 'sqlite';
+    const locationCol = isSQLite ? 'locationId' : '"locationId"';
+    const createdAtCol = isSQLite ? 'createdAt' : '"createdAt"';
+    const syncedCol = isSQLite ? 'syncedToZoho' : '"syncedToZoho"';
+
+    let whereClause = `WHERE ${locationCol} = :locationId`;
+    const replacements = { locationId: userLocationId };
+
+    if (startDate) {
+      whereClause += ` AND ${createdAtCol} >= :startDate`;
+      replacements.startDate = new Date(startDate).toISOString();
+    }
+
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      whereClause += ` AND ${createdAtCol} <= :endDate`;
+      replacements.endDate = end.toISOString();
+    }
+
+    if (syncedToZoho !== undefined) {
+      whereClause += ` AND ${syncedCol} = :syncedToZoho`;
+      replacements.syncedToZoho = syncedToZoho === 'true' ? (isSQLite ? 1 : true) : (isSQLite ? 0 : false);
+    }
+
+    // Query transactions table directly
+    const [transactions] = await sequelize.query(`
+      SELECT * FROM transactions 
+      ${whereClause}
+      ORDER BY ${createdAtCol} DESC
+    `, {
+      replacements
+    });
+
+    // Transform to match frontend Transaction interface
+    const transformedTransactions = (transactions || []).map((txn) => ({
+      id: String(txn.transactionId || txn.id),
+      saleId: txn.id,
+      date: new Date(txn.createdAt),
+      paymentType: txn.paymentType || 'cash',
+      subtotal: parseFloat(txn.subtotal || 0),
+      tax: parseFloat(txn.taxAmount || 0),
+      fee: parseFloat(txn.ccFee || 0),
+      total: parseFloat(txn.total || 0),
+      locationId: txn.locationId,
+      syncedToZoho: Boolean(txn.syncedToZoho),
+      zohoSalesReceiptId: txn.zohoSalesReceiptId || null,
+      cancelledInZoho: Boolean(txn.cancelledInZoho)
+    }));
+
+    return sendSuccess(res, { transactions: transformedTransactions });
+  } catch (err) {
+    console.error('Get transactions error:', err);
+    return sendError(res, 'Failed to fetch transactions', 500, err);
+  }
+};
+
 export const getSaleById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -815,7 +931,7 @@ export const getSaleById = async (req, res) => {
       include: [
         { association: 'items' },
         { association: 'customer' },
-        { association: 'user', attributes: ['username'] }
+        { association: 'user', attributes: ['useremail'] }
       ]
     });
 
@@ -968,44 +1084,68 @@ export const getSyncStatus = async (req, res) => {
   try {
     const { limit = 10 } = req.query;
     const userLocationId = req.user.locationId;
+    const isSQLite = sequelize.getDialect() === 'sqlite';
+    const locationCol = isSQLite ? 'locationId' : '"locationId"';
+    const createdAtCol = isSQLite ? 'createdAt' : '"createdAt"';
     
-    const sales = await Sale.findAll({
-      where: {
-        locationId: userLocationId
-      },
-      include: [
-        { 
-          association: 'customer',
-          attributes: ['id', 'contactName', 'zohoId']
-        }
-      ],
-      order: [['createdAt', 'DESC']],
-      limit: parseInt(limit)
+    // Query transactions table directly
+    const [transactions] = await sequelize.query(`
+      SELECT * FROM transactions 
+      WHERE ${locationCol} = :locationId
+      ORDER BY ${createdAtCol} DESC
+      LIMIT :limit
+    `, {
+      replacements: {
+        locationId: userLocationId,
+        limit: parseInt(limit) || 10
+      }
     });
 
-    const status = sales.map(sale => ({
-      saleId: sale.id,
-      total: sale.total,
-      createdAt: sale.createdAt,
-      customer: sale.customer ? {
-        id: sale.customer.id,
-        name: sale.customer.contactName,
-        hasZohoId: !!sale.customer.zohoId,
-        zohoId: sale.customer.zohoId
-      } : null,
-      syncedToZoho: sale.syncedToZoho,
-      zohoSalesReceiptId: sale.zohoSalesReceiptId,
-      syncError: sale.syncError
-    }));
+    // Fetch customer details for transactions that have customerId
+    const customerIds = [...new Set((transactions || [])
+      .map(t => t.customerId)
+      .filter(Boolean))];
+    
+    const customersMap = new Map();
+    if (customerIds.length > 0) {
+      const customers = await Customer.findAll({
+        where: { id: { [Op.in]: customerIds } },
+        attributes: ['id', 'contactName', 'zohoId']
+      });
+      customers.forEach(c => customersMap.set(c.id, c));
+    }
+
+    const status = (transactions || []).map(txn => {
+      const customer = txn.customerId ? customersMap.get(txn.customerId) : null;
+      return {
+        saleId: txn.id,
+        total: parseFloat(txn.total || 0),
+        createdAt: txn.createdAt,
+        customer: customer ? {
+          id: customer.id,
+          name: customer.contactName,
+          hasZohoId: !!customer.zohoId,
+          zohoId: customer.zohoId
+        } : (txn.zohoCustomerId ? {
+          id: null,
+          name: null,
+          hasZohoId: true,
+          zohoId: txn.zohoCustomerId
+        } : null),
+        syncedToZoho: Boolean(txn.syncedToZoho),
+        zohoSalesReceiptId: txn.zohoSalesReceiptId || null,
+        syncError: txn.syncError || null
+      };
+    });
 
     return sendSuccess(res, { 
       sales: status,
       summary: {
-        total: sales.length,
-        synced: sales.filter(s => s.syncedToZoho).length,
-        failed: sales.filter(s => !s.syncedToZoho && s.syncError).length,
-        noCustomer: sales.filter(s => !s.customer).length,
-        noZohoId: sales.filter(s => s.customer && !s.customer.zohoId).length
+        total: status.length,
+        synced: status.filter(s => s.syncedToZoho).length,
+        failed: status.filter(s => !s.syncedToZoho && s.syncError).length,
+        noCustomer: status.filter(s => !s.customer).length,
+        noZohoId: status.filter(s => s.customer && !s.customer.zohoId).length
       }
     });
   } catch (err) {

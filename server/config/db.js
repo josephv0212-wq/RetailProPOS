@@ -21,7 +21,7 @@ if (DATABASE_SETTING === 'local') {
   // SQLite configuration for local database
   const dbPath = path.join(__dirname, '..', 'database.sqlite');
 
-  // Backward compatibility: if an older SQLite file exists (e.g. "transactionsdb"),
+  // Backward compatibility: if an older SQLite file exists (e.g. "transactionsdb" or "transactions"),
   // migrate/rename it to "database.sqlite" so the app uses a single consistent DB.
   const legacyDbCandidates = [
     path.join(__dirname, '..', 'transactionsdb.sqlite'),

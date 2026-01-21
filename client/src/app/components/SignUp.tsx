@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import { Eye, EyeOff, ChevronDown } from 'lucide-react';
 import { authAPI, zohoAPI } from '../../services/api';
 import { useAlert } from '../contexts/AlertContext';
+import { logger } from '../../utils/logger';
 
 interface SignUpProps {
   onSignUp: () => void;
@@ -65,7 +66,7 @@ export function SignUp({ onSignUp, onNavigateToSignIn }: SignUpProps) {
           }
         }
       } catch (err) {
-        console.error('Failed to load registration data:', err);
+        logger.error('Failed to load registration data', err);
         setError('Failed to load locations and tax rates. Please try again.');
       } finally {
         setLoadingData(false);
@@ -117,7 +118,7 @@ export function SignUp({ onSignUp, onNavigateToSignIn }: SignUpProps) {
     setIsLoading(true);
     try {
       const response = await authAPI.register({
-        username: email,
+        useremail: email,
         password,
         role: role.toLowerCase().replace(/\s+/g, '_'), // Convert to API format
         locationId,

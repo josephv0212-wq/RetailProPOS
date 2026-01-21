@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import { printerAPI, zohoAPI } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
+import { logger } from '../../utils/logger';
 
 interface TopNavigationProps {
   storeName: string;
@@ -40,7 +41,12 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
       try {
         const response = await printerAPI.test();
         setPrinterStatus(response.success ? 'online' : 'offline');
-      } catch (err) {
+      } catch (err: any) {
+        // Silently handle printer status check failures (printer may not be configured)
+        // Only log in development mode for debugging
+        if (import.meta.env.DEV) {
+          logger.warn('Printer status check failed', err);
+        }
         setPrinterStatus('offline');
       }
     };
@@ -76,7 +82,7 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
         showToast(response.message || 'Zoho sync failed.', 'error', 5000);
       }
     } catch (err: any) {
-      console.error('Zoho sync failed:', err);
+      logger.error('Zoho sync failed', err);
       showToast(err?.message || 'Zoho sync failed.', 'error', 5000);
     } finally {
       setIsSyncingZoho(false);
@@ -112,39 +118,6 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
           </div>
           
           <div className="hidden md:block h-6 w-px bg-gray-300 dark:bg-gray-600" />
-          
-          {/* Navigation Buttons */}
-          <div className="hidden md:flex items-center gap-2">
-            {onNavigateToPOS && (
-              <button 
-                onClick={onNavigateToPOS}
-                className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
-              >
-                <ShoppingCart className="w-4 h-4" />
-                <span>Sales</span>
-              </button>
-            )}
-            
-            {onNavigateToCustomers && (
-              <button 
-                onClick={onNavigateToCustomers}
-                className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
-              >
-                <Users className="w-4 h-4" />
-                <span>Customers</span>
-              </button>
-            )}
-            
-            {onNavigateToReports && (
-              <button 
-                onClick={onNavigateToReports}
-                className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
-              >
-                <BarChart3 className="w-4 h-4" />
-                <span>Reports</span>
-              </button>
-            )}
-          </div>
         </div>
 
         {/* Right Section */}
@@ -235,6 +208,48 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
                     </button>
                   </div>
                 </div>
+                
+                {/* Navigation Buttons */}
+                {onNavigateToPOS && (
+                  <button 
+                    onClick={() => {
+                      onNavigateToPOS();
+                      setIsDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    <span>Sales</span>
+                  </button>
+                )}
+                
+                {onNavigateToCustomers && (
+                  <button 
+                    onClick={() => {
+                      onNavigateToCustomers();
+                      setIsDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Customers</span>
+                  </button>
+                )}
+                
+                {onNavigateToReports && (
+                  <button 
+                    onClick={() => {
+                      onNavigateToReports();
+                      setIsDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    <span>Reports</span>
+                  </button>
+                )}
+                
+                <div className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
                 
                 {onNavigateToSettings && (
                   <button 

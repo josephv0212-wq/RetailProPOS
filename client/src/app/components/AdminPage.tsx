@@ -1,11 +1,12 @@
 import React, { useState, useEffect, ChangeEvent } from 'react';
 import { RefreshCw, Trash2, Check, X, Edit3, AlertCircle } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
+import { logger } from '../../utils/logger';
 import { authAPI, zohoAPI, itemsAPI } from '../../services/api';
 
 interface User {
   id: string;
-  username: string;
+  useremail: string;
   locationId?: string;
   locationName?: string;
   taxRate?: number;
@@ -35,7 +36,7 @@ interface Item {
 
 interface AdminPageProps {
   currentUser: {
-    username: string;
+    useremail: string;
     role: 'admin' | 'cashier';
   };
 }
@@ -73,10 +74,10 @@ export function AdminPage({ currentUser }: AdminPageProps) {
 
         if (allUsersRes.success && allUsersRes.data?.users) {
           const allUsers: User[] = allUsersRes.data.users
-            .filter((u: any) => u.username !== currentUser.username)
+            .filter((u: any) => u.useremail !== currentUser.useremail)
             .map((u: any) => ({
               id: String(u.id),
-              username: u.username,
+              useremail: u.useremail,
               locationId: u.locationId,
               locationName: u.locationName,
               taxRate: u.taxPercentage,
@@ -88,7 +89,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
           if (pendingUsersRes.success && pendingUsersRes.data?.users) {
             const pendingUsers: User[] = pendingUsersRes.data.users.map((u: any) => ({
               id: String(u.id),
-              username: u.username,
+              useremail: u.useremail,
               role: u.role,
               status: 'pending' as const,
             }));
@@ -106,7 +107,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
           }
         }
       } catch (err) {
-        console.error('Failed to load users:', err);
+        logger.error('Failed to load users', err);
         showToast('Failed to load users', 'error');
       } finally {
         setIsLoadingUsers(false);
@@ -147,7 +148,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
           setTaxes(transformedTaxes);
         }
       } catch (err) {
-        console.error('Failed to load taxes:', err);
+        logger.error('Failed to load taxes', err);
       } finally {
         setIsLoadingTaxes(false);
       }
@@ -184,7 +185,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
     if (isAdmin) {
       loadData();
     }
-  }, [currentUser.username, isAdmin]);
+  }, [currentUser.useremail, isAdmin]);
 
   const handleSyncZoho = async () => {
     setIsSyncingZoho(true);
@@ -198,7 +199,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
         showToast('Zoho sync failed', 'error');
       }
     } catch (err) {
-      console.error('Zoho sync failed:', err);
+      logger.error('Zoho sync failed', err);
       showToast('Zoho sync failed', 'error');
     } finally {
       setIsSyncingZoho(false);
@@ -233,7 +234,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
           showToast('Failed to delete user', 'error');
         }
       } catch (err) {
-        console.error('Failed to delete user:', err);
+        logger.error('Failed to delete user', err);
         showToast('Failed to delete user', 'error');
       }
     }
@@ -316,7 +317,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
         showToast('Failed to update location', 'error');
       }
     } catch (err) {
-      console.error('Failed to update location:', err);
+      logger.error('Failed to update location', err);
       showToast('Failed to update location', 'error');
     }
   };
@@ -430,7 +431,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                       key={user.id} 
                       className={user.status === 'pending' ? 'bg-red-50 dark:bg-red-900/20' : 'bg-white dark:bg-gray-800'}
                     >
-                      <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white">{user.username}</td>
+                      <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white">{user.useremail}</td>
                       
                       <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
                         {editingUserId === user.id ? (

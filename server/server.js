@@ -211,6 +211,66 @@ const syncOptions = process.env.NODE_ENV === 'production'
   ? { alter: false } // In production, disable auto-sync (use migrations instead)
   : { alter: true }; // In development, allow schema alterations
 
+// Check if admin user exists and create default admin if needed
+const checkAndCreateAdminUser = async () => {
+  try {
+    const adminCount = await User.count({ where: { role: 'admin' } });
+    
+    if (adminCount === 0) {
+      logInfo('No admin user found in database. Creating default admin user...');
+      
+      const defaultAdmin = {
+        useremail: 'accounting@subzeroiceservices.com',
+        password: 'dryice000',
+        role: 'admin',
+        locationId: 'LOC001',
+        locationName: 'Default Location',
+        taxPercentage: 7.5,
+        isActive: true
+      };
+      
+      try {
+        // Check if user with this useremail already exists (but not as admin)
+        const existingUser = await User.findOne({ 
+          where: { useremail: defaultAdmin.useremail } 
+        });
+        
+        if (existingUser) {
+          // Update existing user to admin
+          existingUser.role = 'admin';
+          existingUser.isActive = true;
+          if (!existingUser.locationId) existingUser.locationId = defaultAdmin.locationId;
+          if (!existingUser.locationName) existingUser.locationName = defaultAdmin.locationName;
+          if (!existingUser.taxPercentage) existingUser.taxPercentage = defaultAdmin.taxPercentage;
+          await existingUser.save();
+          logSuccess(`Updated existing user "${defaultAdmin.useremail}" to admin role`);
+        } else {
+          // Create new admin user
+          const hashedPassword = await bcrypt.hash(defaultAdmin.password, 10);
+          const adminUser = await User.create({
+            useremail: defaultAdmin.useremail,
+            password: hashedPassword,
+            role: defaultAdmin.role,
+            locationId: defaultAdmin.locationId,
+            locationName: defaultAdmin.locationName,
+            taxPercentage: defaultAdmin.taxPercentage,
+            isActive: defaultAdmin.isActive
+          });
+          logSuccess(`Admin user created: ${adminUser.useremail} (ID: ${adminUser.id})`);
+        }
+      } catch (createError) {
+        logError('Failed to create admin user', createError);
+        log('The server will continue to run, but you may need to create an admin user manually.');
+      }
+    } else {
+      logSuccess(`Found ${adminCount} admin user(s) in database.`);
+    }
+  } catch (error) {
+    logError('Error checking admin user', error);
+    // Don't fail server startup if admin check fails
+  }
+};
+
 // Check if customers exist and sync from Zoho if needed
 const checkAndSyncCustomers = async () => {
   try {
@@ -423,6 +483,125 @@ const ensureZohoTaxIdColumn = async () =>
     warnMessage: 'Could not ensure zohoTaxId column on Users table'
   });
 
+// Ensure name column exists on Users table
+const ensureUserNameColumn = async () =>
+  ensureColumn({
+    table: 'Users',
+    column: 'name',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added name column to Users table',
+    existsMessage: 'name column already exists on Users table',
+    warnMessage: 'Could not ensure name column on Users table'
+  });
+
+// Rename username column to useremail in Users table
+const renameUsernameToUseremail = async () => {
+  try {
+    if (isSQLite) {
+      // For SQLite, check if username exists and useremail doesn't
+      try {
+        const [results] = await sequelize.query(`
+          SELECT name FROM sqlite_master 
+          WHERE type='table' AND name='Users'
+        `);
+        if (results.length > 0) {
+          const [columns] = await sequelize.query(`PRAGMA table_info(Users)`);
+          const hasUsername = columns.some((col) => col.name === 'username');
+          const hasUseremail = columns.some((col) => col.name === 'useremail');
+          
+          if (hasUsername && !hasUseremail) {
+            // SQLite doesn't support ALTER TABLE RENAME COLUMN directly
+            // We'll use a workaround: create new table, copy data, drop old, rename
+            await sequelize.query(`
+              CREATE TABLE Users_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                useremail VARCHAR(255) NOT NULL UNIQUE,
+                name VARCHAR(255),
+                password VARCHAR(255) NOT NULL,
+                role VARCHAR(255) DEFAULT 'cashier',
+                locationId VARCHAR(255) NOT NULL,
+                locationName VARCHAR(255),
+                taxPercentage DECIMAL(5,2) DEFAULT 7.5,
+                zohoTaxId VARCHAR(255),
+                isActive BOOLEAN DEFAULT 1,
+                terminalIP VARCHAR(255),
+                terminalPort INTEGER,
+                terminalNumber VARCHAR(255),
+                cardReaderMode VARCHAR(50) DEFAULT 'integrated',
+                createdAt DATETIME,
+                updatedAt DATETIME
+              )
+            `);
+            await sequelize.query(`
+              INSERT INTO Users_new (id, useremail, name, password, role, locationId, locationName, taxPercentage, zohoTaxId, isActive, terminalIP, terminalPort, terminalNumber, cardReaderMode, createdAt, updatedAt)
+              SELECT id, username, name, password, role, locationId, locationName, taxPercentage, zohoTaxId, isActive, terminalIP, terminalPort, terminalNumber, cardReaderMode, createdAt, updatedAt
+              FROM Users
+            `);
+            await sequelize.query(`DROP TABLE Users`);
+            await sequelize.query(`ALTER TABLE Users_new RENAME TO Users`);
+            logSuccess('Renamed username column to useremail in Users table (SQLite)');
+          } else if (hasUseremail) {
+            logInfo('useremail column already exists on Users table');
+          } else {
+            logInfo('username column does not exist, skipping rename');
+          }
+        } else {
+          logInfo('Users table does not exist yet, will be created with correct schema by sequelize.sync');
+        }
+      } catch (err) {
+        const e = err?.message || '';
+        if (e.includes('no such table')) {
+          logInfo('Users table does not exist yet, will be created with correct schema');
+        } else if (e.includes('duplicate column')) {
+          logInfo('Users table structure already updated');
+        } else {
+          logError(`Could not rename username to useremail: ${err.message}`);
+          logError('Migration failed - please check database state');
+          throw err; // Re-throw to prevent continuing with incorrect schema
+        }
+      }
+    } else {
+      // For PostgreSQL, use ALTER TABLE RENAME COLUMN
+      try {
+        // Check if username column exists
+        const [results] = await sequelize.query(`
+          SELECT column_name 
+          FROM information_schema.columns 
+          WHERE table_name = 'Users' AND column_name = 'username'
+        `);
+        
+        if (results.length > 0) {
+          // Check if useremail already exists
+          const [emailResults] = await sequelize.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'Users' AND column_name = 'useremail'
+          `);
+          
+          if (emailResults.length === 0) {
+            await sequelize.query(`ALTER TABLE "Users" RENAME COLUMN "username" TO "useremail"`);
+            logSuccess('Renamed username column to useremail in Users table (PostgreSQL)');
+          } else {
+            logInfo('useremail column already exists on Users table');
+          }
+        } else {
+          logInfo('username column does not exist, skipping rename');
+        }
+      } catch (err) {
+        const e = err?.message || '';
+        if (e.includes('does not exist') || e.includes('duplicate')) {
+          logInfo('Users table structure already updated');
+        } else {
+          logWarning(`Could not rename username to useremail: ${err.message}`);
+        }
+      }
+    }
+  } catch (error) {
+    logWarning(`Error renaming username to useremail: ${error}`);
+  }
+};
+
 // Ensure taxId column exists on SaleItems table
 // This persists the Zoho Books tax_id used on each line item (needed for retry sync and historical data).
 const ensureSaleItemTaxIdColumn = async () =>
@@ -448,12 +627,98 @@ const ensureSaleCancelledColumn = async () =>
     warnMessage: 'Could not ensure cancelledInZoho column on Sales table'
   });
 
+// Ensure transactions table exists (legacy table for backward compatibility)
+const ensureTransactionsTable = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      // Check if transactions table exists
+      const [tables] = await sequelize.query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'"
+      );
+      
+      if (tables && tables.length > 0) {
+        logInfo('transactions table already exists');
+        return;
+      }
+      
+      // Create transactions table with schema matching Sale model
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS transactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          transactionId VARCHAR(255),
+          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+          subtotal DECIMAL(10, 2) NOT NULL,
+          taxAmount DECIMAL(10, 2) DEFAULT 0,
+          taxPercentage DECIMAL(5, 2) DEFAULT 0,
+          ccFee DECIMAL(10, 2) DEFAULT 0,
+          total DECIMAL(10, 2) NOT NULL,
+          paymentType VARCHAR(255) NOT NULL,
+          locationId VARCHAR(255) NOT NULL,
+          locationName VARCHAR(255),
+          customerId INTEGER,
+          zohoCustomerId VARCHAR(255),
+          userId INTEGER,
+          zohoSalesReceiptId VARCHAR(255),
+          syncedToZoho BOOLEAN DEFAULT 0,
+          syncError TEXT,
+          notes TEXT,
+          cancelledInZoho BOOLEAN DEFAULT 0
+        )
+      `);
+      logSuccess('Created transactions table');
+    } else {
+      // For PostgreSQL, check if table exists
+      const [tables] = await sequelize.query(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transactions'"
+      );
+      
+      if (tables && tables.length > 0) {
+        logInfo('transactions table already exists');
+        return;
+      }
+      
+      // Create transactions table with schema matching Sale model
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS transactions (
+          id SERIAL PRIMARY KEY,
+          "transactionId" VARCHAR(255),
+          "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          subtotal DECIMAL(10, 2) NOT NULL,
+          "taxAmount" DECIMAL(10, 2) DEFAULT 0,
+          "taxPercentage" DECIMAL(5, 2) DEFAULT 0,
+          "ccFee" DECIMAL(10, 2) DEFAULT 0,
+          total DECIMAL(10, 2) NOT NULL,
+          "paymentType" VARCHAR(255) NOT NULL,
+          "locationId" VARCHAR(255) NOT NULL,
+          "locationName" VARCHAR(255),
+          "customerId" INTEGER,
+          "zohoCustomerId" VARCHAR(255),
+          "userId" INTEGER,
+          "zohoSalesReceiptId" VARCHAR(255),
+          "syncedToZoho" BOOLEAN DEFAULT false,
+          "syncError" TEXT,
+          notes TEXT,
+          "cancelledInZoho" BOOLEAN DEFAULT false
+        )
+      `);
+      logSuccess('Created transactions table');
+    }
+  } catch (err) {
+    logWarning(`Could not ensure transactions table: ${err.message}`);
+  }
+};
+
 // Admin user creation is handled by bootstrap login mechanism in authController.js
 // Bootstrap credentials: accounting@subzeroiceservices.com / dryice000
 // This only works when database is empty (first-time setup)
 
 const startServer = async () => {
   await cleanupBackupTables();
+
+  // Rename username to useremail if needed (must be done BEFORE sequelize.sync)
+  await renameUsernameToUseremail();
 
   await disableSQLiteForeignKeys();
   try {
@@ -462,28 +727,33 @@ const startServer = async () => {
     await enableSQLiteForeignKeys();
   }
 
-  // Make sure new columns needed for features exist in older SQLite DBs
-  if (DATABASE_SETTING === 'local') {
-    await ensureItemImageColumn();
-    await ensureTerminalColumns();
-    await ensureZohoTaxIdColumn();
-    await ensureSaleItemTaxIdColumn();
-    await ensureSaleCancelledColumn();
-    await ensureBankAccountColumn();
-    await ensureCustomerProfileColumns();
-    await ensureCustomerStatusColumn();
-  } else {
-    // For PostgreSQL, also ensure columns exist
-    await ensureTerminalColumns();
-    await ensureZohoTaxIdColumn();
-    await ensureSaleItemTaxIdColumn();
-    await ensureSaleCancelledColumn();
-    await ensureBankAccountColumn();
-    await ensureCustomerProfileColumns();
-    await ensureCustomerStatusColumn();
-  }
+        // Make sure new columns needed for features exist in older SQLite DBs
+        if (DATABASE_SETTING === 'local') {
+          await ensureItemImageColumn();
+          await ensureTerminalColumns();
+          await ensureZohoTaxIdColumn();
+          await ensureUserNameColumn();
+          await ensureSaleItemTaxIdColumn();
+          await ensureSaleCancelledColumn();
+          await ensureBankAccountColumn();
+          await ensureCustomerProfileColumns();
+          await ensureCustomerStatusColumn();
+          await ensureTransactionsTable();
+        } else {
+          // For PostgreSQL, also ensure columns exist
+          await ensureTerminalColumns();
+          await ensureZohoTaxIdColumn();
+          await ensureUserNameColumn();
+          await ensureSaleItemTaxIdColumn();
+          await ensureSaleCancelledColumn();
+          await ensureBankAccountColumn();
+          await ensureCustomerProfileColumns();
+          await ensureCustomerStatusColumn();
+          await ensureTransactionsTable();
+        }
 
-  // Admin user creation handled by bootstrap login (see authController.js)
+  // Check and create admin user if none exists
+  await checkAndCreateAdminUser();
 
   await checkAndSyncCustomers();
 

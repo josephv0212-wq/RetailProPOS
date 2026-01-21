@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CreditCard, Building2, Check, Loader2 } from 'lucide-react';
 import { customersAPI } from '../../services/api';
+import { logger } from '../../utils/logger';
 
 interface PaymentProfile {
   paymentProfileId: string;
@@ -59,7 +60,7 @@ export function PaymentMethodSelector({
         setError(response.error || response.data?.message || 'Failed to load payment profiles');
       }
     } catch (err: any) {
-      console.error('Failed to load payment profiles:', err);
+      logger.error('Failed to load payment profiles', err);
       setError(err.message || 'Failed to load payment profiles');
     } finally {
       setLoading(false);

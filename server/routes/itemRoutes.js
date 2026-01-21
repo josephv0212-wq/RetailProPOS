@@ -1,10 +1,11 @@
 import express from 'express';
-import { getItems, getItemById, getItemsFromPricebook, updateItemImage } from '../controllers/itemController.js';
+import { getItems, getItemById, getItemsFromPricebook, updateItemImage, syncItemsFromZoho } from '../controllers/itemController.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.get('/pricebook', authenticate, getItemsFromPricebook);
+router.post('/sync', authenticate, syncItemsFromZoho);
 router.get('/', authenticate, getItems);
 router.get('/:id', authenticate, getItemById);
 

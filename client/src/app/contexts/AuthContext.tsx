@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { authAPI } from '../../services/api';
+import { logger } from '../../utils/logger';
 
 interface User {
   id: number;
-  username: string;
+  useremail: string;
+  name?: string | null;
   role: 'cashier' | 'admin';
   locationId: string;
   locationName: string;
@@ -19,7 +21,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (username: string, password: string, rememberDevice?: boolean) => Promise<{ success: boolean; message?: string }>;
+  login: (useremail: string, password: string, rememberDevice?: boolean) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -45,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             authAPI.logout();
           }
         } catch (error) {
-          console.error('Failed to load user:', error);
+          logger.error('Failed to load user', error);
           authAPI.logout();
         }
       }
@@ -55,9 +57,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadUser();
   }, []);
 
-  const login = async (username: string, password: string, rememberDevice: boolean = true) => {
+  const login = async (useremail: string, password: string, rememberDevice: boolean = true) => {
     try {
-      const response = await authAPI.login(username, password, rememberDevice);
+      const response = await authAPI.login(useremail, password, rememberDevice);
       if (response.success && response.data?.user) {
         setUser(response.data.user);
         return { success: true };

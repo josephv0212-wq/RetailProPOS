@@ -4,6 +4,7 @@
  */
 
 import { paymentAPI } from './api';
+import { logger } from '../utils/logger';
 
 export interface PaymentStatus {
   success: boolean;
@@ -68,7 +69,7 @@ export const pollPaymentStatus = async (
         }
       }
     } catch (error: any) {
-      console.error('Payment status check error:', error);
+      logger.error('Payment status check error', error);
       // Continue polling on error (might be temporary network issue)
     }
 

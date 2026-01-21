@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { salesAPI } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
+import { logger } from '../../utils/logger';
 import { RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 
 interface SyncStatus {
@@ -40,7 +41,7 @@ export function ZohoSyncDiagnostic() {
       }
     } catch (err: any) {
       showToast('Failed to load sync status', 'error');
-      console.error('Sync status error:', err);
+      logger.error('Sync status error', err);
     } finally {
       setLoading(false);
     }

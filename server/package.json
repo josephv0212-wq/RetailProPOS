@@ -11,7 +11,8 @@
     "get-zoho-token": "node scripts/getZohoToken.js",
     "migrate:terminal-ip": "node scripts/addTerminalIPColumn.js",
     "zoho:organize-salesorders": "node scripts/organizeZohoSalesOrders.js",
-    "zoho:scan-salesorders": "node scripts/scanZohoSalesOrders.js"
+    "zoho:scan-salesorders": "node scripts/scanZohoSalesOrders.js",
+    "create-admin": "node scripts/createAdminUser.js"
   },
   "dependencies": {
     "axios": "^1.6.0",

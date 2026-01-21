@@ -115,11 +115,13 @@ export const validateSale = (req, res, next) => {
 };
 
 export const validateLogin = (req, res, next) => {
-  const { username, password } = req.body;
+  const { username, useremail, password } = req.body;
+  // Support both username and useremail for backward compatibility
+  const email = useremail || username;
   const errors = [];
 
-  if (!username || typeof username !== 'string' || username.trim().length === 0) {
-    errors.push('Username is required');
+  if (!email || typeof email !== 'string' || email.trim().length === 0) {
+    errors.push('User email is required');
   }
   if (!password || typeof password !== 'string' || password.length === 0) {
     errors.push('Password is required');
@@ -137,11 +139,13 @@ export const validateLogin = (req, res, next) => {
 };
 
 export const validateCreateUser = (req, res, next) => {
-  const { username, password, role, locationId } = req.body;
+  const { username, useremail, password, role, locationId } = req.body;
+  // Support both username and useremail for backward compatibility
+  const email = useremail || username;
   const errors = [];
 
-  if (!username || typeof username !== 'string' || username.trim().length < 3) {
-    errors.push('Username must be at least 3 characters');
+  if (!email || typeof email !== 'string' || email.trim().length < 3) {
+    errors.push('User email must be at least 3 characters');
   }
   if (!password || typeof password !== 'string' || password.length < 6) {
     errors.push('Password must be at least 6 characters');
@@ -165,11 +169,13 @@ export const validateCreateUser = (req, res, next) => {
 };
 
 export const validateRegistration = (req, res, next) => {
-  const { username, password, locationId } = req.body;
+  const { username, useremail, password, locationId } = req.body;
+  // Support both username and useremail for backward compatibility
+  const email = useremail || username;
   const errors = [];
 
-  if (!username || typeof username !== 'string' || username.trim().length < 3) {
-    errors.push('Username must be at least 3 characters');
+  if (!email || typeof email !== 'string' || email.trim().length < 3) {
+    errors.push('User email must be at least 3 characters');
   }
   if (!password || typeof password !== 'string' || password.length < 6) {
     errors.push('Password must be at least 6 characters');

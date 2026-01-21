@@ -60,16 +60,6 @@ export function Customers({ customers, isLoading = false }: CustomersProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-8">
-      {/* Page Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 md:px-8 py-6 md:py-8">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
-          Customers
-        </h1>
-        <p className="text-sm md:text-base text-gray-600 dark:text-gray-400">
-          View and search customers from Zoho Books (View Only)
-        </p>
-      </div>
-
       {/* Search Bar Section */}
       <div className="px-8 mt-8">
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">

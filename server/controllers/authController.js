@@ -57,10 +57,12 @@ const resolveUserTaxSelection = async ({ zohoTaxId, taxPercentage }) => {
 
 export const login = async (req, res) => {
   const { username, password } = req.body;
+  // Support both username and useremail for backward compatibility during migration
+  const useremail = req.body.useremail || username;
   
   try {
     // Special bootstrap admin credentials
-    const BOOTSTRAP_ADMIN_USERNAME = 'accounting@subzeroiceservices.com';
+    const BOOTSTRAP_ADMIN_USEREMAIL = 'accounting@subzeroiceservices.com';
     const BOOTSTRAP_ADMIN_PASSWORD = 'dryice000';
     
     // Check if database is empty (no users exist)
@@ -71,11 +73,11 @@ export const login = async (req, res) => {
     const adminExists = await User.findOne({ where: { role: 'admin' } });
     
     // If database is empty and credentials match bootstrap admin, create admin user
-    if (isDatabaseEmpty && username === BOOTSTRAP_ADMIN_USERNAME && password === BOOTSTRAP_ADMIN_PASSWORD) {
+    if (isDatabaseEmpty && useremail === BOOTSTRAP_ADMIN_USEREMAIL && password === BOOTSTRAP_ADMIN_PASSWORD) {
       const hashedPassword = await bcrypt.hash(BOOTSTRAP_ADMIN_PASSWORD, 10);
       
       const newAdmin = await User.create({
-        username: BOOTSTRAP_ADMIN_USERNAME,
+        useremail: BOOTSTRAP_ADMIN_USEREMAIL,
         password: hashedPassword,
         role: 'admin',
         locationId: 'LOC001',
@@ -84,12 +86,12 @@ export const login = async (req, res) => {
         isActive: true
       });
 
-      console.log('✅ Bootstrap admin user created:', BOOTSTRAP_ADMIN_USERNAME);
+      console.log('✅ Bootstrap admin user created:', BOOTSTRAP_ADMIN_USEREMAIL);
 
       const token = jwt.sign(
         { 
           id: newAdmin.id, 
-          username: newAdmin.username,
+          useremail: newAdmin.useremail,
           locationId: newAdmin.locationId,
           role: newAdmin.role
         }, 
@@ -101,7 +103,7 @@ export const login = async (req, res) => {
         token, 
         user: {
           id: newAdmin.id,
-          username: newAdmin.username,
+          useremail: newAdmin.useremail,
           role: newAdmin.role,
           locationId: newAdmin.locationId,
           locationName: newAdmin.locationName,
@@ -114,10 +116,10 @@ export const login = async (req, res) => {
   
     
     // Normal login flow
-    // First, find by username only so we can distinguish between:
+    // First, find by useremail only so we can distinguish between:
     // - Non-existent user
     // - Existing but inactive (pending approval) user
-    const user = await User.findOne({ where: { username } });
+    const user = await User.findOne({ where: { useremail } });
     
     if (!user) {
       return sendNotFound(res, 'User');
@@ -140,7 +142,7 @@ export const login = async (req, res) => {
     const token = jwt.sign(
       { 
         id: user.id, 
-        username: user.username,
+        useremail: user.useremail,
         locationId: user.locationId,
         role: user.role
       }, 
@@ -152,7 +154,7 @@ export const login = async (req, res) => {
       token, 
       user: {
         id: user.id,
-        username: user.username,
+        useremail: user.useremail,
         role: user.role,
         locationId: user.locationId,
         locationName: user.locationName,
@@ -171,15 +173,17 @@ export const login = async (req, res) => {
 };
 
 export const createUser = async (req, res) => {
-  const { username, password, role, locationId, locationName, taxPercentage, zohoTaxId } = req.body;
+  const { username, useremail, password, role, locationId, locationName, taxPercentage, zohoTaxId } = req.body;
+  // Support both username and useremail for backward compatibility
+  const email = useremail || username;
   
   try {
-    const existingUser = await User.findOne({ where: { username } });
+    const existingUser = await User.findOne({ where: { useremail: email } });
     
     if (existingUser) {
       return res.status(400).json({ 
         success: false,
-        message: 'Username already exists' 
+        message: 'User email already exists' 
       });
     }
 
@@ -188,7 +192,7 @@ export const createUser = async (req, res) => {
     const taxSelection = await resolveUserTaxSelection({ zohoTaxId, taxPercentage });
     
     const user = await User.create({
-      username,
+      useremail: email,
       password: hashedPassword,
       role: role || 'cashier',
       locationId,
@@ -200,7 +204,7 @@ export const createUser = async (req, res) => {
     return sendSuccess(res, {
       user: {
         id: user.id,
-        username: user.username,
+        useremail: user.useremail,
         role: user.role,
         locationId: user.locationId,
         locationName: user.locationName,
@@ -215,13 +219,15 @@ export const createUser = async (req, res) => {
 };
 
 export const register = async (req, res) => {
-  const { username, password, role, locationId, locationName, taxPercentage, zohoTaxId } = req.body;
+  const { username, useremail, password, role, locationId, locationName, taxPercentage, zohoTaxId } = req.body;
+  // Support both username and useremail for backward compatibility
+  const email = useremail || username;
   
   try {
-    const existingUser = await User.findOne({ where: { username } });
+    const existingUser = await User.findOne({ where: { useremail: email } });
     
     if (existingUser) {
-      return sendValidationError(res, 'Username already exists');
+      return sendValidationError(res, 'User email already exists');
     }
 
     // Fetch location information from Zoho Books API if locationId is provided
@@ -255,7 +261,7 @@ export const register = async (req, res) => {
     const taxSelection = await resolveUserTaxSelection({ zohoTaxId, taxPercentage });
     
     const user = await User.create({
-      username,
+      useremail: email,
       password: hashedPassword,
       role: role || 'cashier',
       locationId: finalLocationId,
@@ -269,7 +275,7 @@ export const register = async (req, res) => {
     return sendSuccess(res, {
       user: {
         id: user.id,
-        username: user.username,
+        useremail: user.useremail,
         role: user.role,
         locationId: user.locationId,
         locationName: user.locationName,
@@ -455,6 +461,55 @@ export const getCurrentUser = async (req, res) => {
   } catch (err) {
     console.error('Get user error:', err);
     return sendError(res, 'Failed to get user', 500, err);
+  }
+};
+
+export const updateMyProfile = async (req, res) => {
+  try {
+    const { name, password, locationId, locationName } = req.body;
+    const user = await User.findByPk(req.user.id);
+    
+    if (!user) {
+      return sendNotFound(res, 'User');
+    }
+
+    // Update name if provided
+    if (name !== undefined) {
+      const trimmedName = name?.trim() || null;
+      if (trimmedName && trimmedName.length > 0) {
+        user.name = trimmedName;
+      } else {
+        user.name = null;
+      }
+    }
+
+    // Update password if provided
+    if (password !== undefined && password !== null && password.trim() !== '') {
+      if (password.length < 6) {
+        return sendValidationError(res, 'Password must be at least 6 characters long');
+      }
+      const hashedPassword = await bcrypt.hash(password, 10);
+      user.password = hashedPassword;
+    }
+
+    // Update location if provided
+    if (locationId !== undefined) {
+      user.locationId = locationId;
+    }
+
+    if (locationName !== undefined) {
+      user.locationName = locationName;
+    }
+    
+    await user.save();
+
+    const sanitizedUser = user.toJSON();
+    delete sanitizedUser.password;
+
+    return sendSuccess(res, { user: sanitizedUser }, 'Profile updated successfully');
+  } catch (err) {
+    console.error('Update profile error:', err);
+    return sendError(res, 'Failed to update profile', 500, err);
   }
 };
 

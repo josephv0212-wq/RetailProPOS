@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { TopNavigation } from './components/TopNavigation';
+import { PageWrapper } from './components/PageWrapper';
 import { ShoppingCart } from './components/ShoppingCart';
 import { ProductSelection } from './components/ProductSelection';
 import { PaymentModal } from './components/PaymentModal';
@@ -21,6 +22,7 @@ import { SalesOrderInvoiceModal } from './components/SalesOrderInvoiceModal';
 import { PaymentMethodSelector } from './components/PaymentMethodSelector';
 import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
+import { logger } from '../utils/logger';
 
 type AppScreen = 'signin' | 'signup' | 'pos' | 'customers' | 'reports' | 'settings' | 'admin' | 'receipt';
 
@@ -61,12 +63,91 @@ function AppContent() {
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [pendingChargeItems, setPendingChargeItems] = useState<any[]>([]);
 
-  // Constants from user data
-  const TAX_RATE = user?.taxPercentage ? user.taxPercentage / 100 : 0.0825;
-  const STORE_NAME = user?.locationName || 'Store';
-  const STORE_ADDRESS = '123 Main Street, Suite 100, City, ST 12345'; // Could come from API
-  const STORE_PHONE = '(555) 123-4567'; // Could come from API
-  const USER_NAME = user?.username || 'User';
+  // Memoized constants from user data
+  const constants = useMemo(() => ({
+    TAX_RATE: user?.taxPercentage ? user.taxPercentage / 100 : 0.0825,
+    STORE_NAME: user?.locationName || 'Store',
+    STORE_ADDRESS: '123 Main Street, Suite 100, City, ST 12345', // Could come from API
+    STORE_PHONE: '(555) 123-4567', // Could come from API
+    USER_NAME: user?.name || user?.useremail || 'User',
+  }), [user?.taxPercentage, user?.locationName, user?.name, user?.useremail]);
+
+  const loadProducts = useCallback(async () => {
+    setLoadingProducts(true);
+    setError('');
+    try {
+      const response = await itemsAPI.getAll({ isActive: true });
+      if (response.success && response.data?.items) {
+        // Transform API products to match UI format
+        const transformedProducts: Product[] = response.data.items.map((item: any) => {
+          // Handle imageData - could be base64 string or full data URL
+          let imageUrl = undefined;
+          if (item.imageData) {
+            // If it already has data: prefix, use as is, otherwise add it
+            imageUrl = item.imageData.startsWith('data:') 
+              ? item.imageData 
+              : `data:image/png;base64,${item.imageData}`;
+          }
+          return {
+            ...item,
+            imageUrl,
+          };
+        });
+        setProducts(transformedProducts);
+      }
+    } catch (err: any) {
+      logger.error('Failed to load products', err);
+      setError('Failed to load products');
+    } finally {
+      setLoadingProducts(false);
+    }
+  }, []);
+
+  const loadCustomers = useCallback(async () => {
+    setLoadingCustomers(true);
+    try {
+      const response = await customersAPI.getAll({ isActive: true });
+      if (response.success && response.data?.customers) {
+        // Transform API customers to match UI format
+        const transformedCustomers: Customer[] = response.data.customers.map((cust: any) => ({
+          ...cust,
+          name: cust.contactName,
+          company: cust.companyName,
+          taxExempt: false, // Will be determined from price list
+          hasZohoId: !!cust.zohoId,
+          status: cust.isActive ? 'active' : 'inactive',
+          paymentInfo: {
+            cardBrand: cust.cardBrand,
+            last4: cust.last_four_digits,
+            hasCard: cust.hasPaymentMethod,
+          },
+        }));
+        setCustomers(transformedCustomers);
+      }
+    } catch (err: any) {
+      logger.error('Failed to load customers', err);
+    } finally {
+      setLoadingCustomers(false);
+    }
+  }, []);
+
+  // Calculate totals for payment modal (memoized) - must be before any early returns
+  const totalsForReceipt = useMemo(() => {
+    const subtotal = cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+    const isTaxExempt = selectedCustomer?.taxExempt || false;
+    const tax = isTaxExempt ? 0 : subtotal * constants.TAX_RATE;
+    const total = subtotal + tax;
+    return { subtotal, tax, total };
+  }, [cartItems, selectedCustomer?.taxExempt, constants.TAX_RATE]);
+
+  // Memoize navigation handlers to prevent unnecessary re-renders
+  const navigationHandlers = useMemo(() => ({
+    toPOS: () => setCurrentScreen('pos'),
+    toCustomers: () => setCurrentScreen('customers'),
+    toReports: () => setCurrentScreen('reports'),
+    toSettings: () => setCurrentScreen('settings'),
+    toAdmin: () => setCurrentScreen('admin'),
+  }), []);
 
   // Load products and customers when authenticated
   useEffect(() => {
@@ -74,7 +155,7 @@ function AppContent() {
       loadProducts();
       loadCustomers();
     }
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, loadProducts, loadCustomers]);
 
   // Track if we're syncing from URL to avoid loops
   const isSyncingFromUrl = useRef(false);
@@ -144,65 +225,6 @@ function AppContent() {
     }
   }, [authLoading, isAuthenticated, currentScreen]);
 
-  const loadProducts = async () => {
-    setLoadingProducts(true);
-    setError('');
-    try {
-      const response = await itemsAPI.getAll({ isActive: true });
-      if (response.success && response.data?.items) {
-        // Transform API products to match UI format
-        const transformedProducts: Product[] = response.data.items.map((item: any) => {
-          // Handle imageData - could be base64 string or full data URL
-          let imageUrl = undefined;
-          if (item.imageData) {
-            // If it already has data: prefix, use as is, otherwise add it
-            imageUrl = item.imageData.startsWith('data:') 
-              ? item.imageData 
-              : `data:image/png;base64,${item.imageData}`;
-          }
-          return {
-            ...item,
-            imageUrl,
-          };
-        });
-        setProducts(transformedProducts);
-      }
-    } catch (err: any) {
-      console.error('Failed to load products:', err);
-      setError('Failed to load products');
-    } finally {
-      setLoadingProducts(false);
-    }
-  };
-
-  const loadCustomers = async () => {
-    setLoadingCustomers(true);
-    try {
-      const response = await customersAPI.getAll({ isActive: true });
-      if (response.success && response.data?.customers) {
-        // Transform API customers to match UI format
-        const transformedCustomers: Customer[] = response.data.customers.map((cust: any) => ({
-          ...cust,
-          name: cust.contactName,
-          company: cust.companyName,
-          taxExempt: false, // Will be determined from price list
-          hasZohoId: !!cust.zohoId,
-          status: cust.isActive ? 'active' : 'inactive',
-          paymentInfo: {
-            cardBrand: cust.cardBrand,
-            last4: cust.last_four_digits,
-            hasCard: cust.hasPaymentMethod,
-          },
-        }));
-        setCustomers(transformedCustomers);
-      }
-    } catch (err: any) {
-      console.error('Failed to load customers:', err);
-    } finally {
-      setLoadingCustomers(false);
-    }
-  };
-
   // Handle customer selection with pricebook integration
   const handleSelectCustomer = async (customer: Customer | null) => {
     // Check if vendor contact
@@ -248,7 +270,7 @@ function AppContent() {
           return;
         }
       } catch (err: any) {
-        console.error('Failed to check for sales orders/invoices:', err);
+        logger.error('Failed to check for sales orders/invoices', err);
         setOpenSalesOrders([]);
         setInvoices([]);
       } finally {
@@ -445,7 +467,7 @@ function AppContent() {
         );
       }
     } catch (err: any) {
-      console.error('Failed to charge invoices/sales orders:', err);
+      logger.error('Failed to charge invoices/sales orders', err);
       showToast(
         err.message || 'Failed to charge invoices/sales orders',
         'error',
@@ -460,6 +482,19 @@ function AppContent() {
   // Continue customer selection after SO/Invoice handling
   const continueCustomerSelection = async (customer: Customer | null) => {
     if (!customer) return;
+
+    // Sync items from Zoho when customer is selected
+    try {
+      logger.info('Syncing items from Zoho for customer...');
+      const syncResponse = await itemsAPI.syncFromZoho();
+      if (syncResponse.success) {
+        const stats = syncResponse.data?.syncStats;
+        logger.info(`Items synced: ${stats?.created || 0} created, ${stats?.updated || 0} updated`);
+      }
+    } catch (syncError: any) {
+      logger.error('Failed to sync items from Zoho', syncError);
+      // Continue with customer selection even if sync fails
+    }
 
     // Fetch customer pricebook and items from pricebook
     if (customer.id) {
@@ -585,11 +620,11 @@ function AppContent() {
         customerTaxPreference = 'SALES TAX EXCEPTION CERTIFICATE';
       }
     } catch (err) {
-      console.error('Failed to get customer tax preference:', err);
+      logger.error('Failed to get customer tax preference', err);
     }
 
     const isTaxExempt = customerTaxPreference === 'SALES TAX EXCEPTION CERTIFICATE';
-    const tax = isTaxExempt ? 0 : subtotal * TAX_RATE;
+    const tax = isTaxExempt ? 0 : subtotal * constants.TAX_RATE;
     const total = subtotal + tax;
 
     // Prepare payment details for API
@@ -709,7 +744,7 @@ function AppContent() {
           tax: response.data.sale.taxAmount,
           payment: paymentDetails,
           timestamp: new Date(response.data.sale.createdAt),
-          cashier: USER_NAME,
+          cashier: constants.USER_NAME,
           zohoSynced: response.data.sale.syncedToZoho,
           zohoError: response.data.sale.syncError || undefined,
         };
@@ -723,7 +758,7 @@ function AppContent() {
         showAlert({ message: response.message || 'Failed to complete sale' });
       }
     } catch (err: any) {
-      console.error('Failed to create sale:', err);
+      logger.error('Failed to create sale', err);
       showAlert({ message: err.message || 'An error occurred while processing the sale' });
     }
   };
@@ -760,20 +795,14 @@ function AppContent() {
     );
   }
 
-  // Calculate totals for payment modal
-  const subtotal = cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
-  const isTaxExempt = selectedCustomer?.taxExempt || false;
-  const tax = isTaxExempt ? 0 : subtotal * TAX_RATE;
-  const total = subtotal + tax;
-
   if (currentScreen === 'receipt' && completedSale) {
     return (
       <ReceiptScreen
         sale={completedSale}
-        storeName={STORE_NAME}
-        storeAddress={STORE_ADDRESS}
-        storePhone={STORE_PHONE}
-        userName={USER_NAME}
+        storeName={constants.STORE_NAME}
+        storeAddress={constants.STORE_ADDRESS}
+        storePhone={constants.STORE_PHONE}
+        userName={constants.USER_NAME}
         onNewSale={handleNewSale}
         onLogout={handleLogout}
       />
@@ -802,106 +831,96 @@ function AppContent() {
 
   if (currentScreen === 'customers') {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <TopNavigation
-          storeName={STORE_NAME}
-          userName={USER_NAME}
-          onLogout={handleLogout}
-          onNavigateToPOS={() => setCurrentScreen('pos')}
-          onNavigateToCustomers={() => setCurrentScreen('customers')}
-          onNavigateToReports={() => setCurrentScreen('reports')}
-          onNavigateToSettings={() => setCurrentScreen('settings')}
-          onNavigateToAdmin={() => setCurrentScreen('admin')}
-          userRole={user?.role || 'cashier'}
-          userLocation={user?.locationName || 'Store'}
-        />
-        <div className="pt-[73px]">
-          <Customers customers={customers} />
-        </div>
-      </div>
+      <PageWrapper
+        storeName={constants.STORE_NAME}
+        userName={constants.USER_NAME}
+        userRole={user?.role || 'cashier'}
+        userLocation={user?.locationName || 'Store'}
+        onLogout={handleLogout}
+        onNavigateToPOS={navigationHandlers.toPOS}
+        onNavigateToCustomers={navigationHandlers.toCustomers}
+        onNavigateToReports={navigationHandlers.toReports}
+        onNavigateToSettings={navigationHandlers.toSettings}
+        onNavigateToAdmin={navigationHandlers.toAdmin}
+      >
+        <Customers customers={customers} />
+      </PageWrapper>
     );
   }
 
   if (currentScreen === 'reports') {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <TopNavigation
-          storeName={STORE_NAME}
-          userName={USER_NAME}
-          onLogout={handleLogout}
-          onNavigateToPOS={() => setCurrentScreen('pos')}
-          onNavigateToCustomers={() => setCurrentScreen('customers')}
-          onNavigateToReports={() => setCurrentScreen('reports')}
-          onNavigateToSettings={() => setCurrentScreen('settings')}
-          onNavigateToAdmin={() => setCurrentScreen('admin')}
-          userRole={user?.role || 'cashier'}
-          userLocation={user?.locationName || 'Store'}
-        />
-        <div className="pt-[73px]">
-          <Reports transactions={[]} userLocationId={user?.locationId || ''} />
-        </div>
-      </div>
+      <PageWrapper
+        storeName={constants.STORE_NAME}
+        userName={constants.USER_NAME}
+        userRole={user?.role || 'cashier'}
+        userLocation={user?.locationName || 'Store'}
+        onLogout={handleLogout}
+        onNavigateToPOS={navigationHandlers.toPOS}
+        onNavigateToCustomers={navigationHandlers.toCustomers}
+        onNavigateToReports={navigationHandlers.toReports}
+        onNavigateToSettings={navigationHandlers.toSettings}
+        onNavigateToAdmin={navigationHandlers.toAdmin}
+      >
+        <Reports transactions={[]} userLocationId={user?.locationId || ''} />
+      </PageWrapper>
     );
   }
 
   if (currentScreen === 'settings') {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <TopNavigation
-          storeName={STORE_NAME}
-          userName={USER_NAME}
-          onLogout={handleLogout}
-          onNavigateToPOS={() => setCurrentScreen('pos')}
-          onNavigateToCustomers={() => setCurrentScreen('customers')}
-          onNavigateToReports={() => setCurrentScreen('reports')}
-          onNavigateToSettings={() => setCurrentScreen('settings')}
-          onNavigateToAdmin={() => setCurrentScreen('admin')}
+      <PageWrapper
+        storeName={constants.STORE_NAME}
+        userName={constants.USER_NAME}
+        userRole={user?.role || 'cashier'}
+        userLocation={user?.locationName || 'Store'}
+        onLogout={handleLogout}
+        onNavigateToPOS={navigationHandlers.toPOS}
+        onNavigateToCustomers={navigationHandlers.toCustomers}
+        onNavigateToReports={navigationHandlers.toReports}
+        onNavigateToSettings={navigationHandlers.toSettings}
+        onNavigateToAdmin={navigationHandlers.toAdmin}
+      >
+        <Settings
+          locationId={user?.locationId || ''}
+          locationName={user?.locationName || ''}
+          userName={constants.USER_NAME}
           userRole={user?.role || 'cashier'}
-          userLocation={user?.locationName || 'Store'}
         />
-        <div className="pt-[73px]">
-          <Settings
-            locationId={user?.locationId || ''}
-            locationName={user?.locationName || ''}
-            userName={USER_NAME}
-            userRole={user?.role || 'cashier'}
-          />
-        </div>
-      </div>
+      </PageWrapper>
     );
   }
 
   if (currentScreen === 'admin') {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <TopNavigation
-          storeName={STORE_NAME}
-          userName={USER_NAME}
-          onLogout={handleLogout}
-          onNavigateToPOS={() => setCurrentScreen('pos')}
-          onNavigateToCustomers={() => setCurrentScreen('customers')}
-          onNavigateToReports={() => setCurrentScreen('reports')}
-          onNavigateToSettings={() => setCurrentScreen('settings')}
-          onNavigateToAdmin={() => setCurrentScreen('admin')}
-          userRole={user?.role || 'cashier'}
-          userLocation={user?.locationName || 'Store'}
-        />
-        <AdminPage currentUser={user ? { username: user.username, role: user.role } : { username: '', role: 'cashier' }} />
-      </div>
+      <PageWrapper
+        storeName={constants.STORE_NAME}
+        userName={constants.USER_NAME}
+        userRole={user?.role || 'cashier'}
+        userLocation={user?.locationName || 'Store'}
+        onLogout={handleLogout}
+        onNavigateToPOS={navigationHandlers.toPOS}
+        onNavigateToCustomers={navigationHandlers.toCustomers}
+        onNavigateToReports={navigationHandlers.toReports}
+        onNavigateToSettings={navigationHandlers.toSettings}
+        onNavigateToAdmin={navigationHandlers.toAdmin}
+      >
+        <AdminPage currentUser={user ? { useremail: user.useremail, role: user.role } : { useremail: '', role: 'cashier' }} />
+      </PageWrapper>
     );
   }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <TopNavigation
-        storeName={STORE_NAME}
-        userName={USER_NAME}
+        storeName={constants.STORE_NAME}
+        userName={constants.USER_NAME}
         onLogout={handleLogout}
-        onNavigateToPOS={() => setCurrentScreen('pos')}
-        onNavigateToCustomers={() => setCurrentScreen('customers')}
-        onNavigateToReports={() => setCurrentScreen('reports')}
-        onNavigateToSettings={() => setCurrentScreen('settings')}
-        onNavigateToAdmin={() => setCurrentScreen('admin')}
+        onNavigateToPOS={navigationHandlers.toPOS}
+        onNavigateToCustomers={navigationHandlers.toCustomers}
+        onNavigateToReports={navigationHandlers.toReports}
+        onNavigateToSettings={navigationHandlers.toSettings}
+        onNavigateToAdmin={navigationHandlers.toAdmin}
         userRole={user?.role || 'cashier'}
         userLocation={user?.locationName || 'Store'}
       />
@@ -920,7 +939,7 @@ function AppContent() {
             onRemoveItem={handleRemoveItem}
             onClearCart={handleClearCart}
             onPayNow={handlePayNow}
-            taxRate={TAX_RATE}
+            taxRate={constants.TAX_RATE}
           />
         </div>
 
@@ -948,9 +967,9 @@ function AppContent() {
       <PaymentModal
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
-        total={total}
-        subtotal={subtotal}
-        tax={tax}
+        total={totalsForReceipt.total}
+        subtotal={totalsForReceipt.subtotal}
+        tax={totalsForReceipt.tax}
         cartItems={cartItems}
         onConfirmPayment={handleConfirmPayment}
         userTerminalNumber={user?.terminalNumber}

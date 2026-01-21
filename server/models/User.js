@@ -7,10 +7,15 @@ export const User = sequelize.define('User', {
     autoIncrement: true, 
     primaryKey: true 
   },
-  username: { 
+  useremail: { 
     type: DataTypes.STRING, 
     allowNull: false,
     unique: true 
+  },
+  name: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Display name for the user (shown in UI instead of useremail)'
   },
   password: { 
     type: DataTypes.STRING, 

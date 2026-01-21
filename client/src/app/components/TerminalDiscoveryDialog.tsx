@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Wifi, Loader, CheckCircle2, XCircle, RefreshCw, AlertCircle } from 'lucide-react';
 import { paxAPI } from '../../services/api';
+import { logger } from '../../utils/logger';
 
 interface Terminal {
   ip: string;
@@ -65,7 +66,7 @@ export function TerminalDiscoveryDialog({
         setError(response.message || 'Failed to discover terminals');
       }
     } catch (err: any) {
-      console.error('Terminal discovery error:', err);
+      logger.error('Terminal discovery error', err);
       setError(err.message || 'Failed to discover terminals. Check your network connection.');
     } finally {
       setIsDiscovering(false);

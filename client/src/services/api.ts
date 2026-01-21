@@ -1,6 +1,8 @@
 // API Service for RetailPro POS
 // Based on API_DOCUMENTATION.md
 
+import { logger } from '../utils/logger';
+
 const getEnvVar = (key: string): string | undefined => {
   try {
     return (import.meta as any).env?.[key];
@@ -97,6 +99,17 @@ async function apiRequest<T = any>(
       throw new Error('Unauthorized');
     }
 
+    // Handle printer test 500 errors gracefully (printer may not be configured)
+    const isPrinterTest = endpoint.includes('/printer/test');
+    if (isPrinterTest && response.status === 500) {
+      // Silently return failure response for printer tests - expected when printer isn't configured
+      return { 
+        success: false, 
+        message: 'Printer not available', 
+        error: 'Printer test failed' 
+      } as ApiResponse<T>;
+    }
+
     const data: ApiResponse<T> = await response.json();
 
     // Cache successful GET requests
@@ -105,18 +118,30 @@ async function apiRequest<T = any>(
     }
 
     return data;
-  } catch (error) {
-    console.error('API request failed:', error);
+  } catch (error: any) {
+    // Don't log errors for printer tests as they're expected when printer isn't configured
+    const isPrinterTest = endpoint.includes('/printer/test');
+    
+    if (isPrinterTest) {
+      // Silently handle printer test failures - return a failure response instead of throwing
+      return { 
+        success: false, 
+        message: 'Printer not available', 
+        error: 'Printer test failed' 
+      } as ApiResponse<T>;
+    }
+    
+    logger.error('API request failed', error);
     throw error;
   }
 }
 
 // Authentication API
 export const authAPI = {
-  login: async (username: string, password: string, rememberDevice: boolean = true) => {
+  login: async (useremail: string, password: string, rememberDevice: boolean = true) => {
     const response = await apiRequest<{ token: string; user: any }>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ useremail, password }),
     }, true);
 
     if (response.success && response.data?.token) {
@@ -127,7 +152,7 @@ export const authAPI = {
   },
 
   register: async (data: {
-    username: string;
+    useremail: string;
     password: string;
     role: string;
     locationId: string;
@@ -143,6 +168,18 @@ export const authAPI = {
 
   getCurrentUser: async () => {
     return apiRequest<{ user: any }>('/auth/me');
+  },
+
+  updateMyProfile: async (data: {
+    name?: string;
+    password?: string;
+    locationId?: string;
+    locationName?: string;
+  }) => {
+    return apiRequest<{ user: any }>('/auth/me/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }, true);
   },
 
   updateTerminalSettings: async (terminalNumber?: string | null, terminalIP?: string | null, terminalPort?: number | string | null, cardReaderMode?: 'integrated' | 'standalone') => {
@@ -166,7 +203,7 @@ export const authAPI = {
   },
 
   createUser: async (data: {
-    username: string;
+    useremail: string;
     password: string;
     role: string;
     locationId: string;
@@ -238,6 +275,20 @@ export const itemsAPI = {
       body: JSON.stringify({ imageData }),
     }, true);
   },
+
+  syncFromZoho: async () => {
+    return apiRequest<{
+      items: any[];
+      syncStats: {
+        total: number;
+        created: number;
+        updated: number;
+        active: number;
+      };
+    }>('/items/sync', {
+      method: 'POST',
+    }, true);
+  },
 };
 
 // Customers API
@@ -291,6 +342,17 @@ export const customersAPI = {
 
 // Sales API
 export const salesAPI = {
+  getTransactions: async (params?: { startDate?: string; endDate?: string; syncedToZoho?: string }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+    if (params?.syncedToZoho !== undefined) queryParams.append('syncedToZoho', params.syncedToZoho);
+    
+    const query = queryParams.toString();
+    return apiRequest<{ transactions: any[] }>(`/sales/transactions${query ? `?${query}` : ''}`, {
+      method: 'GET',
+    }, true);
+  },
   create: async (data: {
     items: Array<{ itemId: number; quantity: number }>;
     customerId?: number;

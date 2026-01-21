@@ -1,7 +1,7 @@
 import React, { useState, FormEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { useAlert } from '../contexts/AlertContext';
+import { useToast } from '../contexts/ToastContext';
 
 interface SignInProps {
   onSignIn: () => void;
@@ -9,21 +9,19 @@ interface SignInProps {
 }
 
 export function SignIn({ onSignIn, onNavigateToSignUp }: SignInProps) {
-  const { showAlert } = useAlert();
+  const { showToast } = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(false);
-  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setError('');
     
     if (!email || !password) {
-      setError('Please enter both email and password');
+      showToast('Please enter both email and password', 'error', 4000);
       return;
     }
 
@@ -33,10 +31,10 @@ export function SignIn({ onSignIn, onNavigateToSignUp }: SignInProps) {
       if (result.success) {
         onSignIn();
       } else {
-        setError(result.message || 'Login failed. Please check your credentials.');
+        showToast(result.message || 'Login failed. Please check your credentials.', 'error', 4000);
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred during login');
+      showToast(err.message || 'An error occurred during login', 'error', 4000);
     } finally {
       setIsLoading(false);
     }
@@ -68,13 +66,6 @@ export function SignIn({ onSignIn, onNavigateToSignUp }: SignInProps) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Error Message */}
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
-
           {/* Email Field */}
           <div>
             <label htmlFor="email" className="block font-medium text-gray-900 dark:text-white mb-2">
@@ -138,7 +129,7 @@ export function SignIn({ onSignIn, onNavigateToSignUp }: SignInProps) {
             <button
               type="button"
               className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-              onClick={() => showAlert({ message: 'Forgot password functionality would be implemented here' })}
+              onClick={() => showToast('Forgot password functionality would be implemented here', 'info', 3000)}
             >
               Forgot password?
             </button>
@@ -171,7 +162,7 @@ export function SignIn({ onSignIn, onNavigateToSignUp }: SignInProps) {
 
       {/* Footer */}
       <div className="mt-8 text-center text-sm text-gray-500 dark:text-gray-400">
-        Version 1.0.0 | <button className="hover:text-gray-700 dark:hover:text-gray-300 transition-colors" onClick={() => showAlert({ message: 'Support functionality would be implemented here' })}>Support</button>
+        Version 1.0.0 | <button className="hover:text-gray-700 dark:hover:text-gray-300 transition-colors" onClick={() => showToast('Support functionality would be implemented here', 'info', 3000)}>Support</button>
       </div>
     </div>
   );

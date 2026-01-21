@@ -10,6 +10,7 @@ import { initiateValorPayment, pollValorPaymentStatus } from '../../services/val
 import { useToast } from '../contexts/ToastContext';
 import { customersAPI } from '../../services/api';
 import { PaymentMethodSelector } from './PaymentMethodSelector';
+import { logger } from '../../utils/logger';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -72,7 +73,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         await loadAcceptJs();
         setAcceptJsReady(isAcceptJsAvailable());
       } catch (err) {
-        console.warn('Accept.js failed to load:', err);
+        logger.warn('Accept.js failed to load', err);
         setAcceptJsReady(false);
       }
     };
@@ -315,7 +316,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             // If no public key configured, still send card data
             // Backend can process directly (less secure but functional)
             // Note: You should configure VITE_AUTHORIZE_NET_PUBLIC_CLIENT_KEY for better security
-            console.warn('⚠️ Accept.js public client key not configured. Using direct card data.');
+            logger.warn('Accept.js public client key not configured. Using direct card data.');
             paymentDetails.useBluetoothReader = true;
             paymentDetails.bluetoothPayload = {
               descriptor: 'COMMON.ACCEPT.INAPP.PAYMENT',
@@ -385,7 +386,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           }
         } catch (encryptError: any) {
           // If encryption fails, send card data directly
-          console.warn('Accept.js encryption failed, using direct card data:', encryptError);
+          logger.warn('Accept.js encryption failed, using direct card data', encryptError);
           paymentDetails.cardNumber = cardNumber;
           paymentDetails.expirationDate = cardExpiry;
           paymentDetails.cvv = cardCvv;
@@ -741,23 +742,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
               <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
-                {cardReaderMode === 'standalone' ? (
-                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border-2 border-yellow-400 dark:border-yellow-600 rounded-lg p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="text-yellow-600 dark:text-yellow-400 text-xl">⚠️</div>
-                      <div className="flex-1">
-                        <div className="font-semibold text-yellow-900 dark:text-yellow-200 mb-2">
-                          Standalone Card Reader Mode
-                        </div>
-                        <div className="text-sm text-yellow-800 dark:text-yellow-300 space-y-1">
-                          <p>• POS will print the receipt only</p>
-                          <p>• No payment information will be sent to the card reader</p>
-                          <p>• After printing, manually type the amount into the external card reader</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
+                {cardReaderMode !== 'standalone' && (
                   <div className="flex justify-center">
                     {cardPaymentMethod !== 'manual' ? (
                       <button

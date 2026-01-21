@@ -145,14 +145,14 @@ export interface Sale {
   items?: SaleItem[];
   customer?: Customer | null;
   user?: {
-    username: string;
+    useremail: string;
   };
   // UI compatibility properties
   receiptNumber?: string; // Alias for transactionId
   tax?: number; // Alias for taxAmount
   payment?: PaymentDetails;
   timestamp?: Date; // Alias for createdAt
-  cashier?: string; // Alias for user.username
+  cashier?: string; // Alias for user.useremail
   zohoSynced?: boolean; // Alias for syncedToZoho
   zohoError?: string; // Alias for syncError
 }

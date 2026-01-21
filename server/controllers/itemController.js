@@ -1,6 +1,6 @@
 import { Item } from '../models/index.js';
 import { Op } from 'sequelize';
-import { getItemsFromPricebookByName } from '../services/zohoService.js';
+import { getItemsFromPricebookByName, syncItemsFromZoho as syncItemsFromZohoService } from '../services/zohoService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
 export const getItems = async (req, res) => {
@@ -188,5 +188,65 @@ export const updateItemImage = async (req, res) => {
   } catch (err) {
     console.error('Update item image error:', err);
     return sendError(res, 'Failed to update item image', 500, err);
+  }
+};
+
+export const syncItemsFromZoho = async (req, res) => {
+  try {
+    // Fetch items from Zoho and sync to database
+    console.log('🔄 Syncing items from Zoho...');
+    const zohoItems = await syncItemsFromZohoService();
+    
+    let created = 0;
+    let updated = 0;
+    const now = new Date();
+
+    // Sync items to database
+    for (const zohoItem of zohoItems) {
+      const [item, isNew] = await Item.upsert({
+        zohoId: zohoItem.item_id,
+        name: zohoItem.name,
+        sku: zohoItem.sku || null,
+        description: zohoItem.description || null,
+        price: parseFloat(zohoItem.rate) || 0,
+        taxId: zohoItem.tax_id || null,
+        taxName: zohoItem.tax_name || null,
+        taxPercentage: parseFloat(zohoItem.tax_percentage) || 0,
+        unit: zohoItem.unit || null,
+        isActive: zohoItem.status === 'active',
+        lastSyncedAt: now
+      }, {
+        returning: true
+      });
+
+      if (isNew) {
+        created++;
+        console.log(`✅ Created item: ${zohoItem.name} (Zoho ID: ${zohoItem.item_id})`);
+      } else {
+        updated++;
+        console.log(`🔄 Updated item: ${zohoItem.name} (Zoho ID: ${zohoItem.item_id})`);
+      }
+    }
+
+    console.log(`✅ Item sync completed: ${created} created, ${updated} updated (${zohoItems.length} total)`);
+
+    // Fetch all active items from database to return
+    const allItems = await Item.findAll({
+      where: { isActive: true },
+      order: [['name', 'ASC']]
+    });
+
+    return sendSuccess(res, {
+      items: allItems,
+      syncStats: {
+        total: zohoItems.length,
+        created,
+        updated,
+        active: allItems.length
+      }
+    }, 'Items synced successfully from Zoho');
+  } catch (err) {
+    console.error('Sync items from Zoho error:', err);
+    return sendError(res, `Failed to sync items from Zoho: ${err.message}`, 500, err);
   }
 };
