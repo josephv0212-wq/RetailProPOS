@@ -1,9 +1,153 @@
 import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer } from '../models/index.js';
+import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
-import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage } from '../services/zohoService.js';
+import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
+
+// Best-effort loader for legacy "transactionsdb" SQLite tables.
+// This keeps the Reports > Transactions tab working when older installs stored history
+// in a separate SQLite schema/table rather than the current Sequelize `Sale` table.
+const fetchLegacyTransactionsForReports = async ({ locationId, startDate, endDate }) => {
+  try {
+    if (sequelize.getDialect() !== 'sqlite') return [];
+
+    // Enumerate tables and look for any "transaction*" table names.
+    const [tables] = await sequelize.query(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    );
+
+    const tableNames = (tables || [])
+      .map(t => t?.name)
+      .filter(Boolean)
+      .filter(name => typeof name === 'string')
+      .filter(name => /transaction/i.test(name))
+      // avoid Sequelize internals if any
+      .filter(name => name !== 'SequelizeMeta')
+      // safety: only allow simple identifiers
+      .filter(name => /^[A-Za-z0-9_]+$/.test(name));
+
+    if (tableNames.length === 0) return [];
+
+    const toNumberOrZero = (v) => {
+      const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const normalizePaymentType = (v) => {
+      const s = String(v || '').toLowerCase().trim();
+      if (s === 'cash' || s === 'credit_card' || s === 'debit_card' || s === 'zelle' || s === 'ach') return s;
+      if (s === 'credit' || s === 'cc' || s === 'card' || s === 'creditcard') return 'credit_card';
+      if (s === 'debit' || s === 'debitcard') return 'debit_card';
+      return 'cash';
+    };
+
+    const parseDate = (v) => {
+      if (!v) return null;
+      if (v instanceof Date) return v;
+      // handle numeric epoch seconds/ms
+      if (typeof v === 'number') {
+        const ms = v > 1e12 ? v : v * 1000;
+        const d = new Date(ms);
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+      const s = String(v);
+      // numeric string
+      if (/^\d+$/.test(s)) {
+        const num = parseInt(s, 10);
+        const ms = num > 1e12 ? num : num * 1000;
+        const d = new Date(ms);
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+      const d = new Date(s);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+
+    const start = startDate ? new Date(startDate) : null;
+    const end = endDate ? new Date(endDate) : null;
+
+    const results = [];
+
+    for (const tableName of tableNames) {
+      // Inspect columns to build a best-effort mapping.
+      const [cols] = await sequelize.query(`PRAGMA table_info(${tableName})`);
+      const colNames = (cols || []).map(c => c?.name).filter(Boolean);
+      const byLower = new Map(colNames.map(n => [String(n).toLowerCase(), n]));
+
+      const pick = (...candidates) => {
+        for (const c of candidates) {
+          const found = byLower.get(String(c).toLowerCase());
+          if (found) return found;
+        }
+        return null;
+      };
+
+      const idCol = pick('id', 'transaction_id', 'transactionid', 'rowid');
+      const txnCol = pick('transactionid', 'transaction_id', 'transaction', 'txn', 'txnid', 'reference', 'ref', 'receipt', 'receipt_number');
+      const dateCol = pick('createdat', 'created_at', 'date', 'timestamp', 'time', 'created');
+      const paymentCol = pick('paymenttype', 'payment_type', 'type', 'method');
+      const subtotalCol = pick('subtotal', 'sub_total', 'amount_subtotal', 'net');
+      const taxCol = pick('taxamount', 'tax_amount', 'tax', 'sales_tax');
+      const feeCol = pick('ccfee', 'cc_fee', 'fee', 'processing_fee', 'convenience_fee');
+      const totalCol = pick('total', 'amount', 'grand_total');
+      const locationCol = pick('locationid', 'location_id', 'location');
+
+      // Load rows, filtered if we can.
+      const whereParts = [];
+      if (locationId && locationCol) whereParts.push(`"${locationCol}" = :locationId`);
+      if (dateCol && start) whereParts.push(`"${dateCol}" >= :startDate`);
+      if (dateCol && end) whereParts.push(`"${dateCol}" <= :endDate`);
+
+      const whereSql = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
+      const [rows] = await sequelize.query(`SELECT * FROM "${tableName}"${whereSql}`, {
+        replacements: {
+          locationId,
+          startDate: start ? start.toISOString() : undefined,
+          endDate: end ? end.toISOString() : undefined
+        }
+      });
+
+      for (const row of rows || []) {
+        const createdAt = parseDate(dateCol ? row?.[dateCol] : null) || new Date(0);
+        const transactionId = txnCol ? row?.[txnCol] : null;
+        const legacyIdVal = idCol ? row?.[idCol] : null;
+
+        // Shape it like a `Sale` row so the existing frontend mapping works unchanged.
+        results.push({
+          id: typeof legacyIdVal === 'number' ? legacyIdVal : Number(legacyIdVal) || 0,
+          transactionId: transactionId ? String(transactionId) : `LEGACY-${tableName}-${legacyIdVal ?? createdAt.getTime()}`,
+          createdAt: createdAt.toISOString(),
+          paymentType: normalizePaymentType(paymentCol ? row?.[paymentCol] : null),
+          subtotal: toNumberOrZero(subtotalCol ? row?.[subtotalCol] : null).toFixed(2),
+          taxAmount: toNumberOrZero(taxCol ? row?.[taxCol] : null).toFixed(2),
+          ccFee: toNumberOrZero(feeCol ? row?.[feeCol] : null).toFixed(2),
+          total: toNumberOrZero(totalCol ? row?.[totalCol] : null).toFixed(2),
+          locationId: (locationCol ? String(row?.[locationCol] || '') : String(locationId || '')) || String(locationId || ''),
+          locationName: null,
+          customerId: null,
+          zohoCustomerId: null,
+          userId: null,
+          syncedToZoho: false,
+          zohoSalesReceiptId: null,
+          cancelledInZoho: false,
+          syncError: null,
+          notes: null,
+          items: [],
+          customer: null,
+          user: null,
+          // keep updatedAt for completeness
+          updatedAt: createdAt.toISOString()
+        });
+      }
+    }
+
+    return results;
+  } catch (e) {
+    // Never break reports if legacy parsing fails.
+    return [];
+  }
+};
 
 // Normalize a user's tax percentage, trying location name (e.g., "Miami Dade Sales Tax (7%)")
 // before falling back to the default. Keeps server-side calc in sync with UI/Zoho.
@@ -27,7 +171,28 @@ const resolveTaxPercentage = (user) => {
 
 export const createSale = async (req, res) => {
   try {
-    const { items, customerId, paymentType, paymentDetails, notes, useValorApi, useOpaqueData, useBluetoothReader, bluetoothPayload, opaqueDataPayload, customerTaxPreference, useStoredPayment, paymentProfileId, terminalNumber, valorTransactionId } = req.body;
+    const { 
+      items, 
+      customerId, 
+      paymentType: requestPaymentType, 
+      paymentDetails, 
+      notes, 
+      useValorApi, 
+      useOpaqueData, 
+      useBluetoothReader, 
+      bluetoothPayload, 
+      opaqueDataPayload, 
+      customerTaxPreference, 
+      useStoredPayment, 
+      paymentProfileId, 
+      terminalNumber, 
+      valorTransactionId, 
+      useStandaloneMode 
+    } = req.body;
+    let paymentType = requestPaymentType;
+    
+    // Support useStandaloneMode from root level OR from paymentDetails (for backward compatibility)
+    const isStandaloneMode = useStandaloneMode === true || paymentDetails?.useStandaloneMode === true;
     const userId = req.user.id;
     const locationId = req.user.locationId;
     const locationName = req.user.locationName;
@@ -194,8 +359,22 @@ export const createSale = async (req, res) => {
     let transactionId = null;
     let paymentResult = null;
 
-    // Process payment based on payment type
-    if (useStoredPayment && paymentProfileId && customer) {
+    // Standalone mode: Skip payment processing, just record the sale (works like cash payment)
+    // This handles when cardReaderMode is 'standalone' - cashier processes payment manually on external card reader
+    // IMPORTANT: This must be checked BEFORE any card payment processing logic
+    if (isStandaloneMode && (paymentType === 'credit_card' || paymentType === 'debit_card')) {
+      // No payment processing required - works exactly like cash payment
+      // Cashier will manually process payment on external card reader after sale is recorded
+      transactionId = `STANDALONE-${Date.now()}`;
+      paymentResult = {
+        success: true,
+        message: 'Sale recorded. Payment to be processed manually on external card reader.',
+        transactionId: transactionId
+      };
+      // Keep payment type as credit_card or debit_card but mark it as manual card reader payment
+      // The description will indicate "manual card reader payment" in the sale record
+      // Do NOT process any card payment - skip all card processing logic below
+    } else if (useStoredPayment && paymentProfileId && customer) {
       // Stored payment method via Authorize.net CIM - use same logic as chargeInvoicesSalesOrders
       let customerProfileId = customer.customerProfileId;
       let customerPaymentProfileId = paymentProfileId;
@@ -299,32 +478,42 @@ export const createSale = async (req, res) => {
       // Update paymentType to actual type determined from profile
       paymentType = actualPaymentType;
     } else if (paymentType === 'credit_card' || paymentType === 'debit_card') {
-      // Accept.js / opaqueData flow (preferred for PCI); keep legacy flags for backward compatibility.
-      const usingOpaqueData = !!useOpaqueData || !!useBluetoothReader;
-      const opaquePayload = opaqueDataPayload || bluetoothPayload;
+      // IMPORTANT: Double-check standalone mode - if enabled, skip all card processing
+      if (isStandaloneMode) {
+        // This should have been caught earlier, but add safety check here too
+        transactionId = `STANDALONE-${Date.now()}`;
+        paymentResult = {
+          success: true,
+          message: 'Sale recorded. Payment to be processed manually on external card reader.',
+          transactionId: transactionId
+        };
+      } else {
+        // Accept.js / opaqueData flow (preferred for PCI); keep legacy flags for backward compatibility.
+        const usingOpaqueData = !!useOpaqueData || !!useBluetoothReader;
+        const opaquePayload = opaqueDataPayload || bluetoothPayload;
 
-      if (usingOpaqueData) {
-        if (!opaquePayload || !opaquePayload.descriptor || !opaquePayload.value) {
-          return sendValidationError(res, 'Encrypted card payload (opaqueData) is required for this payment method.');
-        }
+        if (usingOpaqueData) {
+          if (!opaquePayload || !opaquePayload.descriptor || !opaquePayload.value) {
+            return sendValidationError(res, 'Encrypted card payload (opaqueData) is required for this payment method.');
+          }
 
-        paymentResult = await processOpaqueDataPayment({
-          amount: total,
-          opaqueData: {
-            descriptor: opaquePayload.descriptor,
-            value: opaquePayload.value
-          },
-          deviceSessionId: opaquePayload.sessionId,
-          invoiceNumber: `POS-${Date.now()}`,
-          description: `POS Sale - ${locationName}`
-        });
+          paymentResult = await processOpaqueDataPayment({
+            amount: total,
+            opaqueData: {
+              descriptor: opaquePayload.descriptor,
+              value: opaquePayload.value
+            },
+            deviceSessionId: opaquePayload.sessionId,
+            invoiceNumber: `POS-${Date.now()}`,
+            description: `POS Sale - ${locationName}`
+          });
 
-        if (!paymentResult.success) {
-          return sendError(res, 'Card payment processing failed', 400, paymentResult.error);
-        }
+          if (!paymentResult.success) {
+            return sendError(res, 'Card payment processing failed', 400, paymentResult.error);
+          }
 
-        transactionId = paymentResult.transactionId;
-      } else if (useValorApi) {
+          transactionId = paymentResult.transactionId;
+        } else if (useValorApi) {
         // Valor API mode - payment already processed in frontend via Valor API (NO Authorize.Net)
         // Flow: Frontend -> Valor API -> VP100 Terminal -> Valor API -> Frontend -> Backend (record sale)
         // Payment is already completed, we just need to record the sale with the Valor transaction ID
@@ -364,6 +553,7 @@ export const createSale = async (req, res) => {
         }
 
         transactionId = paymentResult.transactionId;
+        }
       }
     } else if (paymentType === 'ach') {
       if (!paymentDetails) {
@@ -411,6 +601,13 @@ export const createSale = async (req, res) => {
       console.warn(`⚠️ Customer "${customer.contactName}" has no Zoho ID. Invoice will not be created in Zoho Books.`);
     }
 
+    // Add note for standalone mode (manual card reader payment)
+    let saleNotes = notes || '';
+    if (isStandaloneMode && (paymentType === 'credit_card' || paymentType === 'debit_card')) {
+      const manualPaymentNote = 'Manual card reader payment';
+      saleNotes = saleNotes ? `${saleNotes}\n${manualPaymentNote}` : manualPaymentNote;
+    }
+
     const sale = await Sale.create({
       subtotal: subtotal.toFixed(2),
       taxAmount: taxAmount.toFixed(2),
@@ -424,7 +621,7 @@ export const createSale = async (req, res) => {
       zohoCustomerId: customer?.zohoId || null,
       userId,
       transactionId,
-      notes
+      notes: saleNotes
     });
 
     // Optimize: Batch create all sale items in a single operation
@@ -550,9 +747,8 @@ export const getSales = async (req, res) => {
     const { locationId, startDate, endDate, syncedToZoho } = req.query;
     const userLocationId = req.user.locationId;
 
-    const where = {
-      locationId: locationId || userLocationId
-    };
+    const effectiveLocationId = locationId || userLocationId;
+    const where = { locationId: effectiveLocationId };
 
     if (startDate || endDate) {
       where.createdAt = {};
@@ -577,7 +773,34 @@ export const getSales = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    return sendSuccess(res, { sales });
+    // Include legacy transactions (older "transactionsdb" history) in local SQLite mode.
+    // Frontend Reports tab reads from /sales and maps rows to "Transaction".
+    const legacySales = await fetchLegacyTransactionsForReports({
+      locationId: effectiveLocationId,
+      startDate,
+      endDate
+    });
+
+    if (legacySales.length === 0) {
+      return sendSuccess(res, { sales });
+    }
+
+    const existingTxnIds = new Set(
+      (sales || []).map(s => String(s?.transactionId || s?.id)).filter(Boolean)
+    );
+
+    const merged = [
+      ...(sales || []),
+      ...legacySales.filter(ls => !existingTxnIds.has(String(ls?.transactionId || ls?.id)))
+    ];
+
+    merged.sort((a, b) => {
+      const ta = new Date(a.createdAt).getTime();
+      const tb = new Date(b.createdAt).getTime();
+      return tb - ta;
+    });
+
+    return sendSuccess(res, { sales: merged });
   } catch (err) {
     console.error('Get sales error:', err);
     return sendError(res, 'Failed to fetch sales', 500, err);
@@ -996,3 +1219,76 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
     return sendError(res, 'Failed to charge invoices/sales orders', 500, err);
   }
 };
+
+/**
+ * Cancel a transaction in Zoho by voiding the associated sales receipt.
+ * POST /sales/:id/cancel-zoho
+ */
+export const cancelZohoTransaction = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const sale = await Sale.findByPk(id, {
+      include: [
+        { association: 'customer' }
+      ]
+    });
+
+    if (!sale) {
+      return sendNotFound(res, 'Sale');
+    }
+
+    // Ensure sale has been synced to Zoho
+    if (!sale.syncedToZoho || !sale.zohoSalesReceiptId) {
+      return sendError(
+        res,
+        'Sale is not synced to Zoho or does not have a Zoho sales receipt ID',
+        400
+      );
+    }
+
+    // If already cancelled, prevent duplicate voids
+    if (sale.cancelledInZoho) {
+      return sendError(
+        res,
+        'This transaction has already been cancelled in Zoho',
+        400
+      );
+    }
+
+    // Void the sales receipt in Zoho
+    const voidResult = await voidSalesReceipt(sale.zohoSalesReceiptId);
+
+    if (!voidResult.success) {
+      return sendError(
+        res,
+        `Failed to cancel transaction in Zoho: ${voidResult.error}`,
+        400
+      );
+    }
+
+    // Mark sale as cancelled locally
+    await sale.update({
+      cancelledInZoho: true,
+      syncedToZoho: false,
+      syncError: 'Cancelled in Zoho'
+    });
+
+    return sendSuccess(
+      res,
+      {
+        sale: {
+          id: sale.id,
+          zohoSalesReceiptId: sale.zohoSalesReceiptId,
+          cancelledInZoho: true
+        },
+        zoho: voidResult
+      },
+      'Transaction cancelled successfully in Zoho'
+    );
+  } catch (err) {
+    console.error('Cancel Zoho transaction error:', err);
+    return sendError(res, 'Failed to cancel transaction in Zoho', 500, err);
+  }
+};
+

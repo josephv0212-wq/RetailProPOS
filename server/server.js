@@ -400,6 +400,15 @@ const ensureTerminalColumns = async () => {
     existsMessage: 'terminalNumber column already exists on Users table',
     warnMessage: 'Could not ensure terminalNumber column on Users table'
   });
+  await ensureColumn({
+    table: 'Users',
+    column: 'cardReaderMode',
+    sqliteType: 'VARCHAR(50) NULL DEFAULT "integrated"',
+    pgType: 'VARCHAR(50) NULL DEFAULT \'integrated\'',
+    successMessage: 'Added cardReaderMode column to Users table',
+    existsMessage: 'cardReaderMode column already exists on Users table',
+    warnMessage: 'Could not ensure cardReaderMode column on Users table'
+  });
 };
 
 // Ensure zohoTaxId column exists on Users table
@@ -427,6 +436,18 @@ const ensureSaleItemTaxIdColumn = async () =>
     warnMessage: 'Could not ensure taxId column on SaleItems table'
   });
 
+// Ensure cancelledInZoho column exists on Sales table
+const ensureSaleCancelledColumn = async () =>
+  ensureColumn({
+    table: 'Sales',
+    column: 'cancelledInZoho',
+    sqliteType: 'BOOLEAN DEFAULT 0',
+    pgType: 'BOOLEAN DEFAULT false',
+    successMessage: 'Added cancelledInZoho column to Sales table',
+    existsMessage: 'cancelledInZoho column already exists on Sales table',
+    warnMessage: 'Could not ensure cancelledInZoho column on Sales table'
+  });
+
 // Admin user creation is handled by bootstrap login mechanism in authController.js
 // Bootstrap credentials: accounting@subzeroiceservices.com / dryice000
 // This only works when database is empty (first-time setup)
@@ -447,6 +468,7 @@ const startServer = async () => {
     await ensureTerminalColumns();
     await ensureZohoTaxIdColumn();
     await ensureSaleItemTaxIdColumn();
+    await ensureSaleCancelledColumn();
     await ensureBankAccountColumn();
     await ensureCustomerProfileColumns();
     await ensureCustomerStatusColumn();
@@ -455,6 +477,7 @@ const startServer = async () => {
     await ensureTerminalColumns();
     await ensureZohoTaxIdColumn();
     await ensureSaleItemTaxIdColumn();
+    await ensureSaleCancelledColumn();
     await ensureBankAccountColumn();
     await ensureCustomerProfileColumns();
     await ensureCustomerStatusColumn();

@@ -1,10 +1,12 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Loader2, BarChart3 } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Loader2, BarChart3, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { salesAPI } from '../../services/api';
 import { ZohoSyncDiagnostic } from './ZohoSyncDiagnostic';
+import { useToast } from '../contexts/ToastContext';
 
 interface Transaction {
   id: string;
+  saleId?: number;
   date: Date;
   paymentType: 'cash' | 'credit_card' | 'debit_card' | 'zelle' | 'ach';
   subtotal: number;
@@ -12,6 +14,9 @@ interface Transaction {
   fee: number;
   total: number;
   locationId: string;
+  syncedToZoho?: boolean;
+  zohoSalesReceiptId?: string | null;
+  cancelledInZoho?: boolean;
 }
 
 interface ReportsProps {
@@ -21,6 +26,7 @@ interface ReportsProps {
 }
 
 export function Reports({ transactions: initialTransactions, isLoading: initialLoading, userLocationId }: ReportsProps) {
+  const { showToast } = useToast();
   // Calculate default dates (30 days ago to today)
   const defaultEndDate = new Date();
   const defaultStartDate = new Date();
@@ -28,11 +34,13 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
 
   const [startDate, setStartDate] = useState(defaultStartDate.toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(defaultEndDate.toISOString().split('T')[0]);
-  const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
-  const [isLoading, setIsLoading] = useState(initialLoading);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 15;
   const [activeTab, setActiveTab] = useState<'salesByHour' | 'transactions' | 'zoho'>('transactions');
+  const [cancellingSaleId, setCancellingSaleId] = useState<number | null>(null);
 
   // Use logged-in user's location (no manual location filter)
   const locationId = userLocationId;
@@ -45,45 +53,99 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
     setEndDate(end.toISOString().split('T')[0]);
   };
 
-  // Load sales from API
-  useEffect(() => {
-    const loadSales = async () => {
+  // Load sales from API - extracted to a reusable function
+  const loadSales = useCallback(async (showRefreshing = false) => {
+    if (showRefreshing) {
+      setIsRefreshing(true);
+    } else {
       setIsLoading(true);
-      try {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
+    }
+    try {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
 
-        // Backend already scopes results to the authenticated user's location (requireLocation)
-        const response = await salesAPI.getAll({
-          locationId: undefined,
-          startDate: start.toISOString(),
-          endDate: end.toISOString(),
-        }, true);
+      // Backend already scopes results to the authenticated user's location (requireLocation)
+      // Always bypass cache to get latest data
+      const response = await salesAPI.getAll({
+        locationId: undefined,
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+      }, true);
 
-        if (response.success && response.data?.sales) {
-          // Transform API sales to Transaction format
-          const transformedTransactions: Transaction[] = response.data.sales.map((sale: any) => ({
-            id: String(sale.transactionId || sale.id),
-            date: new Date(sale.createdAt),
-            paymentType: sale.paymentType,
-            subtotal: parseFloat(sale.subtotal),
-            tax: parseFloat(sale.taxAmount),
-            fee: parseFloat(sale.ccFee || '0'),
-            total: parseFloat(sale.total),
-            locationId: sale.locationId,
-          }));
-          setTransactions(transformedTransactions);
-        }
-      } catch (err) {
-        console.error('Failed to load sales:', err);
-      } finally {
-        setIsLoading(false);
+      if (response.success && response.data?.sales) {
+        // Transform API sales to Transaction format
+        const transformedTransactions: Transaction[] = response.data.sales.map((sale: any) => ({
+          id: String(sale.transactionId || sale.id),
+          saleId: sale.id, // Keep original sale ID for cancel action
+          date: new Date(sale.createdAt),
+          paymentType: sale.paymentType,
+          subtotal: parseFloat(sale.subtotal),
+          tax: parseFloat(sale.taxAmount),
+          fee: parseFloat(sale.ccFee || '0'),
+          total: parseFloat(sale.total),
+          locationId: sale.locationId,
+          syncedToZoho: sale.syncedToZoho || false,
+          zohoSalesReceiptId: sale.zohoSalesReceiptId || null,
+          cancelledInZoho: sale.cancelledInZoho || false,
+        }));
+        setTransactions(transformedTransactions);
+      } else {
+        // If no sales returned, set empty array
+        setTransactions([]);
       }
-    };
+    } catch (err) {
+      console.error('Failed to load sales:', err);
+      showToast('Failed to load transactions from database', 'error', 3000);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [startDate, endDate, userLocationId, showToast]);
 
+  // Load sales on mount and when filters change
+  useEffect(() => {
     loadSales();
-  }, [startDate, endDate, userLocationId]);
+  }, [loadSales]);
+
+  // Auto-refresh transactions every 30 seconds when on transactions tab
+  useEffect(() => {
+    if (activeTab === 'transactions') {
+      const interval = setInterval(() => {
+        loadSales(true); // Silent refresh
+      }, 30000); // 30 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, loadSales]);
+
+  const handleCancelZohoTransaction = async (saleId: number) => {
+    if (!window.confirm('Are you sure you want to cancel this transaction in Zoho? This action cannot be undone.')) {
+      return;
+    }
+
+    setCancellingSaleId(saleId);
+    try {
+      const response = await salesAPI.cancelZohoTransaction(saleId);
+      
+      if (response.success) {
+        showToast('Transaction cancelled successfully in Zoho', 'success', 4000);
+        // Reload sales to update the UI using the loadSales function
+        await loadSales(true);
+      } else {
+        showToast(response.message || 'Failed to cancel transaction in Zoho', 'error', 4000);
+      }
+    } catch (error: any) {
+      console.error('Failed to cancel Zoho transaction:', error);
+      showToast(error.message || 'Failed to cancel transaction in Zoho', 'error', 4000);
+    } finally {
+      setCancellingSaleId(null);
+    }
+  };
+
+  const handleRefresh = () => {
+    loadSales(false); // Show loading state
+  };
 
   // Filter transactions based on filters
   const filteredTransactions = useMemo(() => {
@@ -319,10 +381,19 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
             {/* Transactions Tab */}
             {activeTab === 'transactions' && (
               <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                 <h2 className="font-semibold text-gray-900 dark:text-white">
                   Transactions
                 </h2>
+                <button
+                  onClick={handleRefresh}
+                  disabled={isLoading || isRefreshing}
+                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Refresh transactions"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                </button>
               </div>
 
               {filteredTransactions.length === 0 ? (
@@ -365,6 +436,12 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                         </th>
                         <th className="px-6 py-3 text-right font-semibold text-gray-900 dark:text-white">
                           Total
+                        </th>
+                        <th className="px-6 py-3 text-center font-semibold text-gray-900 dark:text-white">
+                          Zoho
+                        </th>
+                        <th className="px-6 py-3 text-center font-semibold text-gray-900 dark:text-white">
+                          Actions
                         </th>
                       </tr>
                     </thead>
@@ -425,6 +502,41 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right font-bold text-blue-600 dark:text-blue-400">
                             ${transaction.total.toFixed(2)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center">
+                            {transaction.syncedToZoho && !transaction.cancelledInZoho ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Synced
+                              </span>
+                            ) : transaction.cancelledInZoho ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400">
+                                <XCircle className="w-3 h-3" />
+                                Cancelled
+                              </span>
+                            ) : (
+                              <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+                                Not Synced
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center">
+                            {transaction.syncedToZoho && !transaction.cancelledInZoho && transaction.saleId ? (
+                              <button
+                                onClick={() => handleCancelZohoTransaction(transaction.saleId!)}
+                                disabled={cancellingSaleId === transaction.saleId}
+                                className="px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              >
+                                {cancellingSaleId === transaction.saleId ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 inline animate-spin mr-1" />
+                                    Cancelling...
+                                  </>
+                                ) : (
+                                  'Cancel in Zoho'
+                                )}
+                              </button>
+                            ) : null}
                           </td>
                         </tr>
                       ))}

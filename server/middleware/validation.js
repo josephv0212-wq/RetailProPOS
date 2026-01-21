@@ -31,12 +31,20 @@ export const validateSale = (req, res, next) => {
 
   // Validate payment details based on payment type
   if (paymentType === 'credit_card' || paymentType === 'debit_card') {
-    const useValorApi = req.body.useValorApi;
-    const useOpaqueData = req.body.useOpaqueData;
-    // Backward compatibility: older clients used "useBluetoothReader" + "bluetoothPayload" for Accept.js opaqueData
-    const useBluetoothReader = req.body.useBluetoothReader;
+    // Support useStandaloneMode from root level OR from paymentDetails (for backward compatibility)
+    const useStandaloneMode = req.body.useStandaloneMode || req.body.paymentDetails?.useStandaloneMode;
     
-    if (useValorApi) {
+    // Standalone mode: Skip payment processing validation - cashier will process manually
+    if (useStandaloneMode) {
+      // No payment processing required - just record the sale
+      // Validation passes, continue to next middleware
+    } else {
+      const useValorApi = req.body.useValorApi;
+      const useOpaqueData = req.body.useOpaqueData;
+      // Backward compatibility: older clients used "useBluetoothReader" + "bluetoothPayload" for Accept.js opaqueData
+      const useBluetoothReader = req.body.useBluetoothReader;
+      
+      if (useValorApi) {
       // Valor API mode - validate terminalNumber and valorTransactionId
       if (!req.body.terminalNumber || req.body.terminalNumber.trim() === '') {
         errors.push('Terminal serial number is required for Valor API payment. Please configure your VP100 serial number in Settings.');
@@ -73,6 +81,7 @@ export const validateSale = (req, res, next) => {
           errors.push('Invalid CVV format');
         }
       }
+    }
     }
   } else if (paymentType === 'ach') {
     if (!paymentDetails) {

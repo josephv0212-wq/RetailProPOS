@@ -62,5 +62,10 @@ export const Sale = sequelize.define('Sale', {
   },
   notes: {
     type: DataTypes.TEXT
+  },
+  cancelledInZoho: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: 'Whether this sale has been cancelled/voided in Zoho'
   }
 });

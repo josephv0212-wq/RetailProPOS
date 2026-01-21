@@ -599,7 +599,10 @@ function AppContent() {
     if (paymentDetails.method === 'cash') {
       apiPaymentDetails.cashReceived = paymentDetails.cashReceived || total;
     } else if (paymentDetails.method === 'credit_card' || paymentDetails.method === 'debit_card') {
-      if (paymentDetails.useValorApi) {
+      if (paymentDetails.useStandaloneMode) {
+        // Standalone mode - no payment processing, just record the sale
+        apiPaymentDetails.useStandaloneMode = true;
+      } else if (paymentDetails.useValorApi) {
         // Valor API payment - already processed in PaymentModal
         // Just record the sale with the transaction ID
         apiPaymentDetails.useValorApi = true;
@@ -669,6 +672,11 @@ function AppContent() {
       if (paymentDetails.useTerminal) {
         requestBody.useTerminal = true;
         requestBody.terminalNumber = paymentDetails.terminalNumber;
+      }
+
+      // Add useStandaloneMode at root level if using standalone card reader mode
+      if (paymentDetails.useStandaloneMode) {
+        requestBody.useStandaloneMode = true;
       }
 
       // Add useStoredPayment and paymentProfileId at root level if using stored payment method
@@ -948,6 +956,7 @@ function AppContent() {
         userTerminalNumber={user?.terminalNumber}
         userTerminalIP={user?.terminalIP}
         userTerminalPort={user?.terminalPort}
+        cardReaderMode={user?.cardReaderMode || 'integrated'}
         customerId={selectedCustomer?.id || null}
         customerName={selectedCustomer?.name || selectedCustomer?.contactName || null}
       />

@@ -55,5 +55,11 @@ export const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: true,
     comment: 'VP100 serial number or terminal number registered in Valor Portal/Authorize.Net (required for Valor Connect cloud-to-cloud payments)'
+  },
+  cardReaderMode: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: 'integrated',
+    comment: 'Card reader mode: "integrated" (POS sends payment to card reader) or "standalone" (cashier types amount manually into external card reader)'
   }
 });

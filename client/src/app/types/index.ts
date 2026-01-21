@@ -92,6 +92,7 @@ export interface PaymentDetails {
   terminalPort?: number | string; // Legacy support for direct terminal connection
   useBluetoothReader?: boolean;
   valorTransactionId?: string; // Transaction ID from Valor API
+  useStandaloneMode?: boolean; // Standalone card reader mode - no payment processing, just record sale
   bluetoothPayload?: {
     descriptor: string;
     value: string;

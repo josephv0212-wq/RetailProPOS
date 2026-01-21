@@ -1,5 +1,5 @@
 import express from 'express';
-import { createSale, getSales, getSaleById, retryZohoSync, getSyncStatus, chargeInvoicesSalesOrders } from '../controllers/salesController.js';
+import { createSale, getSales, getSaleById, retryZohoSync, getSyncStatus, chargeInvoicesSalesOrders, cancelZohoTransaction } from '../controllers/salesController.js';
 import { authenticate, requireLocation } from '../middleware/auth.js';
 import { validateSale } from '../middleware/validation.js';
 
@@ -10,6 +10,7 @@ router.post('/charge-invoices', authenticate, requireLocation, chargeInvoicesSal
 router.get('/', authenticate, requireLocation, getSales);
 router.get('/sync/status', authenticate, requireLocation, getSyncStatus);
 router.post('/:id/sync/zoho', authenticate, retryZohoSync);
+router.post('/:id/cancel-zoho', authenticate, requireLocation, cancelZohoTransaction);
 router.get('/:id', authenticate, getSaleById);
 
 export default router;

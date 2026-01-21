@@ -22,6 +22,7 @@ interface PaymentModalProps {
   userTerminalNumber?: string | null;
   userTerminalIP?: string | null;
   userTerminalPort?: number | string | null;
+  cardReaderMode?: 'integrated' | 'standalone';
   customerId?: number | null;
   customerName?: string | null;
 }
@@ -35,7 +36,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalNumber, userTerminalIP, userTerminalPort, customerId, customerName }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName }: PaymentModalProps) {
   const { showToast } = useToast();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
@@ -139,6 +140,27 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const handleConfirmPayment = async () => {
     setError('');
     setIsProcessing(true);
+
+    // Standalone mode: Skip payment processing, just record the sale
+    if (cardReaderMode === 'standalone' && (selectedMethod === 'credit_card' || selectedMethod === 'debit_card')) {
+      const paymentDetails: PaymentDetails = {
+        method: selectedMethod,
+        amount: finalTotal,
+        useStandaloneMode: true // Flag to indicate standalone mode
+      };
+      
+      try {
+        await onConfirmPayment(paymentDetails);
+        setIsProcessing(false);
+        onClose();
+        showToast('Sale recorded. Please process payment manually on the external card reader.', 'success', 5000);
+      } catch (err: any) {
+        setError(err.message || 'Failed to record sale');
+        setIsProcessing(false);
+        showToast('Failed to record sale', 'error', 4000);
+      }
+      return;
+    }
 
     // Validation
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
@@ -719,23 +741,41 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
               <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
-                <div className="flex justify-center">
-                  {cardPaymentMethod !== 'manual' ? (
-                    <button
-                      onClick={() => setCardPaymentMethod('manual')}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                    >
-                      Manual Entry
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setCardPaymentMethod('valor_api')}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                    >
-                      Use Terminal
-                    </button>
-                  )}
-                </div>
+                {cardReaderMode === 'standalone' ? (
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border-2 border-yellow-400 dark:border-yellow-600 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="text-yellow-600 dark:text-yellow-400 text-xl">⚠️</div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-yellow-900 dark:text-yellow-200 mb-2">
+                          Standalone Card Reader Mode
+                        </div>
+                        <div className="text-sm text-yellow-800 dark:text-yellow-300 space-y-1">
+                          <p>• POS will print the receipt only</p>
+                          <p>• No payment information will be sent to the card reader</p>
+                          <p>• After printing, manually type the amount into the external card reader</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex justify-center">
+                    {cardPaymentMethod !== 'manual' ? (
+                      <button
+                        onClick={() => setCardPaymentMethod('manual')}
+                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      >
+                        Manual Entry
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setCardPaymentMethod('valor_api')}
+                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      >
+                        Use Terminal
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {cardPaymentMethod !== 'manual' ? null : (
                   <div className="space-y-3">

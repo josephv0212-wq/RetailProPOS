@@ -494,6 +494,55 @@ export const createSalesReceipt = async (saleData) => {
   }
 };
 
+/**
+ * Void/Delete a sales receipt in Zoho Books
+ * @param {string} salesReceiptId - The Zoho sales receipt ID to void
+ * @returns {Promise<Object>} Result with success status
+ */
+export const voidSalesReceipt = async (salesReceiptId) => {
+  if (!salesReceiptId) {
+    return {
+      success: false,
+      error: 'Sales receipt ID is required'
+    };
+  }
+
+  try {
+    // Zoho Books API uses DELETE method to void/delete a sales receipt
+    const response = await makeZohoRequest(`/salesreceipts/${salesReceiptId}`, 'DELETE');
+    
+    if (response.code === 0) {
+      console.log(`✅ Zoho sales receipt ${salesReceiptId} voided successfully`);
+      return {
+        success: true,
+        message: 'Sales receipt voided successfully in Zoho',
+        data: response
+      };
+    } else {
+      const errorMsg = response.message || 'Unknown error';
+      console.error(`❌ Failed to void sales receipt ${salesReceiptId}: ${errorMsg}`);
+      return {
+        success: false,
+        error: errorMsg
+      };
+    }
+  } catch (error) {
+    const errorData = error.response?.data;
+    const errorMsg = errorData?.message || error.message || 'Unknown error';
+    
+    console.error(`❌ Failed to void sales receipt ${salesReceiptId} in Zoho:`);
+    console.error(`   Error: ${errorMsg}`);
+    if (error.response?.status) {
+      console.error(`   HTTP Status: ${error.response.status}`);
+    }
+    
+    return {
+      success: false,
+      error: errorMsg
+    };
+  }
+};
+
 export const getOrganizationDetails = async () => {
   try {
     const response = await makeZohoRequest('/organizations');

@@ -12,6 +12,7 @@ interface User {
   terminalIP?: string | null;
   terminalPort?: number | string | null;
   terminalNumber?: string | null;
+  cardReaderMode?: 'integrated' | 'standalone';
 }
 
 interface AuthContextType {

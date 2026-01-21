@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { User } from '../models/index.js';
+import { User, Sale } from '../models/index.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 import { getLocationById, getTaxRates, getZohoTaxIdForPercentage } from '../services/zohoService.js';
 
@@ -106,7 +106,8 @@ export const login = async (req, res) => {
           locationId: newAdmin.locationId,
           locationName: newAdmin.locationName,
           taxPercentage: resolveTaxPercentage(newAdmin),
-          zohoTaxId: newAdmin.zohoTaxId || null
+          zohoTaxId: newAdmin.zohoTaxId || null,
+          cardReaderMode: newAdmin.cardReaderMode || 'integrated'
         }
       }, 'Bootstrap admin created and logged in successfully');
     }
@@ -159,7 +160,8 @@ export const login = async (req, res) => {
         zohoTaxId: user.zohoTaxId || null,
         terminalIP: user.terminalIP,
         terminalPort: user.terminalPort,
-        terminalNumber: user.terminalNumber
+        terminalNumber: user.terminalNumber,
+        cardReaderMode: user.cardReaderMode || 'integrated'
       }
     }, 'Login successful');
   } catch (err) {
@@ -321,18 +323,39 @@ export const approveUser = async (req, res) => {
 export const rejectUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const user = await User.findByPk(id);
+    const userId = parseInt(id);
+    const user = await User.findByPk(userId);
 
     if (!user) {
       return sendNotFound(res, 'User');
     }
 
+    // Prevent admin from deleting themselves
+    if (req.user.id === userId) {
+      return sendError(res, 'You cannot delete your own account', 400);
+    }
+
+    // Prevent deleting the last admin
+    if (user.role === 'admin') {
+      const adminCount = await User.count({ where: { role: 'admin', isActive: true } });
+      if (adminCount <= 1) {
+        return sendError(res, 'Cannot delete the last active admin user', 400);
+      }
+    }
+
+    // Set userId to NULL in associated sales before deleting the user
+    // This prevents foreign key constraint errors
+    await Sale.update(
+      { userId: null },
+      { where: { userId: userId } }
+    );
+
     await user.destroy();
 
-    return sendSuccess(res, { id }, 'User registration rejected and removed');
+    return sendSuccess(res, { id: userId }, 'User deleted successfully');
   } catch (err) {
     console.error('Reject user error:', err);
-    return sendError(res, 'Failed to reject user', 500, err);
+    return sendError(res, 'Failed to delete user', 500, err);
   }
 };
 
@@ -425,6 +448,7 @@ export const getCurrentUser = async (req, res) => {
     const normalizedUser = user?.toJSON ? user.toJSON() : user;
     if (normalizedUser) {
       normalizedUser.taxPercentage = resolveTaxPercentage(normalizedUser);
+      normalizedUser.cardReaderMode = normalizedUser.cardReaderMode || 'integrated';
     }
     
     return sendSuccess(res, { user: normalizedUser });
@@ -436,7 +460,7 @@ export const getCurrentUser = async (req, res) => {
 
 export const updateMyTerminalIP = async (req, res) => {
   try {
-    const { terminalIP, terminalPort, terminalNumber } = req.body;
+    const { terminalIP, terminalPort, terminalNumber, cardReaderMode } = req.body;
     const user = await User.findByPk(req.user.id);
     
     if (!user) {
@@ -479,6 +503,15 @@ export const updateMyTerminalIP = async (req, res) => {
     user.terminalNumber = (terminalNumber !== undefined && terminalNumber !== null && terminalNumber !== '') 
       ? terminalNumber.trim() 
       : null;
+    
+    // Update cardReaderMode if provided
+    if (cardReaderMode !== undefined && cardReaderMode !== null) {
+      if (!['integrated', 'standalone'].includes(cardReaderMode)) {
+        return sendValidationError(res, 'cardReaderMode must be either "integrated" or "standalone"');
+      }
+      user.cardReaderMode = cardReaderMode;
+    }
+    
     await user.save();
 
     const sanitizedUser = user.toJSON();

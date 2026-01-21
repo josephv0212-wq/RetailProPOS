@@ -188,6 +188,17 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
             </div>
           </div>
 
+          {/* Card Reader Mode Configuration */}
+          <div className="mb-8 pb-8 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+              Card Reader Mode
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Choose how card payments are processed. In standalone mode, the POS will not send payment information to the card reader. The cashier will manually type the amount into the external card reader after the receipt is printed.
+            </p>
+            <CardReaderModeConfig />
+          </div>
+
           {/* Valor API Configuration */}
           <div className="mb-8 pb-8 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
@@ -425,3 +436,129 @@ function ValorApiConfig() {
   );
 }
 
+// Card Reader Mode Configuration Component
+function CardReaderModeConfig() {
+  const { user, refreshUser } = useAuth();
+  const { showToast } = useToast();
+  const [cardReaderMode, setCardReaderMode] = useState<'integrated' | 'standalone'>(user?.cardReaderMode || 'integrated');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (user?.cardReaderMode) {
+      setCardReaderMode(user.cardReaderMode);
+    }
+  }, [user?.cardReaderMode]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const response = await authAPI.updateTerminalSettings(
+        user?.terminalNumber || null,
+        user?.terminalIP || null,
+        user?.terminalPort || null,
+        cardReaderMode
+      );
+      
+      if (response.success) {
+        showToast('Card reader mode saved successfully', 'success', 3000);
+        if (refreshUser) {
+          await refreshUser();
+        }
+      } else {
+        showToast(response.message || 'Failed to save card reader mode', 'error', 4000);
+      }
+    } catch (error: any) {
+      console.error('Error saving card reader mode:', error);
+      showToast(error.message || 'Failed to save card reader mode', 'error', 4000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Mode Selection */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+          Payment Processing Mode
+        </label>
+        <div className="space-y-3">
+          <button
+            onClick={() => setCardReaderMode('integrated')}
+            className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
+              cardReaderMode === 'integrated'
+                ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className={`w-5 h-5 border-2 rounded flex items-center justify-center ${
+                cardReaderMode === 'integrated'
+                  ? 'bg-blue-600 dark:bg-blue-500 border-blue-600 dark:border-blue-500'
+                  : 'border-gray-300 dark:border-gray-600'
+              }`}>
+                {cardReaderMode === 'integrated' && <CheckCircle2 className="w-3 h-3 text-white" />}
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold text-gray-900 dark:text-white">Integrated</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  POS sends payment information to the card reader automatically. Payment is processed through the integrated system.
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setCardReaderMode('standalone')}
+            className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
+              cardReaderMode === 'standalone'
+                ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className={`w-5 h-5 border-2 rounded flex items-center justify-center ${
+                cardReaderMode === 'standalone'
+                  ? 'bg-blue-600 dark:bg-blue-500 border-blue-600 dark:border-blue-500'
+                  : 'border-gray-300 dark:border-gray-600'
+              }`}>
+                {cardReaderMode === 'standalone' && <CheckCircle2 className="w-3 h-3 text-white" />}
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold text-gray-900 dark:text-white">Standalone</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  POS prints receipt only. Cashier manually types the amount into the external card reader. No payment information is sent from POS.
+                </div>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Info Box */}
+      <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+        <p className="text-sm text-yellow-900 dark:text-yellow-200 font-medium mb-1">
+          ℹ️ Standalone Mode Instructions
+        </p>
+        <p className="text-xs text-yellow-800 dark:text-yellow-300">
+          When using standalone mode: 1) Complete the sale in POS, 2) Show the printed receipt to the customer, 3) Take the customer's card and insert it into the external card reader, 4) Manually type the amount from the receipt into the card reader.
+        </p>
+      </div>
+
+      {/* Action Button */}
+      <div className="pt-2">
+        <button
+          onClick={handleSave}
+          disabled={isSaving}
+          className={`w-full px-4 py-2 rounded-lg font-medium transition-colors ${
+            !isSaving
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+          }`}
+        >
+          {isSaving ? 'Saving...' : 'Save Card Reader Mode'}
+        </button>
+      </div>
+    </div>
+  );
+}

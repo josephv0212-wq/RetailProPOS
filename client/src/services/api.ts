@@ -145,13 +145,14 @@ export const authAPI = {
     return apiRequest<{ user: any }>('/auth/me');
   },
 
-  updateTerminalSettings: async (terminalNumber?: string | null, terminalIP?: string | null, terminalPort?: number | string | null) => {
+  updateTerminalSettings: async (terminalNumber?: string | null, terminalIP?: string | null, terminalPort?: number | string | null, cardReaderMode?: 'integrated' | 'standalone') => {
     return apiRequest<{ user: any }>('/auth/me/terminal', {
       method: 'PATCH',
       body: JSON.stringify({ 
         terminalNumber: terminalNumber?.trim() || null,
         terminalIP: terminalIP?.trim() || null,
-        terminalPort: terminalPort?.toString().trim() || null
+        terminalPort: terminalPort?.toString().trim() || null,
+        cardReaderMode: cardReaderMode || null
       }),
     }, true);
   },
@@ -347,6 +348,19 @@ export const salesAPI = {
       salesReceiptId: string;
       salesReceiptNumber: string;
     }>(`/sales/${saleId}/sync/zoho`, {
+      method: 'POST',
+    }, true);
+  },
+
+  cancelZohoTransaction: async (saleId: number) => {
+    return apiRequest<{
+      sale: {
+        id: number;
+        zohoSalesReceiptId: string;
+        cancelledInZoho: boolean;
+      };
+      zoho: any;
+    }>(`/sales/${saleId}/cancel-zoho`, {
       method: 'POST',
     }, true);
   },
