@@ -1,6 +1,7 @@
 import { Sequelize } from 'sequelize';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { logDatabase } from '../utils/logger.js';
 
@@ -19,10 +20,37 @@ let sequelize;
 if (DATABASE_SETTING === 'local') {
   // SQLite configuration for local database
   const dbPath = path.join(__dirname, '..', 'database.sqlite');
+
+  // Backward compatibility: if an older SQLite file exists (e.g. "transactionsdb"),
+  // migrate/rename it to "database.sqlite" so the app uses a single consistent DB.
+  const legacyDbCandidates = [
+    path.join(__dirname, '..', 'transactionsdb.sqlite'),
+    path.join(__dirname, '..', 'transactionsdb.db'),
+    path.join(__dirname, '..', 'transactions.db'),
+    path.join(__dirname, '..', 'transactions.sqlite')
+  ];
+
+  try {
+    if (!fs.existsSync(dbPath)) {
+      const legacyPath = legacyDbCandidates.find(p => fs.existsSync(p));
+      if (legacyPath) {
+        try {
+          fs.renameSync(legacyPath, dbPath);
+          logDatabase(`Migrated legacy SQLite DB "${path.basename(legacyPath)}" -> "${path.basename(dbPath)}"`);
+        } catch (renameErr) {
+          // If rename fails (locked file, permissions, etc.), fall back to using legacy path.
+          logDatabase(`Using legacy SQLite DB "${legacyPath}" (could not rename to "${dbPath}": ${renameErr.message})`);
+        }
+      }
+    }
+  } catch (e) {
+    // If filesystem checks fail for any reason, proceed with default dbPath.
+    logDatabase(`SQLite legacy DB check skipped: ${e.message}`);
+  }
   
   sequelize = new Sequelize({
     dialect: 'sqlite',
-    storage: dbPath,
+    storage: fs.existsSync(dbPath) ? dbPath : (legacyDbCandidates.find(p => fs.existsSync(p)) || dbPath),
     logging: false,
     pool: {
       max: 5,
@@ -32,7 +60,7 @@ if (DATABASE_SETTING === 'local') {
     }
   });
   
-  logDatabase(`Using SQLite database (local mode) - ${dbPath}`);
+  logDatabase(`Using SQLite database (local mode) - ${sequelize.options.storage}`);
 } else {
   // PostgreSQL configuration for cloud database
   if (!process.env.DATABASE_URL) {
