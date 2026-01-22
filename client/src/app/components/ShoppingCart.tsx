@@ -1,7 +1,23 @@
 import React from 'react';
 import { Customer, CartItem } from '../types';
 import { CustomerSelector } from './CustomerSelector';
-import { ShoppingCart as ShoppingCartIcon, CircleCheck, TriangleAlert, Info, Plus, Minus, Trash2, ArrowLeft } from 'lucide-react';
+import { ShoppingCart as ShoppingCartIcon, CircleCheck, TriangleAlert, Info, Trash2, ArrowLeft } from 'lucide-react';
+
+// Dry Ice UM Configuration - shared with App.tsx
+export const DRY_ICE_UM_OPTIONS = [
+  { text: 'lb', rate: 1, description: 'all dry ice' },
+  { text: 'Bin 1950', rate: 1950, description: 'all dry ice' },
+  { text: 'Bin 700', rate: 700, description: 'all dry ice' },
+  { text: 'Bin 500 lb', rate: 500, description: 'all dry ice pellets and dry ice blasting' },
+  { text: 'Kg', rate: 2.2, description: 'all dry ice' },
+  { text: 'ea 10 lb', rate: 10, description: 'all dry ice' },
+  { text: 'ea 5 lb', rate: 5, description: 'all dry ice' },
+  { text: 'Bag 50 lb', rate: 50, description: 'all dry ice and dry ice pellets' },
+];
+
+export const isDryIceItem = (itemName: string): boolean => {
+  return itemName.toLowerCase().includes('dry ice');
+};
 
 interface ShoppingCartProps {
   customers: Customer[];
@@ -11,6 +27,7 @@ interface ShoppingCartProps {
   onSelectCustomer: (customer: Customer | null) => void;
   cartItems: CartItem[];
   onUpdateQuantity: (productId: string, quantity: number) => void;
+  onUpdateUM?: (productId: string, um: string) => void;
   onRemoveItem: (productId: string) => void;
   onClearCart: () => void;
   onPayNow: () => void;
@@ -25,12 +42,28 @@ export function ShoppingCart({
   onSelectCustomer,
   cartItems,
   onUpdateQuantity,
+  onUpdateUM,
   onRemoveItem,
   onClearCart,
   onPayNow,
   taxRate,
 }: ShoppingCartProps) {
-  const subtotal = cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+  // Calculate price with UM conversion rate for dry ice items
+  const getItemPrice = (item: CartItem): number => {
+    const basePrice = item.product.price;
+    if (isDryIceItem(item.product.name) && item.selectedUM) {
+      const umOption = DRY_ICE_UM_OPTIONS.find(opt => opt.text === item.selectedUM);
+      if (umOption) {
+        return basePrice * umOption.rate;
+      }
+    }
+    return basePrice;
+  };
+
+  const subtotal = cartItems.reduce((sum, item) => {
+    const itemPrice = getItemPrice(item);
+    return sum + (itemPrice * item.quantity);
+  }, 0);
   const isTaxExempt = customerTaxPreference === 'SALES TAX EXCEPTION CERTIFICATE' || selectedCustomer?.taxExempt || false;
   const tax = isTaxExempt ? 0 : subtotal * taxRate;
   const total = subtotal + tax;
@@ -122,52 +155,97 @@ export function ShoppingCart({
           </div>
         ) : (
           <div className="space-y-3">
-            {cartItems.map((item) => (
-              <div key={item.product.id} className="flex items-start gap-3 pb-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
-                <div className="flex-1">
-                  <h4 className="font-medium text-gray-900 dark:text-white">{item.product.name}</h4>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">${item.product.price.toFixed(2)} each</p>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => onUpdateQuantity(item.product.id, Math.max(1, item.quantity - 1))}
-                    className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    <Minus className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                  </button>
+            {cartItems.map((item) => {
+              const itemNameLower = item.product.name.toLowerCase();
+              // Exclude "Online Dry Ice Block" and "Online Dry Ice Pellets" from dry ice UM dropdown
+              const isOnlineDryIce = itemNameLower.includes('online dry ice block') || 
+                                     itemNameLower.includes('online dry ice pellets');
+              const isDryIce = isDryIceItem(item.product.name) && !isOnlineDryIce;
+              const isDryIcePellets = isDryIce && itemNameLower.includes('dry ice pellets');
+              const isDryIceBlasting = isDryIce && itemNameLower.includes('dry ice blasting');
+              
+              // Get available UM options based on item type
+              let availableUMOptions = [];
+              if (isDryIcePellets) {
+                // Dry ice pellets: lb, Bin 500 lb, and Bag 50 lb
+                availableUMOptions = DRY_ICE_UM_OPTIONS.filter(um => 
+                  um.text === 'lb' || um.text === 'Bin 500 lb' || um.text === 'Bag 50 lb'
+                );
+              } else if (isDryIceBlasting) {
+                // Dry ice blasting: only lb and Bin 500 lb
+                availableUMOptions = DRY_ICE_UM_OPTIONS.filter(um => 
+                  um.text === 'lb' || um.text === 'Bin 500 lb'
+                );
+              } else if (isDryIce) {
+                // Other dry ice items: all options
+                availableUMOptions = DRY_ICE_UM_OPTIONS;
+              }
+              
+              const itemPrice = getItemPrice(item);
+              const selectedUMOption = isDryIce && item.selectedUM 
+                ? DRY_ICE_UM_OPTIONS.find(opt => opt.text === item.selectedUM)
+                : null;
+
+              return (
+                <div key={item.product.id} className="flex items-start gap-3 pb-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+                  <div className="flex-1">
+                    <h4 className="text-xs font-medium text-gray-900 dark:text-white">{item.product.name}</h4>
+                  </div>
                   
-                  <input
-                    type="number"
-                    value={item.quantity}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value) || 1;
-                      onUpdateQuantity(item.product.id, Math.max(1, value));
-                    }}
-                    className="w-12 text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    min="1"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={item.quantity}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value) || 1;
+                        onUpdateQuantity(item.product.id, Math.max(1, value));
+                      }}
+                      className="w-12 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      min="1"
+                    />
+                    
+                    {/* UM Dropdown for Dry Ice Items - shown next to quantity */}
+                    {isDryIce && onUpdateUM && availableUMOptions.length > 0 && (
+                      <select
+                        value={item.selectedUM || ''}
+                        onChange={(e) => onUpdateUM(item.product.id, e.target.value)}
+                        className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{ minWidth: '100px' }}
+                      >
+                        {availableUMOptions.map((um) => (
+                          <option key={um.text} value={um.text}>
+                            {um.text}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    
+                    {/* UM Dropdown for Other Items - shown next to quantity */}
+                    {!isDryIce && item.product.unit && (
+                      <select
+                        value={item.product.unit}
+                        disabled
+                        className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 cursor-not-allowed"
+                        style={{ minWidth: '80px' }}
+                      >
+                        <option value={item.product.unit}>{item.product.unit}</option>
+                      </select>
+                    )}
+                  </div>
+                  
+                  <div className="w-20 text-right text-xs font-medium text-gray-900 dark:text-white">
+                    ${(itemPrice * item.quantity).toFixed(2)}
+                  </div>
                   
                   <button
-                    onClick={() => onUpdateQuantity(item.product.id, item.quantity + 1)}
-                    className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    onClick={() => onRemoveItem(item.product.id)}
+                    className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-colors"
                   >
-                    <Plus className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
-                
-                <div className="w-20 text-right font-medium text-gray-900 dark:text-white">
-                  ${(item.product.price * item.quantity).toFixed(2)}
-                </div>
-                
-                <button
-                  onClick={() => onRemoveItem(item.product.id)}
-                  className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-colors"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -207,6 +207,9 @@ export const syncZohoItems = async (req, res) => {
     let updated = 0;
 
     for (const zohoItem of zohoItems) {
+      // Get unit of measure from Zoho (try multiple possible field names)
+      const unit = zohoItem.unit || zohoItem.unit_name || zohoItem.unit_of_measure || zohoItem.um || null;
+      
       const [item, isNew] = await Item.upsert({
         zohoId: zohoItem.item_id,
         name: zohoItem.name,
@@ -216,7 +219,7 @@ export const syncZohoItems = async (req, res) => {
         taxId: zohoItem.tax_id || null,
         taxName: zohoItem.tax_name || null,
         taxPercentage: parseFloat(zohoItem.tax_percentage) || 0,
-        unit: zohoItem.unit || null,
+        unit: unit,
         isActive: zohoItem.status === 'active',
         lastSyncedAt: new Date()
       });
@@ -257,6 +260,9 @@ export const syncAll = async (req, res) => {
     let itemsUpdated = 0;
 
     for (const zohoItem of zohoItems) {
+      // Get unit of measure from Zoho (try multiple possible field names)
+      const unit = zohoItem.unit || zohoItem.unit_name || zohoItem.unit_of_measure || zohoItem.um || null;
+      
       const [item, isNew] = await Item.upsert({
         zohoId: zohoItem.item_id,
         name: zohoItem.name,
@@ -266,7 +272,7 @@ export const syncAll = async (req, res) => {
         taxId: zohoItem.tax_id || null,
         taxName: zohoItem.tax_name || null,
         taxPercentage: parseFloat(zohoItem.tax_percentage) || 0,
-        unit: zohoItem.unit || null,
+        unit: unit,
         isActive: zohoItem.status === 'active',
         lastSyncedAt: new Date()
       });

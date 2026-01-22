@@ -23,6 +23,7 @@ import { PaymentMethodSelector } from './components/PaymentMethodSelector';
 import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
 import { logger } from '../utils/logger';
+import { DRY_ICE_UM_OPTIONS, isDryIceItem } from './components/ShoppingCart';
 
 type AppScreen = 'signin' | 'signup' | 'pos' | 'customers' | 'reports' | 'settings' | 'admin' | 'receipt';
 
@@ -37,6 +38,18 @@ export default function App() {
     </ThemeProvider>
   );
 }
+
+// Helper function to get item price with UM conversion
+const getItemPrice = (item: CartItem): number => {
+  const basePrice = item.product.price;
+  if (isDryIceItem(item.product.name) && item.selectedUM) {
+    const umOption = DRY_ICE_UM_OPTIONS.find(opt => opt.text === item.selectedUM);
+    if (umOption) {
+      return basePrice * umOption.rate;
+    }
+  }
+  return basePrice;
+};
 
 function AppContent() {
   const { user, isLoading: authLoading, isAuthenticated, logout } = useAuth();
@@ -133,7 +146,10 @@ function AppContent() {
 
   // Calculate totals for payment modal (memoized) - must be before any early returns
   const totalsForReceipt = useMemo(() => {
-    const subtotal = cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+    const subtotal = cartItems.reduce((sum, item) => {
+      const itemPrice = getItemPrice(item);
+      return sum + (itemPrice * item.quantity);
+    }, 0);
     const isTaxExempt = selectedCustomer?.taxExempt || false;
     const tax = isTaxExempt ? 0 : subtotal * constants.TAX_RATE;
     const total = subtotal + tax;
@@ -310,6 +326,14 @@ function AppContent() {
     setCartItems(cartItems.map(item =>
       String(item.product.id) === String(productId)
         ? { ...item, quantity: Math.max(1, quantity) }
+        : item
+    ));
+  };
+
+  const handleUpdateUM = (productId: number | string, um: string) => {
+    setCartItems(cartItems.map(item =>
+      String(item.product.id) === String(productId)
+        ? { ...item, selectedUM: um }
         : item
     ));
   };
@@ -610,7 +634,10 @@ function AppContent() {
   const handleConfirmPayment = async (paymentDetails: PaymentDetails): Promise<any> => {
     if (!user || !selectedCustomer) return;
 
-    const subtotal = cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+    const subtotal = cartItems.reduce((sum, item) => {
+      const itemPrice = getItemPrice(item);
+      return sum + (itemPrice * item.quantity);
+    }, 0);
     
     // Get customer tax preference
     let customerTaxPreference: 'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE' = 'STANDARD';
@@ -680,10 +707,14 @@ function AppContent() {
     try {
       // Build request body - useBluetoothReader and bluetoothPayload need to be at root level
       const requestBody: any = {
-        items: cartItems.map(item => ({
-          itemId: typeof item.product.id === 'number' ? item.product.id : parseInt(item.product.id),
-          quantity: item.quantity,
-        })),
+        items: cartItems.map(item => {
+          const itemPrice = getItemPrice(item);
+          return {
+            itemId: typeof item.product.id === 'number' ? item.product.id : parseInt(item.product.id),
+            quantity: item.quantity,
+            price: itemPrice, // Send converted price for dry ice items
+          };
+        }),
         customerId: selectedCustomer.id,
         paymentType: paymentType as any,
         paymentDetails: apiPaymentDetails,
@@ -936,6 +967,7 @@ function AppContent() {
             onSelectCustomer={handleSelectCustomer}
             cartItems={cartItems}
             onUpdateQuantity={handleUpdateQuantity}
+            onUpdateUM={handleUpdateUM}
             onRemoveItem={handleRemoveItem}
             onClearCart={handleClearCart}
             onPayNow={handlePayNow}

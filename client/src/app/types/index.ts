@@ -60,6 +60,7 @@ export interface Product {
 export interface CartItem {
   product: Product;
   quantity: number;
+  selectedUM?: string; // Selected unit of measure for dry ice items
 }
 
 export interface PaymentMethod {

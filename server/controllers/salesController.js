@@ -246,7 +246,8 @@ export const createSale = async (req, res) => {
       }
 
       const quantity = parseFloat(saleItem.quantity) || 1;
-      const price = parseFloat(item.price);
+      // Use provided price override (for UM conversions) or fall back to database price
+      const price = saleItem.price !== undefined ? parseFloat(saleItem.price) : parseFloat(item.price);
       const lineSubtotal = price * quantity;
       // Use user's location tax rate instead of item's tax percentage
       const itemTax = lineSubtotal * taxRate;

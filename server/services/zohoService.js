@@ -780,18 +780,23 @@ export const getItemsFromPricebook = async (pricebookId) => {
       const pricebookItems = response.pricebook.pricebook_items || [];
       
       // Map pricebook items to include item details and pricebook rate
-      const items = pricebookItems.map(pbItem => ({
-        item_id: pbItem.item_id,
-        name: pbItem.name || pbItem.item_name,
-        sku: pbItem.sku || pbItem.item_sku,
-        description: pbItem.description || pbItem.item_description,
-        price: parseFloat(pbItem.pricebook_rate || pbItem.rate || 0),
-        tax_id: pbItem.tax_id || null,
-        tax_name: pbItem.tax_name || null,
-        tax_percentage: parseFloat(pbItem.tax_percentage || 0),
-        unit: pbItem.unit || null,
-        status: pbItem.status || 'active'
-      }));
+      const items = pricebookItems.map(pbItem => {
+        // Get unit of measure (try multiple possible field names)
+        const unit = pbItem.unit || pbItem.unit_name || pbItem.unit_of_measure || pbItem.um || null;
+        
+        return {
+          item_id: pbItem.item_id,
+          name: pbItem.name || pbItem.item_name,
+          sku: pbItem.sku || pbItem.item_sku,
+          description: pbItem.description || pbItem.item_description,
+          price: parseFloat(pbItem.pricebook_rate || pbItem.rate || 0),
+          tax_id: pbItem.tax_id || null,
+          tax_name: pbItem.tax_name || null,
+          tax_percentage: parseFloat(pbItem.tax_percentage || 0),
+          unit: unit,
+          status: pbItem.status || 'active'
+        };
+      });
       
       return items;
     } else {
