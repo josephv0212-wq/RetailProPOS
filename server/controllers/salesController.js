@@ -639,9 +639,11 @@ export const createSale = async (req, res) => {
       try {
         // For Zoho, ccFee is the credit card processing fee (if any)
         // Pass customerLocation to enforce correct tax rate - Zoho uses place_of_contact to determine tax rate
+        // Use sale.createdAt date to match the actual sale date (fixes date discrepancy issue)
+        const saleDate = sale.createdAt ? new Date(sale.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
         const zohoResult = await createSalesReceipt({
           customerId: customer.zohoId, // Using the customer's zohoId from Zoho Books
-          date: new Date().toISOString().split('T')[0],
+          date: saleDate,
           lineItems: saleItemsData,
           locationId,
           locationName,

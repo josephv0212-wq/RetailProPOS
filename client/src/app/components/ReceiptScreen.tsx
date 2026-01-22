@@ -53,8 +53,8 @@ export function ReceiptScreen({
     window.print();
   };
 
-  // Calculate processing fee if applicable
-  const processingFee = sale.payment.method === 'card' ? sale.total * 0.03 : 0;
+  // Get processing fee from sale object (already calculated and included in total)
+  const processingFee = sale.ccFee || 0;
   const taxRate = sale.tax > 0 ? ((sale.tax / sale.subtotal) * 100) : 0;
 
   // Format payment method
@@ -221,7 +221,7 @@ export function ReceiptScreen({
                 <div className="flex justify-between items-center pt-2 border-t border-gray-300 dark:border-gray-600">
                   <span className="text-[19px] font-extrabold text-gray-900 dark:text-white">TOTAL:</span>
                   <span className="text-[19px] font-extrabold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-purple-400">
-                    ${(sale.total + processingFee).toFixed(2)}
+                    ${sale.total.toFixed(2)}
                   </span>
                 </div>
               </div>
