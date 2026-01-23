@@ -1,7 +1,8 @@
 import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById, organizeZohoSalesOrdersFuelSurcharge as organizeZohoSalesOrdersFuelSurchargeService } from '../services/zohoService.js';
 import { Customer, Item, Sale } from '../models/index.js';
-import { sequelize } from '../config/db.js';
+import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
+import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
 
 const DEFAULT_CUSTOMERS = {
   'LOC001': 'MIA Dry Ice - WALK IN MIAMI',
@@ -207,8 +208,7 @@ export const syncZohoItems = async (req, res) => {
     let updated = 0;
 
     for (const zohoItem of zohoItems) {
-      // Get unit of measure from Zoho (try multiple possible field names)
-      const unit = zohoItem.unit || zohoItem.unit_name || zohoItem.unit_of_measure || zohoItem.um || null;
+      const unit = extractUnitFromZohoItem(zohoItem);
       
       const [item, isNew] = await Item.upsert({
         zohoId: zohoItem.item_id,
@@ -222,7 +222,22 @@ export const syncZohoItems = async (req, res) => {
         unit: unit,
         isActive: zohoItem.status === 'active',
         lastSyncedAt: new Date()
+      }, {
+        returning: true
       });
+
+      // Ensure we have the item with ID
+      const itemWithId = item.id ? item : await Item.findOne({ where: { zohoId: zohoItem.item_id } });
+      
+      if (!itemWithId || !itemWithId.id) {
+        console.error(`⚠️ Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
+        continue;
+      }
+
+      // Sync unit of measure if present
+      if (unit) {
+        await syncItemUnitOfMeasure(itemWithId, zohoItem);
+      }
 
       if (isNew) created++;
       else updated++;
@@ -260,8 +275,7 @@ export const syncAll = async (req, res) => {
     let itemsUpdated = 0;
 
     for (const zohoItem of zohoItems) {
-      // Get unit of measure from Zoho (try multiple possible field names)
-      const unit = zohoItem.unit || zohoItem.unit_name || zohoItem.unit_of_measure || zohoItem.um || null;
+      const unit = extractUnitFromZohoItem(zohoItem);
       
       const [item, isNew] = await Item.upsert({
         zohoId: zohoItem.item_id,
@@ -275,7 +289,22 @@ export const syncAll = async (req, res) => {
         unit: unit,
         isActive: zohoItem.status === 'active',
         lastSyncedAt: new Date()
+      }, {
+        returning: true
       });
+
+      // Ensure we have the item with ID
+      const itemWithId = item.id ? item : await Item.findOne({ where: { zohoId: zohoItem.item_id } });
+      
+      if (!itemWithId || !itemWithId.id) {
+        console.error(`⚠️ Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
+        continue;
+      }
+
+      // Sync unit of measure if present
+      if (unit) {
+        await syncItemUnitOfMeasure(itemWithId, zohoItem);
+      }
 
       if (isNew) itemsCreated++;
       else itemsUpdated++;

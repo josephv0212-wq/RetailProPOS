@@ -1,7 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/authRoutes.js';
 import salesRoutes from './routes/salesRoutes.js';
 import zohoRoutes from './routes/zohoRoutes.js';
@@ -9,6 +8,8 @@ import itemRoutes from './routes/itemRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import printerRoutes from './routes/printerRoutes.js';
 import valorApiRoutes from './routes/valorApiRoutes.js';
+import unitOfMeasureRoutes from './routes/unitOfMeasureRoutes.js';
+import itemUnitOfMeasureRoutes from './routes/itemUnitOfMeasureRoutes.js';
 import { sequelize } from './config/db.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -92,45 +93,6 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: {
-    success: false,
-    message: 'Too many requests from this IP, please try again later.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Stricter rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 login attempts per windowMs
-  message: {
-    success: false,
-    message: 'Too many authentication attempts, please try again later.'
-  },
-  skipSuccessfulRequests: true
-});
-
-// Apply rate limiting to all routes (except health check and OPTIONS preflight requests)
-app.use((req, res, next) => {
-  if (req.path === '/health' || req.method === 'OPTIONS') {
-    return next(); // Skip rate limiting for health check and preflight requests
-  }
-  limiter(req, res, next);
-});
-
-// Apply auth rate limiting, but skip OPTIONS requests
-app.use('/auth/login', (req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    return next(); // Skip rate limiting for preflight requests
-  }
-  authLimiter(req, res, next);
-});
-
 app.use(express.json({ limit: '10mb' }));
 
 // Health check endpoint
@@ -173,10 +135,12 @@ app.get('/', (req, res) => {
 app.use('/auth', authRoutes);
 app.use('/sales', salesRoutes);
 app.use('/items', itemRoutes);
+app.use('/items', itemUnitOfMeasureRoutes);
 app.use('/customers', customerRoutes);
 app.use('/zoho', zohoRoutes);
 app.use('/printer', printerRoutes);
 app.use('/valor', valorApiRoutes);
+app.use('/units', unitOfMeasureRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

@@ -220,17 +220,39 @@ export function ShoppingCart({
                       </select>
                     )}
                     
-                    {/* UM Dropdown for Other Items - shown next to quantity */}
-                    {!isDryIce && item.product.unit && (
-                      <select
-                        value={item.product.unit}
-                        disabled
-                        className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 cursor-not-allowed"
-                        style={{ minWidth: '80px' }}
-                      >
-                        <option value={item.product.unit}>{item.product.unit}</option>
-                      </select>
-                    )}
+                  {/* UM Dropdown for Other Items - supports multiple units from backend */}
+                  {!isDryIce && (
+                    <>
+                      {onUpdateUM && item.availableUnits && item.availableUnits.length > 0 ? (
+                        <select
+                          value={item.selectedUM || ''}
+                          onChange={(e) => onUpdateUM(item.product.id, e.target.value)}
+                          className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          style={{ minWidth: '100px' }}
+                        >
+                          {item.availableUnits.map((unit) => {
+                            const label = unit.symbol || unit.unitName;
+                            return (
+                              <option key={unit.id} value={label}>
+                                {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      ) : (
+                        item.product.unit && (
+                          <select
+                            value={item.product.unit}
+                            disabled
+                            className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 cursor-not-allowed"
+                            style={{ minWidth: '80px' }}
+                          >
+                            <option value={item.product.unit}>{item.product.unit}</option>
+                          </select>
+                        )
+                      )}
+                    </>
+                  )}
                   </div>
                   
                   <div className="w-20 text-right text-xs font-medium text-gray-900 dark:text-white">

@@ -57,10 +57,25 @@ export interface Product {
   imageUrl?: string; // Computed from imageData
 }
 
+// Unit of measure option associated with an item
+export interface UnitOfMeasureOption {
+  id: number;
+  unitName: string;
+  symbol: string;
+  unitPrecision: number;
+  // Present when loaded via /items/:itemId/units include
+  ItemUnitOfMeasure?: {
+    isDefault: boolean;
+  };
+}
+
 export interface CartItem {
   product: Product;
   quantity: number;
-  selectedUM?: string; // Selected unit of measure for dry ice items
+  // Selected unit text (symbol or name). For dry ice, this also controls price conversion.
+  selectedUM?: string;
+  // All available units for this item (from backend many-to-many mapping)
+  availableUnits?: UnitOfMeasureOption[];
 }
 
 export interface PaymentMethod {

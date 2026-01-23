@@ -269,7 +269,7 @@ export const itemsAPI = {
     );
   },
 
-  updateImage: async (id: number, imageData: string) => {
+  updateImage: async (id: number, imageData: string | null) => {
     return apiRequest(`/items/${id}/image`, {
       method: 'POST',
       body: JSON.stringify({ imageData }),
@@ -659,6 +659,59 @@ export const printerAPI = {
   },
 };
 
+// Units of Measure API
+export const unitsAPI = {
+  getAll: async () => {
+    return apiRequest<{ units: any[] }>('/units');
+  },
+
+  create: async (data: {
+    unitName: string;
+    symbol: string;
+    unitPrecision: number;
+  }) => {
+    return apiRequest<{ unit: any }>('/units', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, true);
+  },
+
+  delete: async (id: number) => {
+    return apiRequest(`/units/${id}`, {
+      method: 'DELETE',
+    }, true);
+  },
+};
+
+// Item Unit of Measure API
+export const itemUnitsAPI = {
+  getItemUnits: async (itemId: number) => {
+    return apiRequest<{ units: any[] }>(`/items/${itemId}/units`);
+  },
+
+  addItemUnit: async (itemId: number, data: {
+    unitOfMeasureId: number;
+    isDefault?: boolean;
+  }) => {
+    return apiRequest(`/items/${itemId}/units`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, true);
+  },
+
+  removeItemUnit: async (itemId: number, unitOfMeasureId: number) => {
+    return apiRequest(`/items/${itemId}/units/${unitOfMeasureId}`, {
+      method: 'DELETE',
+    }, true);
+  },
+
+  setDefaultUnit: async (itemId: number, unitOfMeasureId: number) => {
+    return apiRequest(`/items/${itemId}/units/${unitOfMeasureId}/default`, {
+      method: 'PATCH',
+    }, true);
+  },
+};
+
 // Health Check
 export const healthAPI = {
   check: async () => {
@@ -680,6 +733,8 @@ export default {
   pax: paxAPI,
   bluetooth: bluetoothAPI,
   printer: printerAPI,
+  units: unitsAPI,
+  itemUnits: itemUnitsAPI,
   health: healthAPI,
 };
 

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, ChangeEvent } from 'react';
-import { RefreshCw, Trash2, Check, X, Edit3, AlertCircle } from 'lucide-react';
+import { RefreshCw, Trash2, Check, X, Edit3, AlertCircle, Upload, Plus } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { logger } from '../../utils/logger';
-import { authAPI, zohoAPI, itemsAPI } from '../../services/api';
+import { authAPI, zohoAPI, itemsAPI, unitsAPI, itemUnitsAPI } from '../../services/api';
 
 interface User {
   id: string;
@@ -32,6 +32,23 @@ interface Item {
   id: string;
   name: string;
   image?: string;
+  unit?: string;
+  unitOfMeasures?: Array<{
+    id: number;
+    unitName: string;
+    symbol: string;
+    unitPrecision: number;
+    ItemUnitOfMeasure?: {
+      isDefault: boolean;
+    };
+  }>;
+}
+
+interface UnitOfMeasure {
+  id: number;
+  unitName: string;
+  symbol: string;
+  unitPrecision: number;
 }
 
 interface AdminPageProps {
@@ -55,11 +72,70 @@ export function AdminPage({ currentUser }: AdminPageProps) {
   const [editLocationId, setEditLocationId] = useState<string>('');
   const [editTaxRate, setEditTaxRate] = useState<number>(0);
   const [editZohoTaxId, setEditZohoTaxId] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'users' | 'items' | 'units'>('users');
+  const [units, setUnits] = useState<UnitOfMeasure[]>([]);
+  const [isLoadingUnits, setIsLoadingUnits] = useState(false);
+  const [showUnitModal, setShowUnitModal] = useState(false);
+  const [newUnit, setNewUnit] = useState({
+    unitName: '',
+    symbol: '',
+    unitPrecision: 0
+  });
+  const [showItemUnitModal, setShowItemUnitModal] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  const [itemUnits, setItemUnits] = useState<UnitOfMeasure[]>([]);
+  const [isLoadingItemUnits, setIsLoadingItemUnits] = useState(false);
   
   const { showToast } = useToast();
 
   // Check if current user is admin
   const isAdmin = currentUser.role === 'admin';
+
+  // Load items function
+  const loadItems = async () => {
+    setIsLoadingItems(true);
+    try {
+      const response = await itemsAPI.getAll({ isActive: true });
+      if (response.success && response.data?.items) {
+        const transformedItems: Item[] = await Promise.all(
+          response.data.items.map(async (item: any) => {
+            // Handle imageData - could be base64 string or full data URL
+            let imageUrl = undefined;
+            if (item.imageData) {
+              // If it already has data: prefix, use as is, otherwise add it
+              imageUrl = item.imageData.startsWith('data:') 
+                ? item.imageData 
+                : `data:image/png;base64,${item.imageData}`;
+            }
+            
+            // Load units for this item
+            let unitOfMeasures = undefined;
+            try {
+              const unitsResponse = await itemUnitsAPI.getItemUnits(item.id);
+              if (unitsResponse.success && unitsResponse.data?.units) {
+                unitOfMeasures = unitsResponse.data.units;
+              }
+            } catch (err) {
+              // Silently fail - units are optional
+            }
+            
+            return {
+              id: String(item.id),
+              name: item.name,
+              image: imageUrl,
+              unit: item.unit || undefined,
+              unitOfMeasures,
+            };
+          })
+        );
+        setItems(transformedItems);
+      }
+    } catch (err) {
+      console.error('Failed to load items:', err);
+    } finally {
+      setIsLoadingItems(false);
+    }
+  };
 
   // Load data from API
   useEffect(() => {
@@ -154,32 +230,10 @@ export function AdminPage({ currentUser }: AdminPageProps) {
       }
 
       // Load items
-      setIsLoadingItems(true);
-      try {
-        const response = await itemsAPI.getAll({ isActive: true });
-        if (response.success && response.data?.items) {
-          const transformedItems: Item[] = response.data.items.map((item: any) => {
-            // Handle imageData - could be base64 string or full data URL
-            let imageUrl = undefined;
-            if (item.imageData) {
-              // If it already has data: prefix, use as is, otherwise add it
-              imageUrl = item.imageData.startsWith('data:') 
-                ? item.imageData 
-                : `data:image/png;base64,${item.imageData}`;
-            }
-            return {
-              id: String(item.id),
-              name: item.name,
-              image: imageUrl,
-            };
-          });
-          setItems(transformedItems);
-        }
-      } catch (err) {
-        console.error('Failed to load items:', err);
-      } finally {
-        setIsLoadingItems(false);
-      }
+      await loadItems();
+
+      // Load units
+      await loadUnits();
     };
 
     if (isAdmin) {
@@ -339,6 +393,9 @@ export function AdminPage({ currentUser }: AdminPageProps) {
       return;
     }
 
+    // Clear the input so the same file can be selected again
+    event.target.value = '';
+
     // Read file as base64
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -349,13 +406,9 @@ export function AdminPage({ currentUser }: AdminPageProps) {
         const response = await itemsAPI.updateImage(parseInt(itemId), imageData);
         
         if (response.success) {
-          // Update local state with the saved image
-          setItems(items.map(item => 
-            item.id === itemId 
-              ? { ...item, image: imageData } 
-              : item
-          ));
           showToast('Image uploaded successfully!', 'success');
+          // Reload items to get the latest data from server
+          await loadItems();
         } else {
           showToast(response.message || 'Failed to upload image', 'error');
         }
@@ -371,6 +424,159 @@ export function AdminPage({ currentUser }: AdminPageProps) {
     
     reader.readAsDataURL(file);
   };
+
+  const handleRemoveImage = async (itemId: string) => {
+    if (!confirm('Are you sure you want to remove this image?')) {
+      return;
+    }
+
+    try {
+      const response = await itemsAPI.updateImage(parseInt(itemId), null);
+      
+      if (response.success) {
+        // Update local state to remove the image
+        setItems(items.map(item => 
+          item.id === itemId 
+            ? { ...item, image: undefined } 
+            : item
+        ));
+        showToast('Image removed successfully!', 'success');
+      } else {
+        showToast(response.message || 'Failed to remove image', 'error');
+      }
+    } catch (err) {
+      console.error('Failed to remove image:', err);
+      showToast('Failed to remove image', 'error');
+    }
+  };
+
+  const loadUnits = async () => {
+    setIsLoadingUnits(true);
+    try {
+      const response = await unitsAPI.getAll();
+      if (response.success && response.data?.units) {
+        setUnits(response.data.units);
+      }
+    } catch (err) {
+      console.error('Failed to load units:', err);
+      showToast('Failed to load units', 'error');
+    } finally {
+      setIsLoadingUnits(false);
+    }
+  };
+
+  const handleAddUnit = () => {
+    setNewUnit({ unitName: '', symbol: '', unitPrecision: 0 });
+    setShowUnitModal(true);
+  };
+
+  const handleSaveUnit = async () => {
+    if (!newUnit.unitName.trim() || !newUnit.symbol.trim()) {
+      showToast('Unit name and symbol are required', 'error');
+      return;
+    }
+
+    try {
+      const response = await unitsAPI.create({
+        unitName: newUnit.unitName.trim(),
+        symbol: newUnit.symbol.trim(),
+        unitPrecision: parseInt(String(newUnit.unitPrecision)) || 0
+      });
+
+      if (response.success) {
+        showToast('Unit of measure created successfully!', 'success');
+        setShowUnitModal(false);
+        await loadUnits();
+      } else {
+        showToast(response.message || 'Failed to create unit', 'error');
+      }
+    } catch (err) {
+      console.error('Failed to create unit:', err);
+      showToast('Failed to create unit', 'error');
+    }
+  };
+
+  const handleDeleteUnit = async (unitId: number) => {
+    if (!confirm('Are you sure you want to delete this unit of measure?')) {
+      return;
+    }
+
+    try {
+      const response = await unitsAPI.delete(unitId);
+      
+      if (response.success) {
+        showToast('Unit of measure deleted successfully!', 'success');
+        await loadUnits();
+      } else {
+        showToast(response.message || 'Failed to delete unit', 'error');
+      }
+    } catch (err) {
+      console.error('Failed to delete unit:', err);
+      showToast('Failed to delete unit', 'error');
+    }
+  };
+
+  const handleManageItemUnits = async (item: Item) => {
+    setSelectedItem(item);
+    setIsLoadingItemUnits(true);
+    try {
+      const response = await itemUnitsAPI.getItemUnits(parseInt(item.id));
+      if (response.success && response.data?.units) {
+        setItemUnits(response.data.units);
+      }
+    } catch (err) {
+      console.error('Failed to load item units:', err);
+      showToast('Failed to load item units', 'error');
+    } finally {
+      setIsLoadingItemUnits(false);
+      setShowItemUnitModal(true);
+    }
+  };
+
+  const handleAddItemUnit = async (unitId: number) => {
+    if (!selectedItem) return;
+
+    try {
+      // Default UM comes from Zoho, admins cannot set it
+      const response = await itemUnitsAPI.addItemUnit(parseInt(selectedItem.id), {
+        unitOfMeasureId: unitId
+      });
+
+      if (response.success) {
+        showToast('Unit added to item successfully!', 'success');
+        await handleManageItemUnits(selectedItem);
+      } else {
+        showToast(response.message || 'Failed to add unit to item', 'error');
+      }
+    } catch (err) {
+      console.error('Failed to add unit to item:', err);
+      showToast('Failed to add unit to item', 'error');
+    }
+  };
+
+  const handleRemoveItemUnit = async (unitId: number) => {
+    if (!selectedItem) return;
+
+    if (!confirm('Are you sure you want to remove this unit from the item?')) {
+      return;
+    }
+
+    try {
+      const response = await itemUnitsAPI.removeItemUnit(parseInt(selectedItem.id), unitId);
+
+      if (response.success) {
+        showToast('Unit removed from item successfully!', 'success');
+        await handleManageItemUnits(selectedItem);
+      } else {
+        showToast(response.message || 'Failed to remove unit from item', 'error');
+      }
+    } catch (err) {
+      console.error('Failed to remove unit from item:', err);
+      showToast('Failed to remove unit from item', 'error');
+    }
+  };
+
+  // Removed handleSetDefaultUnit - default UM comes from Zoho and cannot be changed by admins
 
   const activeUsers = users.filter(u => u.status === 'active').length;
   const pendingUsers = users.filter(u => u.status === 'pending').length;
@@ -395,10 +601,45 @@ export function AdminPage({ currentUser }: AdminPageProps) {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Admin Dashboard</h1>
         </div>
 
-        {/* All Users Management Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white">All Users</h2>
+        {/* Tabs */}
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 shadow-sm flex gap-2 mb-6">
+          <button
+            onClick={() => setActiveTab('users')}
+            className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+              activeTab === 'users'
+                ? 'bg-blue-600 text-white'
+                : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            Users
+          </button>
+          <button
+            onClick={() => setActiveTab('items')}
+            className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+              activeTab === 'items'
+                ? 'bg-blue-600 text-white'
+                : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            Item Images
+          </button>
+          <button
+            onClick={() => setActiveTab('units')}
+            className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+              activeTab === 'units'
+                ? 'bg-blue-600 text-white'
+                : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            UM
+          </button>
+        </div>
+
+        {/* Users Tab */}
+        {activeTab === 'users' && (
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 dark:text-white">All Users</h2>
             {isLoadingUsers ? (
               <span className="text-sm text-gray-500 dark:text-gray-400">Loading...</span>
             ) : (
@@ -407,77 +648,79 @@ export function AdminPage({ currentUser }: AdminPageProps) {
               </span>
             )}
           </div>
+          
+          <div className="p-6">
 
-          {isLoadingUsers ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading...</div>
-          ) : users.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">No users found.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 dark:bg-gray-700">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-bold text-gray-700 dark:text-gray-300">Username</th>
-                    <th className="px-4 py-3 text-left font-bold text-gray-700 dark:text-gray-300">Location</th>
-                    <th className="px-4 py-3 text-left font-bold text-gray-700 dark:text-gray-300">Tax Rate</th>
-                    <th className="px-4 py-3 text-left font-bold text-gray-700 dark:text-gray-300">Role</th>
-                    <th className="px-4 py-3 text-left font-bold text-gray-700 dark:text-gray-300">Status</th>
-                    <th className="px-4 py-3 text-right font-bold text-gray-700 dark:text-gray-300">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map(user => (
-                    <tr 
-                      key={user.id} 
-                      className={user.status === 'pending' ? 'bg-red-50 dark:bg-red-900/20' : 'bg-white dark:bg-gray-800'}
-                    >
-                      <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white">{user.useremail}</td>
-                      
-                      <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
-                        {editingUserId === user.id ? (
-                          <select
-                            value={editLocationId}
-                            onChange={(e) => handleLocationChange(e.target.value)}
-                            disabled={isLoadingLocations}
-                            className="min-w-[250px] px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
-                          >
-                            <option value="">
-                              {isLoadingLocations ? 'Loading locations...' : 'Select a location'}
-                            </option>
-                            {locations.map(loc => (
-                              <option key={loc.id} value={loc.id}>
-                                {loc.name} {loc.isPrimary ? '(Primary)' : ''}
+            {isLoadingUsers ? (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading...</div>
+            ) : users.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">No users found.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
+                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Username</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Location</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Tax Rate</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Role</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Status</th>
+                      <th className="px-6 py-3 text-right font-semibold text-gray-900 dark:text-white">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map(user => (
+                      <tr 
+                        key={user.id} 
+                        className={`border-b border-gray-200 dark:border-gray-600 ${user.status === 'pending' ? 'bg-red-50 dark:bg-red-900/20' : 'bg-white dark:bg-gray-800'}`}
+                      >
+                        <td className="px-6 py-3 text-gray-900 dark:text-white">{user.useremail}</td>
+                        
+                        <td className="px-6 py-3">
+                          {editingUserId === user.id ? (
+                            <select
+                              value={editLocationId}
+                              onChange={(e) => handleLocationChange(e.target.value)}
+                              disabled={isLoadingLocations}
+                              className="min-w-[250px] px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                            >
+                              <option value="">
+                                {isLoadingLocations ? 'Loading locations...' : 'Select a location'}
                               </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="text-gray-900 dark:text-white">{user.locationName || user.locationId || '—'}</span>
-                        )}
-                      </td>
-                      
-                      <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
-                        {editingUserId === user.id ? (
-                          <select
-                            value={editZohoTaxId}
-                            onChange={(e) => handleTaxChange(e.target.value)}
-                            disabled={isLoadingTaxes}
-                            className="min-w-[220px] px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
-                          >
-                            <option value="">
-                              {isLoadingTaxes ? 'Loading taxes...' : 'Select tax rate'}
-                            </option>
-                            {taxes.map(t => (
-                              <option key={t.taxId} value={t.taxId}>
-                                {t.taxName} ({t.taxPercentage.toFixed(2)}%)
+                              {locations.map(loc => (
+                                <option key={loc.id} value={loc.id}>
+                                  {loc.name} {loc.isPrimary ? '(Primary)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="text-gray-900 dark:text-white">{user.locationName || user.locationId || '—'}</span>
+                          )}
+                        </td>
+                        
+                        <td className="px-6 py-3">
+                          {editingUserId === user.id ? (
+                            <select
+                              value={editZohoTaxId}
+                              onChange={(e) => handleTaxChange(e.target.value)}
+                              disabled={isLoadingTaxes}
+                              className="min-w-[220px] px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                            >
+                              <option value="">
+                                {isLoadingTaxes ? 'Loading taxes...' : 'Select tax rate'}
                               </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="text-gray-900 dark:text-white">{user.taxRate ? `${user.taxRate.toFixed(2)}%` : '—'}</span>
-                        )}
-                      </td>
-                      
-                      <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+                              {taxes.map(t => (
+                                <option key={t.taxId} value={t.taxId}>
+                                  {t.taxName} ({t.taxPercentage.toFixed(2)}%)
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="text-gray-900 dark:text-white">{user.taxRate ? `${user.taxRate.toFixed(2)}%` : '—'}</span>
+                          )}
+                        </td>
+                        
+                        <td className="px-6 py-3">
                         <span 
                           className={`inline-flex px-2 py-1 text-xs rounded-full ${
                             user.role === 'admin' 
@@ -488,20 +731,20 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                           {user.role}
                         </span>
                       </td>
-                      
-                      <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
-                        <span 
-                          className={`inline-flex px-2 py-1 text-xs rounded-full ${
-                            user.status === 'active' 
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
-                              : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                          }`}
-                        >
-                          {user.status === 'active' ? 'Active' : 'Pending'}
-                        </span>
-                      </td>
-                      
-                      <td className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-right">
+                        
+                        <td className="px-6 py-3">
+                          <span 
+                            className={`inline-flex px-2 py-1 text-xs rounded-full ${
+                              user.status === 'active' 
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                            }`}
+                          >
+                            {user.status === 'active' ? 'Active' : 'Pending'}
+                          </span>
+                        </td>
+                        
+                        <td className="px-6 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
                           {editingUserId === user.id ? (
                             <>
@@ -560,74 +803,387 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                               </button>
                             </>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          </div>
+        )}
 
-        {/* Item Images Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Item Images</h2>
-            <div className="flex items-center gap-3">
-              {isLoadingItems && (
-                <span className="text-sm text-gray-500 dark:text-gray-400">Loading...</span>
-              )}
-              <button
-                type="button"
-                onClick={handleSyncZoho}
-                disabled={isSyncingZoho}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <RefreshCw className={`w-4 h-4 ${isSyncingZoho ? 'animate-spin' : ''}`} />
-                <span>{isSyncingZoho ? 'Syncing...' : 'Sync Zoho'}</span>
-              </button>
+        {/* Item Images Tab */}
+        {activeTab === 'items' && (
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900 dark:text-white">Item Images</h2>
+              <div className="flex items-center gap-3">
+                {isLoadingItems && (
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Loading...</span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSyncZoho}
+                  disabled={isSyncingZoho}
+                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncingZoho ? 'animate-spin' : ''}`} />
+                  {isSyncingZoho ? 'Syncing...' : 'Sync Zoho'}
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-6">
+
+            {isLoadingItems ? (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading...</div>
+            ) : items.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">No items found.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
+                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Item Name</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Image</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">UM</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map(item => (
+                      <tr 
+                        key={item.id} 
+                        className="border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+                      >
+                        <td className="px-6 py-3 text-gray-900 dark:text-white font-medium">
+                          {item.name}
+                        </td>
+                        
+                        <td className="px-6 py-3">
+                        <div className="relative">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id={`file-input-${item.id}`}
+                            onChange={(e) => handleImageUpload(item.id, e)}
+                            className="hidden"
+                          />
+                          {item.image ? (
+                            <div 
+                              onClick={() => handleRemoveImage(item.id)}
+                              className="w-24 h-24 rounded overflow-hidden cursor-pointer hover:opacity-80 transition-opacity relative group"
+                              title="Click to remove image"
+                            >
+                              <img 
+                                src={item.image} 
+                                alt={item.name}
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center">
+                                <Trash2 className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </div>
+                            </div>
+                          ) : (
+                            <div 
+                              onClick={() => document.getElementById(`file-input-${item.id}`)?.click()}
+                              className="w-24 h-24 rounded overflow-hidden cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors bg-gray-200 dark:bg-gray-600 flex flex-col items-center justify-center gap-1"
+                              title="Click to upload image"
+                            >
+                              <Upload className="w-6 h-6 text-gray-500 dark:text-gray-400" />
+                              <span className="text-xs text-gray-500 dark:text-gray-400">Upload</span>
+                            </div>
+                          )}
+                          </div>
+                        </td>
+                        
+                        <td className="px-6 py-3 text-gray-900 dark:text-white">
+                          <div className="flex items-center gap-2">
+                            {item.unitOfMeasures && item.unitOfMeasures.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {item.unitOfMeasures.map((um) => (
+                                  <span
+                                    key={um.id}
+                                    className={`px-2 py-1 text-xs rounded ${
+                                      um.ItemUnitOfMeasure?.isDefault
+                                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-semibold'
+                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                                    }`}
+                                  >
+                                    {um.symbol}
+                                    {um.ItemUnitOfMeasure?.isDefault && ' (Default)'}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span>{item.unit || '—'}</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleManageItemUnits(item)}
+                              className="ml-2 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                            >
+                              Manage
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             </div>
           </div>
+        )}
 
-          {isLoadingItems ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading...</div>
-          ) : items.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">No items found.</div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {items.map(item => (
-                <div 
-                  key={item.id} 
-                  className="border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700 p-2.5"
+        {/* Units Tab */}
+        {activeTab === 'units' && (
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900 dark:text-white">Unit of Measure</h2>
+              <button
+                type="button"
+                onClick={handleAddUnit}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Add UM
+              </button>
+            </div>
+            
+            <div className="p-6">
+              {isLoadingUnits ? (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading...</div>
+              ) : units.length === 0 ? (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">No units found.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Unit Name</th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Symbol</th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Unit Rate</th>
+                        <th className="px-6 py-3 text-right font-semibold text-gray-900 dark:text-white">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {units.map(unit => (
+                        <tr 
+                          key={unit.id} 
+                          className="border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+                        >
+                          <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.unitName}</td>
+                          <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.symbol}</td>
+                          <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.unitPrecision}</td>
+                          <td className="px-6 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteUnit(unit.id)}
+                              className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors flex items-center gap-1"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Add Unit Modal */}
+        {showUnitModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 w-full max-w-md">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Add Unit of Measure</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowUnitModal(false)}
+                  className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                 >
-                  <div className="font-bold text-sm mb-1 text-gray-900 dark:text-white">{item.name}</div>
-                  
-                  <div className="h-30 mb-2 rounded overflow-hidden mt-2">
-                    {item.image ? (
-                      <img 
-                        src={item.image} 
-                        alt={item.name}
-                        className="w-full h-30 object-cover rounded"
-                      />
-                    ) : (
-                      <div className="w-full h-30 bg-gray-200 dark:bg-gray-600 rounded flex items-center justify-center">
-                        <span className="text-xs text-gray-500 dark:text-gray-400">No image</span>
-                      </div>
-                    )}
-                  </div>
-                  
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Unit Name *
+                  </label>
                   <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleImageUpload(item.id, e)}
-                    className="text-xs w-full text-gray-900 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-gray-600 dark:file:text-white dark:hover:file:bg-gray-500"
+                    type="text"
+                    value={newUnit.unitName}
+                    onChange={(e) => setNewUnit({ ...newUnit, unitName: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., Kilogram"
                   />
                 </div>
-              ))}
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Symbol *
+                  </label>
+                  <input
+                    type="text"
+                    value={newUnit.symbol}
+                    onChange={(e) => setNewUnit({ ...newUnit, symbol: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., kg"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Unit Rate *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newUnit.unitPrecision}
+                    onChange={(e) => setNewUnit({ ...newUnit, unitPrecision: parseInt(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+              
+              <div className="flex items-center justify-end gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowUnitModal(false)}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveUnit}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Save
+                </button>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* Manage Item Units Modal */}
+        {showItemUnitModal && selectedItem && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Manage Units for: {selectedItem.name}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowItemUnitModal(false);
+                    setSelectedItem(null);
+                    setItemUnits([]);
+                  }}
+                  className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                {/* Assigned Units */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                    Assigned Units
+                  </h4>
+                  {isLoadingItemUnits ? (
+                    <div className="text-center py-4 text-gray-500 dark:text-gray-400">Loading...</div>
+                  ) : itemUnits.length === 0 ? (
+                    <div className="text-center py-4 text-gray-500 dark:text-gray-400">No units assigned</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {itemUnits.map((unit: any) => {
+                        const isDefault = unit.ItemUnitOfMeasure?.isDefault || unit.isDefault;
+                        return (
+                          <div
+                            key={unit.id}
+                            className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="font-medium text-gray-900 dark:text-white">
+                                {unit.unitName} ({unit.symbol})
+                              </span>
+                              {isDefault && (
+                                <span className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">
+                                  Default
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {isDefault && (
+                                <span className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">
+                                  Default (from Zoho - cannot be removed)
+                                </span>
+                              )}
+                              {!isDefault && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveItemUnit(unit.id)}
+                                  className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Available Units to Add */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                    Available Units
+                  </h4>
+                  {units.length === 0 ? (
+                    <div className="text-center py-4 text-gray-500 dark:text-gray-400">No units available</div>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {units
+                        .filter(unit => !itemUnits.some(itemUnit => itemUnit.id === unit.id))
+                        .map((unit) => (
+                          <div
+                            key={unit.id}
+                            className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
+                          >
+                            <span className="text-gray-900 dark:text-white">
+                              {unit.unitName} ({unit.symbol}) - Precision: {unit.unitPrecision}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleAddItemUnit(unit.id)}
+                              className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

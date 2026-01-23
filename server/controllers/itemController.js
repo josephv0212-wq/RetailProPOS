@@ -2,6 +2,7 @@ import { Item } from '../models/index.js';
 import { Op } from 'sequelize';
 import { getItemsFromPricebookByName, syncItemsFromZoho as syncItemsFromZohoService } from '../services/zohoService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
+import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
 
 export const getItems = async (req, res) => {
   try {
@@ -171,8 +172,9 @@ export const updateItemImage = async (req, res) => {
     const { id } = req.params;
     const { imageData } = req.body;
 
-    if (!imageData || typeof imageData !== 'string') {
-      return sendValidationError(res, 'imageData (base64 string) is required');
+    // Allow null or empty string to remove image, otherwise require valid string
+    if (imageData !== null && imageData !== '' && (!imageData || typeof imageData !== 'string')) {
+      return sendValidationError(res, 'imageData must be a base64 string, null, or empty string');
     }
 
     const item = await Item.findByPk(id);
@@ -181,10 +183,12 @@ export const updateItemImage = async (req, res) => {
       return sendNotFound(res, 'Item');
     }
 
-    item.imageData = imageData;
+    // Set to null if empty string or null, otherwise set the image data
+    item.imageData = (imageData === null || imageData === '') ? null : imageData;
     await item.save();
 
-    return sendSuccess(res, { item }, 'Item image updated successfully');
+    const message = item.imageData ? 'Item image updated successfully' : 'Item image removed successfully';
+    return sendSuccess(res, { item }, message);
   } catch (err) {
     console.error('Update item image error:', err);
     return sendError(res, 'Failed to update item image', 500, err);
@@ -193,7 +197,6 @@ export const updateItemImage = async (req, res) => {
 
 export const syncItemsFromZoho = async (req, res) => {
   try {
-    // Fetch items from Zoho and sync to database
     console.log('🔄 Syncing items from Zoho...');
     const zohoItems = await syncItemsFromZohoService();
     
@@ -203,8 +206,7 @@ export const syncItemsFromZoho = async (req, res) => {
 
     // Sync items to database
     for (const zohoItem of zohoItems) {
-      // Get unit of measure from Zoho (try multiple possible field names)
-      const unit = zohoItem.unit || zohoItem.unit_name || zohoItem.unit_of_measure || zohoItem.um || null;
+      const unit = extractUnitFromZohoItem(zohoItem);
       
       const [item, isNew] = await Item.upsert({
         zohoId: zohoItem.item_id,
@@ -221,6 +223,19 @@ export const syncItemsFromZoho = async (req, res) => {
       }, {
         returning: true
       });
+
+      // Ensure we have the item with ID (upsert should return it, but verify)
+      const itemWithId = item.id ? item : await Item.findOne({ where: { zohoId: zohoItem.item_id } });
+      
+      if (!itemWithId || !itemWithId.id) {
+        console.error(`⚠️ Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
+        continue;
+      }
+
+      // Sync unit of measure if present
+      if (unit) {
+        await syncItemUnitOfMeasure(itemWithId, zohoItem);
+      }
 
       if (isNew) {
         created++;

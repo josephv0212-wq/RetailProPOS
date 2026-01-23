@@ -16,8 +16,8 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { AlertProvider } from './contexts/AlertContext';
 import { useAuth } from './contexts/AuthContext';
 import { useAlert } from './contexts/AlertContext';
-import { Customer, Product, CartItem, PaymentDetails, Sale } from './types';
-import { itemsAPI, customersAPI, salesAPI, zohoAPI } from '../services/api';
+import { Customer, Product, CartItem, PaymentDetails, Sale, UnitOfMeasureOption } from './types';
+import { itemsAPI, customersAPI, salesAPI, zohoAPI, itemUnitsAPI } from '../services/api';
 import { SalesOrderInvoiceModal } from './components/SalesOrderInvoiceModal';
 import { PaymentMethodSelector } from './components/PaymentMethodSelector';
 import { isVendorContact } from './utils/contactType';
@@ -302,7 +302,7 @@ function AppContent() {
   };
 
   // Shopping cart functions
-  const handleAddToCart = (product: Product) => {
+  const handleAddToCart = async (product: Product) => {
     // Check if product price is $0
     if (product.price === 0) {
       showAlert({ message: 'Cannot add item with $0 price to cart.' });
@@ -318,7 +318,44 @@ function AppContent() {
           : item
       ));
     } else {
-      setCartItems([...cartItems, { product, quantity: 1 }]);
+      // When first adding to cart, try to load available units for this item
+      let availableUnits: UnitOfMeasureOption[] | undefined;
+      let selectedUM: string | undefined;
+
+      try {
+        const unitsResponse = await itemUnitsAPI.getItemUnits(product.id);
+        if (unitsResponse.success && unitsResponse.data?.units && unitsResponse.data.units.length > 0) {
+          availableUnits = unitsResponse.data.units as UnitOfMeasureOption[];
+
+          // Prefer unit that matches the item's default unit field first
+          const matchByItemUnit = product.unit
+            ? availableUnits.find(u => (u.symbol || u.unitName) === product.unit)
+            : undefined;
+
+          // Then prefer one flagged as default in the join table
+          const matchByFlag = availableUnits.find(u => u.ItemUnitOfMeasure?.isDefault);
+
+          const defaultUnit =
+            matchByItemUnit || matchByFlag || availableUnits[0];
+
+          if (defaultUnit) {
+            selectedUM = defaultUnit.symbol || defaultUnit.unitName;
+          }
+        }
+      } catch (err) {
+        logger.error('Failed to load item units', err);
+      }
+
+      // Fallback: if no units from API, use product.unit (if present) or, for dry ice, default to "lb"
+      if (!selectedUM) {
+        if (product.unit) {
+          selectedUM = product.unit;
+        } else if (isDryIceItem(product.name)) {
+          selectedUM = 'lb';
+        }
+      }
+
+      setCartItems([...cartItems, { product, quantity: 1, selectedUM, availableUnits }]);
     }
   };
 
