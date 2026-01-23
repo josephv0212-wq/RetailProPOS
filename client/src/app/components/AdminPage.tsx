@@ -1,5 +1,5 @@
 import React, { useState, useEffect, ChangeEvent } from 'react';
-import { RefreshCw, Trash2, Check, X, Edit3, AlertCircle, Upload, Plus } from 'lucide-react';
+import { RefreshCw, Trash2, Check, X, Edit3, AlertCircle, Upload, Plus, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { logger } from '../../utils/logger';
 import { authAPI, zohoAPI, itemsAPI, unitsAPI, itemUnitsAPI } from '../../services/api';
@@ -49,6 +49,7 @@ interface UnitOfMeasure {
   unitName: string;
   symbol: string;
   unitPrecision: number;
+  basicUM?: string | null;
 }
 
 interface AdminPageProps {
@@ -79,12 +80,14 @@ export function AdminPage({ currentUser }: AdminPageProps) {
   const [newUnit, setNewUnit] = useState({
     unitName: '',
     symbol: '',
-    unitPrecision: 0
+    unitPrecision: 0,
+    basicUM: ''
   });
   const [showItemUnitModal, setShowItemUnitModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [itemUnits, setItemUnits] = useState<UnitOfMeasure[]>([]);
   const [isLoadingItemUnits, setIsLoadingItemUnits] = useState(false);
+  const [itemSearchQuery, setItemSearchQuery] = useState('');
   
   const { showToast } = useToast();
 
@@ -434,13 +437,9 @@ export function AdminPage({ currentUser }: AdminPageProps) {
       const response = await itemsAPI.updateImage(parseInt(itemId), null);
       
       if (response.success) {
-        // Update local state to remove the image
-        setItems(items.map(item => 
-          item.id === itemId 
-            ? { ...item, image: undefined } 
-            : item
-        ));
         showToast('Image removed successfully!', 'success');
+        // Reload items to get the latest data from server for real-time update
+        await loadItems();
       } else {
         showToast(response.message || 'Failed to remove image', 'error');
       }
@@ -466,7 +465,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
   };
 
   const handleAddUnit = () => {
-    setNewUnit({ unitName: '', symbol: '', unitPrecision: 0 });
+    setNewUnit({ unitName: '', symbol: '', unitPrecision: 0, basicUM: '' });
     setShowUnitModal(true);
   };
 
@@ -480,7 +479,8 @@ export function AdminPage({ currentUser }: AdminPageProps) {
       const response = await unitsAPI.create({
         unitName: newUnit.unitName.trim(),
         symbol: newUnit.symbol.trim(),
-        unitPrecision: parseInt(String(newUnit.unitPrecision)) || 0
+        unitPrecision: parseInt(String(newUnit.unitPrecision)) || 0,
+        basicUM: newUnit.basicUM.trim() || null
       });
 
       if (response.success) {
@@ -537,20 +537,51 @@ export function AdminPage({ currentUser }: AdminPageProps) {
     if (!selectedItem) return;
 
     try {
-      // Default UM comes from Zoho, admins cannot set it
       const response = await itemUnitsAPI.addItemUnit(parseInt(selectedItem.id), {
         unitOfMeasureId: unitId
       });
 
       if (response.success) {
         showToast('Unit added to item successfully!', 'success');
-        await handleManageItemUnits(selectedItem);
+        // Reload item units to update the modal UI
+        setIsLoadingItemUnits(true);
+        try {
+          const unitsResponse = await itemUnitsAPI.getItemUnits(parseInt(selectedItem.id));
+          if (unitsResponse.success && unitsResponse.data?.units) {
+            const updatedUnits = unitsResponse.data.units;
+            setItemUnits(updatedUnits);
+            
+            // Also update the item in the main items list - create a new array to ensure React detects the change
+            setItems(prevItems => {
+              const itemIdToUpdate = String(selectedItem.id);
+              const updatedItems = prevItems.map(item => {
+                if (String(item.id) === itemIdToUpdate) {
+                  // Create a new object with updated unitOfMeasures
+                  return {
+                    ...item,
+                    unitOfMeasures: [...updatedUnits] // Create new array reference
+                  };
+                }
+                return item;
+              });
+              return updatedItems;
+            });
+          }
+        } catch (err) {
+          console.error('Failed to reload item units:', err);
+        } finally {
+          setIsLoadingItemUnits(false);
+        }
       } else {
-        showToast(response.message || 'Failed to add unit to item', 'error');
+        // Show backend validation error message
+        const errorMessage = response.message || response.error || 'Failed to add unit to item';
+        showToast(errorMessage, 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to add unit to item:', err);
-      showToast('Failed to add unit to item', 'error');
+      // Extract error message from API response
+      const errorMessage = err?.response?.data?.message || err?.message || 'Failed to add unit to item';
+      showToast(errorMessage, 'error');
     }
   };
 
@@ -566,7 +597,27 @@ export function AdminPage({ currentUser }: AdminPageProps) {
 
       if (response.success) {
         showToast('Unit removed from item successfully!', 'success');
-        await handleManageItemUnits(selectedItem);
+        // Reload item units to update the modal UI
+        setIsLoadingItemUnits(true);
+        try {
+          const unitsResponse = await itemUnitsAPI.getItemUnits(parseInt(selectedItem.id));
+          if (unitsResponse.success && unitsResponse.data?.units) {
+            setItemUnits(unitsResponse.data.units);
+            
+            // Also update the item in the main items list
+            setItems(prevItems => 
+              prevItems.map(item => 
+                String(item.id) === String(selectedItem.id)
+                  ? { ...item, unitOfMeasures: unitsResponse.data.units }
+                  : item
+              )
+            );
+          }
+        } catch (err) {
+          console.error('Failed to reload item units:', err);
+        } finally {
+          setIsLoadingItemUnits(false);
+        }
       } else {
         showToast(response.message || 'Failed to remove unit from item', 'error');
       }
@@ -621,7 +672,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                 : 'bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
             }`}
           >
-            Item Images
+            Item Settings
           </button>
           <button
             onClick={() => setActiveTab('units')}
@@ -818,42 +869,82 @@ export function AdminPage({ currentUser }: AdminPageProps) {
         {/* Item Images Tab */}
         {activeTab === 'items' && (
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900 dark:text-white">Item Images</h2>
-              <div className="flex items-center gap-3">
-                {isLoadingItems && (
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Loading...</span>
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold text-gray-900 dark:text-white">Item Settings</h2>
+                <div className="flex items-center gap-3">
+                  {isLoadingItems && (
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Loading...</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSyncZoho}
+                    disabled={isSyncingZoho}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isSyncingZoho ? 'animate-spin' : ''}`} />
+                    {isSyncingZoho ? 'Syncing...' : 'Sync Zoho'}
+                  </button>
+                </div>
+              </div>
+              {/* Search Input */}
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Search items by name..."
+                  value={itemSearchQuery}
+                  onChange={(e) => setItemSearchQuery(e.target.value)}
+                  className="w-full px-4 py-2 pl-10 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                {itemSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setItemSearchQuery('')}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 )}
-                <button
-                  type="button"
-                  onClick={handleSyncZoho}
-                  disabled={isSyncingZoho}
-                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  <RefreshCw className={`w-4 h-4 ${isSyncingZoho ? 'animate-spin' : ''}`} />
-                  {isSyncingZoho ? 'Syncing...' : 'Sync Zoho'}
-                </button>
               </div>
             </div>
             
             <div className="p-6">
+            {(() => {
+              // Filter items based on search query
+              const filteredItems = itemSearchQuery
+                ? items.filter(item => 
+                    item.name.toLowerCase().includes(itemSearchQuery.toLowerCase()) ||
+                    (item.sku && item.sku.toLowerCase().includes(itemSearchQuery.toLowerCase()))
+                  )
+                : items;
 
-            {isLoadingItems ? (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading...</div>
-            ) : items.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">No items found.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
-                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Item Name</th>
-                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Image</th>
-                      <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">UM</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map(item => (
+              return (
+                <>
+                  {isLoadingItems ? (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading...</div>
+                  ) : filteredItems.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      {itemSearchQuery ? `No items found matching "${itemSearchQuery}"` : 'No items found.'}
+                    </div>
+                  ) : (
+                    <>
+                      {itemSearchQuery && (
+                        <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                          Showing {filteredItems.length} of {items.length} items
+                        </div>
+                      )}
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
+                              <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Item Name</th>
+                              <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Image</th>
+                              <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">UM</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredItems.map(item => (
                       <tr 
                         key={item.id} 
                         className="border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
@@ -930,11 +1021,15 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                           </div>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
             </div>
           </div>
         )}
@@ -967,6 +1062,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                         <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Unit Name</th>
                         <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Symbol</th>
                         <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Unit Rate</th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Basic UM</th>
                         <th className="px-6 py-3 text-right font-semibold text-gray-900 dark:text-white">Actions</th>
                       </tr>
                     </thead>
@@ -979,6 +1075,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                           <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.unitName}</td>
                           <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.symbol}</td>
                           <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.unitPrecision}</td>
+                          <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.basicUM || '—'}</td>
                           <td className="px-6 py-3 text-right">
                             <button
                               type="button"
@@ -1052,6 +1149,19 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                     onChange={(e) => setNewUnit({ ...newUnit, unitPrecision: parseInt(e.target.value) || 0 })}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="0"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Basic UM
+                  </label>
+                  <input
+                    type="text"
+                    value={newUnit.basicUM}
+                    onChange={(e) => setNewUnit({ ...newUnit, basicUM: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., lb"
                   />
                 </div>
               </div>
@@ -1160,23 +1270,59 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                     <div className="space-y-2 max-h-60 overflow-y-auto">
                       {units
                         .filter(unit => !itemUnits.some(itemUnit => itemUnit.id === unit.id))
-                        .map((unit) => (
-                          <div
-                            key={unit.id}
-                            className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
-                          >
-                            <span className="text-gray-900 dark:text-white">
-                              {unit.unitName} ({unit.symbol}) - Precision: {unit.unitPrecision}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleAddItemUnit(unit.id)}
-                              className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        .map((unit) => {
+                          // Get item's default UM
+                          const defaultUnit = itemUnits.find(u => u.ItemUnitOfMeasure?.isDefault);
+                          const itemDefaultUM = selectedItem?.unit || (defaultUnit ? (defaultUnit.symbol || defaultUnit.unitName) : null);
+                          const canAdd = unit.basicUM && itemDefaultUM && unit.basicUM === itemDefaultUM;
+                          
+                          return (
+                            <div
+                              key={unit.id}
+                              className={`flex items-center justify-between p-3 rounded-lg ${
+                                canAdd 
+                                  ? 'bg-gray-50 dark:bg-gray-700' 
+                                  : 'bg-gray-100 dark:bg-gray-800 opacity-60'
+                              }`}
                             >
-                              Add
-                            </button>
-                          </div>
-                        ))}
+                              <div className="flex flex-col gap-1">
+                                <span className="text-gray-900 dark:text-white font-medium">
+                                  {unit.unitName} ({unit.symbol})
+                                </span>
+                                <div className="flex flex-col gap-0.5 text-xs">
+                                  <span className="text-gray-600 dark:text-gray-400">
+                                    Unit Rate: {unit.unitPrecision}
+                                  </span>
+                                  {unit.basicUM && (
+                                    <span className="text-gray-600 dark:text-gray-400">
+                                      Basic UM: {unit.basicUM}
+                                    </span>
+                                  )}
+                                </div>
+                                {!canAdd && unit.basicUM && (
+                                  <span className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">
+                                    {!itemDefaultUM 
+                                      ? 'Item has no default UM'
+                                      : `Cannot add: Item's default UM (${itemDefaultUM}) doesn't match this unit's basic UM (${unit.basicUM})`
+                                    }
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleAddItemUnit(unit.id)}
+                                disabled={!canAdd}
+                                className={`px-3 py-1 text-xs rounded transition-colors ${
+                                  canAdd
+                                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                    : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                }`}
+                              >
+                                Add
+                              </button>
+                            </div>
+                          );
+                        })}
                     </div>
                   )}
                 </div>

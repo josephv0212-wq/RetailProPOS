@@ -63,6 +63,7 @@ export interface UnitOfMeasureOption {
   unitName: string;
   symbol: string;
   unitPrecision: number;
+  basicUM?: string | null;
   // Present when loaded via /items/:itemId/units include
   ItemUnitOfMeasure?: {
     isDefault: boolean;

@@ -591,6 +591,18 @@ const ensureSaleCancelledColumn = async () =>
     warnMessage: 'Could not ensure cancelledInZoho column on Sales table'
   });
 
+// Ensure basicUM column exists on unit_of_measures table
+const ensureBasicUMColumn = async () =>
+  ensureColumn({
+    table: 'unit_of_measures',
+    column: 'basicUM',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added basicUM column to unit_of_measures table',
+    existsMessage: 'basicUM column already exists on unit_of_measures table',
+    warnMessage: 'Could not ensure basicUM column on unit_of_measures table'
+  });
+
 // Ensure transactions table exists (legacy table for backward compatibility)
 const ensureTransactionsTable = async () => {
   try {
@@ -702,6 +714,7 @@ const startServer = async () => {
           await ensureBankAccountColumn();
           await ensureCustomerProfileColumns();
           await ensureCustomerStatusColumn();
+          await ensureBasicUMColumn();
           await ensureTransactionsTable();
         } else {
           // For PostgreSQL, also ensure columns exist
@@ -713,6 +726,7 @@ const startServer = async () => {
           await ensureBankAccountColumn();
           await ensureCustomerProfileColumns();
           await ensureCustomerStatusColumn();
+          await ensureBasicUMColumn();
           await ensureTransactionsTable();
         }
 

@@ -10,6 +10,7 @@
     "test": "node scripts/testBackend.js",
     "get-zoho-token": "node scripts/getZohoToken.js",
     "migrate:terminal-ip": "node scripts/addTerminalIPColumn.js",
+    "migrate:basic-um": "node scripts/addBasicUMColumn.js",
     "zoho:organize-salesorders": "node scripts/organizeZohoSalesOrders.js",
     "zoho:scan-salesorders": "node scripts/scanZohoSalesOrders.js",
     "create-admin": "node scripts/createAdminUser.js"

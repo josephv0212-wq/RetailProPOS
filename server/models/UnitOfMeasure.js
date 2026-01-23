@@ -20,6 +20,10 @@ export const UnitOfMeasure = sequelize.define('UnitOfMeasure', {
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0
+  },
+  basicUM: {
+    type: DataTypes.STRING,
+    allowNull: true
   }
 }, {
   tableName: 'unit_of_measures'

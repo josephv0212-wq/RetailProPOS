@@ -6,13 +6,32 @@ export const getItemUnits = async (req, res) => {
   try {
     const { itemId } = req.params;
 
-    const item = await Item.findByPk(itemId, {
-      include: [{
-        model: UnitOfMeasure,
-        as: 'unitOfMeasures',
-        through: { attributes: ['isDefault'] }
-      }]
-    });
+    let item;
+    try {
+      // Try with basicUM attribute first
+      item = await Item.findByPk(itemId, {
+        include: [{
+          model: UnitOfMeasure,
+          as: 'unitOfMeasures',
+          attributes: ['id', 'unitName', 'symbol', 'unitPrecision', 'basicUM'],
+          through: { attributes: ['isDefault'] }
+        }]
+      });
+    } catch (attrError) {
+      // If basicUM column doesn't exist yet, retry without it
+      if (attrError.message?.includes('basicUM') || attrError.original?.message?.includes('basicUM')) {
+        item = await Item.findByPk(itemId, {
+          include: [{
+            model: UnitOfMeasure,
+            as: 'unitOfMeasures',
+            attributes: ['id', 'unitName', 'symbol', 'unitPrecision'],
+            through: { attributes: ['isDefault'] }
+          }]
+        });
+      } else {
+        throw attrError;
+      }
+    }
 
     if (!item) {
       return sendNotFound(res, 'Item');
@@ -94,13 +113,31 @@ export const getItemUnits = async (req, res) => {
 
     // Reload item with relationships if we made changes
     if (needsReload) {
-      const reloadedItem = await Item.findByPk(itemId, {
-        include: [{
-          model: UnitOfMeasure,
-          as: 'unitOfMeasures',
-          through: { attributes: ['isDefault'] }
-        }]
-      });
+      let reloadedItem;
+      try {
+        reloadedItem = await Item.findByPk(itemId, {
+          include: [{
+            model: UnitOfMeasure,
+            as: 'unitOfMeasures',
+            attributes: ['id', 'unitName', 'symbol', 'unitPrecision', 'basicUM'],
+            through: { attributes: ['isDefault'] }
+          }]
+        });
+      } catch (attrError) {
+        // If basicUM column doesn't exist yet, retry without it
+        if (attrError.message?.includes('basicUM') || attrError.original?.message?.includes('basicUM')) {
+          reloadedItem = await Item.findByPk(itemId, {
+            include: [{
+              model: UnitOfMeasure,
+              as: 'unitOfMeasures',
+              attributes: ['id', 'unitName', 'symbol', 'unitPrecision'],
+              through: { attributes: ['isDefault'] }
+            }]
+          });
+        } else {
+          throw attrError;
+        }
+      }
       units = reloadedItem?.unitOfMeasures || units;
     }
 
@@ -130,6 +167,30 @@ export const addItemUnit = async (req, res) => {
       return sendNotFound(res, 'Unit of measure');
     }
 
+    // Validation: Admin can only add UM to item if item's default UM matches the UM's basicUM
+    if (!unit.basicUM) {
+      return sendError(res, 'Cannot add Zoho-synced units to items. Only user-created units with a basic UM can be added.', 400);
+    }
+
+    // Get the item's default UM (from Items.unit field or from ItemUnitOfMeasure with isDefault=true)
+    let itemDefaultUM = item.unit;
+    if (!itemDefaultUM) {
+      const defaultItemUnit = await ItemUnitOfMeasure.findOne({
+        where: { itemId, isDefault: true }
+      });
+      if (defaultItemUnit) {
+        const defaultUnit = await UnitOfMeasure.findByPk(defaultItemUnit.unitOfMeasureId);
+        if (defaultUnit) {
+          itemDefaultUM = defaultUnit.symbol || defaultUnit.unitName;
+        }
+      }
+    }
+
+    // Check if item's default UM matches the UM's basicUM
+    if (!itemDefaultUM || itemDefaultUM !== unit.basicUM) {
+      return sendError(res, `Cannot add this unit to the item. The item's default unit (${itemDefaultUM || 'none'}) must match the unit's basic UM (${unit.basicUM}).`, 400);
+    }
+
     // Check if relationship already exists
     const existing = await ItemUnitOfMeasure.findOne({
       where: { itemId, unitOfMeasureId }
@@ -139,15 +200,11 @@ export const addItemUnit = async (req, res) => {
       return sendError(res, 'Unit of measure already assigned to this item', 400);
     }
 
-    // Determine if this should be default based on Items.unit matching this unit
-    // Default UM comes from Zoho (Items.unit field), admins cannot change it
-    const unitText = unit.symbol || unit.unitName;
-    const isDefault = item.unit && unitText && (item.unit === unitText);
-
+    // User-created units are never default (default comes from Zoho)
     await ItemUnitOfMeasure.create({
       itemId,
       unitOfMeasureId,
-      isDefault: isDefault || false
+      isDefault: false
     });
 
     return sendSuccess(res, {}, 'Unit of measure added to item successfully');

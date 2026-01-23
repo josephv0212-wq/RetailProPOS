@@ -42,12 +42,26 @@ export default function App() {
 // Helper function to get item price with UM conversion
 const getItemPrice = (item: CartItem): number => {
   const basePrice = item.product.price;
+  
+  // For dry ice items, use DRY_ICE_UM_OPTIONS
   if (isDryIceItem(item.product.name) && item.selectedUM) {
     const umOption = DRY_ICE_UM_OPTIONS.find(opt => opt.text === item.selectedUM);
     if (umOption) {
       return basePrice * umOption.rate;
     }
   }
+  
+  // For other items, use unitPrecision from availableUnits
+  if (item.selectedUM && item.availableUnits && item.availableUnits.length > 0) {
+    const selectedUnit = item.availableUnits.find(u => 
+      (u.symbol === item.selectedUM) || (u.unitName === item.selectedUM)
+    );
+    if (selectedUnit && selectedUnit.unitPrecision > 0) {
+      // Price = original price * unitPrecision (Unit Rate)
+      return basePrice * selectedUnit.unitPrecision;
+    }
+  }
+  
   return basePrice;
 };
 

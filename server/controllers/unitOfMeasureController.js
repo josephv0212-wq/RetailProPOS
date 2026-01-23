@@ -1,9 +1,15 @@
 import { UnitOfMeasure } from '../models/index.js';
+import { Op } from 'sequelize';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
 export const getUnits = async (req, res) => {
   try {
+    // Only return user-created units (those with basicUM set)
+    // Hide Zoho-synced units (those with basicUM = null) as they are used as basic UMs
     const units = await UnitOfMeasure.findAll({
+      where: {
+        basicUM: { [Op.ne]: null }
+      },
       order: [['unitName', 'ASC']]
     });
 
@@ -16,7 +22,7 @@ export const getUnits = async (req, res) => {
 
 export const createUnit = async (req, res) => {
   try {
-    const { unitName, symbol, unitPrecision } = req.body;
+    const { unitName, symbol, unitPrecision, basicUM } = req.body;
 
     if (!unitName || !symbol) {
       return sendValidationError(res, 'Unit name and symbol are required');
@@ -35,7 +41,8 @@ export const createUnit = async (req, res) => {
       // Update existing unit if it exists
       await existingUnit.update({
         symbol,
-        unitPrecision: parseInt(unitPrecision) || 0
+        unitPrecision: parseInt(unitPrecision) || 0,
+        basicUM: basicUM || null
       });
       return sendSuccess(res, { unit: existingUnit }, 'Unit of measure updated successfully');
     }
@@ -44,7 +51,8 @@ export const createUnit = async (req, res) => {
     const unit = await UnitOfMeasure.create({
       unitName,
       symbol,
-      unitPrecision: parseInt(unitPrecision) || 0
+      unitPrecision: parseInt(unitPrecision) || 0,
+      basicUM: basicUM || null
     });
 
     return sendSuccess(res, { unit }, 'Unit of measure created successfully');

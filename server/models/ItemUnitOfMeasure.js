@@ -9,19 +9,15 @@ export const ItemUnitOfMeasure = sequelize.define('ItemUnitOfMeasure', {
   },
   itemId: {
     type: DataTypes.INTEGER,
-    allowNull: false,
-    references: {
-      model: 'Items', // Sequelize pluralizes 'Item' to 'Items'
-      key: 'id'
-    }
+    allowNull: false
+    // Foreign key is handled by Sequelize associations in models/index.js
+    // Removing explicit reference to avoid table name mismatches
   },
   unitOfMeasureId: {
     type: DataTypes.INTEGER,
-    allowNull: false,
-    references: {
-      model: 'unit_of_measures', // Explicit table name from UnitOfMeasure model
-      key: 'id'
-    }
+    allowNull: false
+    // Foreign key is handled by Sequelize associations in models/index.js
+    // Removing explicit reference to avoid table name mismatches
   },
   isDefault: {
     type: DataTypes.BOOLEAN,
