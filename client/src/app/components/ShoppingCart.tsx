@@ -186,50 +186,41 @@ export function ShoppingCart({
               const amount = itemPrice * item.quantity;
 
               return (
-                <div key={item.product.id} className="pb-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
-                  {/* First row: Item name and delete icon */}
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <h4 className="text-xs font-medium text-gray-900 dark:text-white flex-1">{item.product.name}</h4>
-                    <button
-                      onClick={() => onRemoveItem(String(item.product.id))}
-                      className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                <div key={item.product.id} className="flex items-center gap-2 pb-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+                  {/* Item name */}
+                  <h4 className="text-xs font-medium text-gray-900 dark:text-white flex-1 min-w-0 truncate">{item.product.name}</h4>
                   
-                  {/* Second row: Quantity input, UM dropdown, and calculation */}
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={item.quantity}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value) || 1;
-                        onUpdateQuantity(String(item.product.id), Math.max(1, value));
-                      }}
-                      className="w-12 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      min="1"
-                    />
-                    
-                    {/* UM Dropdown for Dry Ice Items - shown next to quantity */}
-                    {isDryIce && onUpdateUM && availableUMOptions.length > 0 && (
-                      <select
-                        value={item.selectedUM || ''}
-                        onChange={(e) => onUpdateUM(String(item.product.id), e.target.value)}
-                        className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        style={{ minWidth: '100px' }}
-                      >
-                        {availableUMOptions.map((um) => {
-                          const label = um.symbol || um.unitName;
-                          return (
-                            <option key={um.id} value={label}>
-                              {label}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    )}
-                    
+                  {/* Quantity input */}
+                  <input
+                    type="number"
+                    value={item.quantity}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value) || 1;
+                      onUpdateQuantity(String(item.product.id), Math.max(1, value));
+                    }}
+                    className="w-12 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0"
+                    min="1"
+                  />
+                  
+                  {/* UM Dropdown for Dry Ice Items */}
+                  {isDryIce && onUpdateUM && availableUMOptions.length > 0 && (
+                    <select
+                      value={item.selectedUM || ''}
+                      onChange={(e) => onUpdateUM(String(item.product.id), e.target.value)}
+                      className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0"
+                      style={{ minWidth: '100px' }}
+                    >
+                      {availableUMOptions.map((um) => {
+                        const label = um.symbol || um.unitName;
+                        return (
+                          <option key={um.id} value={label}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  )}
+                  
                   {/* UM Dropdown for Other Items - supports multiple units from backend */}
                   {!isDryIce && (
                     <>
@@ -237,7 +228,7 @@ export function ShoppingCart({
                         <select
                           value={item.selectedUM || ''}
                           onChange={(e) => onUpdateUM(String(item.product.id), e.target.value)}
-                          className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0"
                           style={{ minWidth: '100px' }}
                         >
                           {item.availableUnits.map((unit) => {
@@ -254,7 +245,7 @@ export function ShoppingCart({
                           <select
                             value={item.product.unit}
                             disabled
-                            className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 cursor-not-allowed"
+                            className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 cursor-not-allowed flex-shrink-0"
                             style={{ minWidth: '80px' }}
                           >
                             <option value={item.product.unit}>{item.product.unit}</option>
@@ -263,11 +254,19 @@ export function ShoppingCart({
                       )}
                     </>
                   )}
-                    
-                    <p className="ml-auto text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                      {item.quantity} × {displayUMRate.toFixed(2)} × ${basicPrice.toFixed(2)} = <span className="text-base font-medium text-white">${amount.toFixed(2)}</span>
-                    </p>
-                  </div>
+                  
+                  {/* Calculation */}
+                  <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap flex-shrink-0">
+                    ${displayUMRate.toFixed(2)}  = <span className="text-base font-medium text-white">${amount.toFixed(2)}</span>
+                  </p>
+                  
+                  {/* Delete button */}
+                  <button
+                    onClick={() => onRemoveItem(String(item.product.id))}
+                    className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-colors flex-shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               );
             })}
