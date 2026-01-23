@@ -673,9 +673,22 @@ export const unitsAPI = {
     unitName: string;
     symbol: string;
     unitPrecision: number;
+    basicUM?: string | null;
   }) => {
     return apiRequest<{ unit: any }>('/units', {
       method: 'POST',
+      body: JSON.stringify(data),
+    }, true);
+  },
+
+  update: async (id: number, data: {
+    unitName: string;
+    symbol: string;
+    unitPrecision: number;
+    basicUM?: string | null;
+  }) => {
+    return apiRequest<{ unit: any }>(`/units/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     }, true);
   },

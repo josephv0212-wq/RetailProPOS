@@ -79,6 +79,53 @@ export const createUnit = async (req, res) => {
   }
 };
 
+export const updateUnit = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { unitName, symbol, unitPrecision, basicUM } = req.body;
+
+    if (!unitName || !symbol) {
+      return sendValidationError(res, 'Unit name and symbol are required');
+    }
+
+    if (unitPrecision === undefined || unitPrecision === null) {
+      return sendValidationError(res, 'Unit precision is required');
+    }
+
+    const unit = await UnitOfMeasure.findByPk(id);
+
+    if (!unit) {
+      return sendNotFound(res, 'Unit of measure');
+    }
+
+    // Check if unitName is being changed and if the new name already exists
+    if (unit.unitName !== unitName) {
+      const existingUnit = await UnitOfMeasure.findOne({
+        where: { unitName }
+      });
+      if (existingUnit && existingUnit.id !== parseInt(id)) {
+        return sendError(res, `Unit name "${unitName}" already exists`, 400);
+      }
+    }
+
+    // Update the unit
+    await unit.update({
+      unitName,
+      symbol,
+      unitPrecision: parseFloat(unitPrecision) || 0,
+      basicUM: basicUM || null
+    });
+
+    return sendSuccess(res, { unit }, 'Unit of measure updated successfully');
+  } catch (err) {
+    console.error('Update unit error:', err);
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return sendError(res, `Unit name "${req.body.unitName}" already exists`, 400);
+    }
+    return sendError(res, 'Failed to update unit', 500, err);
+  }
+};
+
 export const deleteUnit = async (req, res) => {
   try {
     const { id } = req.params;

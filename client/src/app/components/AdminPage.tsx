@@ -77,6 +77,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
   const [units, setUnits] = useState<UnitOfMeasure[]>([]);
   const [isLoadingUnits, setIsLoadingUnits] = useState(false);
   const [showUnitModal, setShowUnitModal] = useState(false);
+  const [editingUnit, setEditingUnit] = useState<UnitOfMeasure | null>(null);
   const [newUnit, setNewUnit] = useState({
     unitName: '',
     symbol: '',
@@ -465,7 +466,19 @@ export function AdminPage({ currentUser }: AdminPageProps) {
   };
 
   const handleAddUnit = () => {
+    setEditingUnit(null);
     setNewUnit({ unitName: '', symbol: '', unitPrecision: 0, basicUM: '' });
+    setShowUnitModal(true);
+  };
+
+  const handleEditUnit = (unit: UnitOfMeasure) => {
+    setEditingUnit(unit);
+    setNewUnit({
+      unitName: unit.unitName,
+      symbol: unit.symbol,
+      unitPrecision: unit.unitPrecision,
+      basicUM: unit.basicUM || ''
+    });
     setShowUnitModal(true);
   };
 
@@ -476,23 +489,41 @@ export function AdminPage({ currentUser }: AdminPageProps) {
     }
 
     try {
-      const response = await unitsAPI.create({
-        unitName: newUnit.unitName.trim(),
-        symbol: newUnit.symbol.trim(),
-        unitPrecision: parseInt(String(newUnit.unitPrecision)) || 0,
-        basicUM: newUnit.basicUM.trim() || null
-      });
+      let response;
+      if (editingUnit) {
+        // Update existing unit
+        response = await unitsAPI.update(editingUnit.id, {
+          unitName: newUnit.unitName.trim(),
+          symbol: newUnit.symbol.trim(),
+          unitPrecision: parseFloat(String(newUnit.unitPrecision)) || 0,
+          basicUM: newUnit.basicUM.trim() || null
+        });
+      } else {
+        // Create new unit
+        response = await unitsAPI.create({
+          unitName: newUnit.unitName.trim(),
+          symbol: newUnit.symbol.trim(),
+          unitPrecision: parseFloat(String(newUnit.unitPrecision)) || 0,
+          basicUM: newUnit.basicUM.trim() || null
+        });
+      }
 
       if (response.success) {
-        showToast('Unit of measure created successfully!', 'success');
+        showToast(
+          editingUnit 
+            ? 'Unit of measure updated successfully!' 
+            : 'Unit of measure created successfully!', 
+          'success'
+        );
         setShowUnitModal(false);
+        setEditingUnit(null);
         await loadUnits();
       } else {
-        showToast(response.message || 'Failed to create unit', 'error');
+        showToast(response.message || (editingUnit ? 'Failed to update unit' : 'Failed to create unit'), 'error');
       }
     } catch (err) {
-      console.error('Failed to create unit:', err);
-      showToast('Failed to create unit', 'error');
+      console.error(editingUnit ? 'Failed to update unit:' : 'Failed to create unit:', err);
+      showToast(editingUnit ? 'Failed to update unit' : 'Failed to create unit', 'error');
     }
   };
 
@@ -1077,14 +1108,24 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                           <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.unitPrecision}</td>
                           <td className="px-6 py-3 text-gray-900 dark:text-white">{unit.basicUM || '—'}</td>
                           <td className="px-6 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteUnit(unit.id)}
-                              className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors flex items-center gap-1"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              Remove
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleEditUnit(unit)}
+                                className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteUnit(unit.id)}
+                                className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors flex items-center gap-1"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Remove
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1101,10 +1142,15 @@ export function AdminPage({ currentUser }: AdminPageProps) {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 w-full max-w-md">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Add Unit of Measure</h3>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                  {editingUnit ? 'Edit Unit of Measure' : 'Add Unit of Measure'}
+                </h3>
                 <button
                   type="button"
-                  onClick={() => setShowUnitModal(false)}
+                  onClick={() => {
+                    setShowUnitModal(false);
+                    setEditingUnit(null);
+                  }}
                   className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                 >
                   <X className="w-5 h-5" />
@@ -1170,7 +1216,10 @@ export function AdminPage({ currentUser }: AdminPageProps) {
               <div className="flex items-center justify-end gap-3 mt-6">
                 <button
                   type="button"
-                  onClick={() => setShowUnitModal(false)}
+                  onClick={() => {
+                    setShowUnitModal(false);
+                    setEditingUnit(null);
+                  }}
                   className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
                   Cancel
