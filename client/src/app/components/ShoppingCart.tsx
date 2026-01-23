@@ -255,9 +255,14 @@ export function ShoppingCart({
                     </>
                   )}
                   
-                  {/* Calculation */}
-                  <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap flex-shrink-0">
-                    ${displayUMRate.toFixed(2)}  = <span className="text-base font-medium text-white">${amount.toFixed(2)}</span>
+                  {/* Calculated Price (UM Rate × Basic Price) */}
+                  <p className="text-xs text-white whitespace-nowrap flex-shrink-0">
+                    ${itemPrice.toFixed(2)} =
+                  </p>
+                  
+                  {/* Amount */}
+                  <p className="text-base font-medium text-white whitespace-nowrap flex-shrink-0">
+                    ${amount.toFixed(2)}
                   </p>
                   
                   {/* Delete button */}
