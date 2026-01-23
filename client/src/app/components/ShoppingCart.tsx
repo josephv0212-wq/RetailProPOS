@@ -193,13 +193,13 @@ export function ShoppingCart({
                   {/* Quantity input */}
                   <input
                     type="number"
-                    value={item.quantity}
+                    value={item.quantity || ''}
                     onChange={(e) => {
-                      const value = parseInt(e.target.value) || 1;
-                      onUpdateQuantity(String(item.product.id), Math.max(1, value));
+                      const value = e.target.value === '' ? 0 : parseInt(e.target.value) || 0;
+                      onUpdateQuantity(String(item.product.id), Math.max(0, value));
                     }}
                     className="w-12 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0"
-                    min="1"
+                    min="0"
                   />
                   
                   {/* UM Dropdown for Dry Ice Items */}

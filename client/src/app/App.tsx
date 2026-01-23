@@ -419,14 +419,14 @@ function AppContent() {
         }
       }
 
-      setCartItems([...cartItems, { product, quantity: 1, selectedUM, availableUnits }]);
+      setCartItems([...cartItems, { product, quantity: 0, selectedUM, availableUnits }]);
     }
   };
 
   const handleUpdateQuantity = (productId: number | string, quantity: number) => {
     setCartItems(cartItems.map(item =>
       String(item.product.id) === String(productId)
-        ? { ...item, quantity: Math.max(1, quantity) }
+        ? { ...item, quantity: Math.max(0, quantity) }
         : item
     ));
   };

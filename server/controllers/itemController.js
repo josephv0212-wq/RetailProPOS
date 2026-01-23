@@ -242,7 +242,6 @@ export const syncItemsFromZoho = async (req, res) => {
         console.log(`✅ Created item: ${zohoItem.name} (Zoho ID: ${zohoItem.item_id})`);
       } else {
         updated++;
-        console.log(`🔄 Updated item: ${zohoItem.name} (Zoho ID: ${zohoItem.item_id})`);
       }
     }
 
