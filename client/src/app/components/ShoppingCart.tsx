@@ -164,20 +164,48 @@ export function ShoppingCart({
               const availableUMOptions = item.availableUnits || [];
               
               const itemPrice = getItemPrice(item);
+              
+              // Get UM rate for display
+              const getUMRate = (): number | null => {
+                if (item.selectedUM && item.availableUnits && item.availableUnits.length > 0) {
+                  const selectedUnit = item.availableUnits.find(u => 
+                    (u.symbol === item.selectedUM) || (u.unitName === item.selectedUM)
+                  );
+                  if (selectedUnit && selectedUnit.unitPrecision > 0) {
+                    return typeof selectedUnit.unitPrecision === 'string' 
+                      ? parseFloat(selectedUnit.unitPrecision) 
+                      : selectedUnit.unitPrecision;
+                  }
+                }
+                return null;
+              };
+              
+              const umRate = getUMRate();
+              const basicPrice = item.product.price;
+              const displayUMRate = umRate !== null ? umRate : 1;
+              const amount = itemPrice * item.quantity;
 
               return (
-                <div key={item.product.id} className="flex items-start gap-3 pb-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
-                  <div className="flex-1">
-                    <h4 className="text-xs font-medium text-gray-900 dark:text-white">{item.product.name}</h4>
+                <div key={item.product.id} className="pb-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+                  {/* First row: Item name and delete icon */}
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <h4 className="text-xs font-medium text-gray-900 dark:text-white flex-1">{item.product.name}</h4>
+                    <button
+                      onClick={() => onRemoveItem(String(item.product.id))}
+                      className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                   
+                  {/* Second row: Quantity input, UM dropdown, and calculation */}
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
                       value={item.quantity}
                       onChange={(e) => {
                         const value = parseInt(e.target.value) || 1;
-                        onUpdateQuantity(item.product.id, Math.max(1, value));
+                        onUpdateQuantity(String(item.product.id), Math.max(1, value));
                       }}
                       className="w-12 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       min="1"
@@ -187,7 +215,7 @@ export function ShoppingCart({
                     {isDryIce && onUpdateUM && availableUMOptions.length > 0 && (
                       <select
                         value={item.selectedUM || ''}
-                        onChange={(e) => onUpdateUM(item.product.id, e.target.value)}
+                        onChange={(e) => onUpdateUM(String(item.product.id), e.target.value)}
                         className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                         style={{ minWidth: '100px' }}
                       >
@@ -208,7 +236,7 @@ export function ShoppingCart({
                       {onUpdateUM && item.availableUnits && item.availableUnits.length > 0 ? (
                         <select
                           value={item.selectedUM || ''}
-                          onChange={(e) => onUpdateUM(item.product.id, e.target.value)}
+                          onChange={(e) => onUpdateUM(String(item.product.id), e.target.value)}
                           className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                           style={{ minWidth: '100px' }}
                         >
@@ -235,18 +263,11 @@ export function ShoppingCart({
                       )}
                     </>
                   )}
+                    
+                    <p className="ml-auto text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                      {item.quantity} × {displayUMRate.toFixed(2)} × ${basicPrice.toFixed(2)} = <span className="text-base font-medium text-white">${amount.toFixed(2)}</span>
+                    </p>
                   </div>
-                  
-                  <div className="w-20 text-right text-xs font-medium text-gray-900 dark:text-white">
-                    ${(itemPrice * item.quantity).toFixed(2)}
-                  </div>
-                  
-                  <button
-                    onClick={() => onRemoveItem(item.product.id)}
-                    className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
                 </div>
               );
             })}
