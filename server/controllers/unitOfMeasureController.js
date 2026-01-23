@@ -20,6 +20,20 @@ export const getUnits = async (req, res) => {
   }
 };
 
+// Get all units including basic UMs (for dry ice items)
+export const getAllUnits = async (req, res) => {
+  try {
+    const units = await UnitOfMeasure.findAll({
+      order: [['unitName', 'ASC']]
+    });
+
+    return sendSuccess(res, { units });
+  } catch (err) {
+    console.error('Get all units error:', err);
+    return sendError(res, 'Failed to fetch all units', 500, err);
+  }
+};
+
 export const createUnit = async (req, res) => {
   try {
     const { unitName, symbol, unitPrecision, basicUM } = req.body;

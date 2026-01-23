@@ -665,6 +665,10 @@ export const unitsAPI = {
     return apiRequest<{ units: any[] }>('/units');
   },
 
+  getAllIncludingBasic: async () => {
+    return apiRequest<{ units: any[] }>('/units/all');
+  },
+
   create: async (data: {
     unitName: string;
     symbol: string;

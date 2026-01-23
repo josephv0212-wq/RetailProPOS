@@ -686,6 +686,85 @@ const ensureTransactionsTable = async () => {
   }
 };
 
+// Migrate dry ice UMs to database
+const migrateDryIceUMs = async () => {
+  try {
+    const { UnitOfMeasure } = await import('./models/index.js');
+    
+    // Dry Ice UM Configuration - migrated from frontend
+    const DRY_ICE_UM_OPTIONS = [
+      { unitName: 'Bin 1950', symbol: 'Bin 1950', unitPrecision: 1950, basicUM: 'lb' },
+      { unitName: 'Bin 700', symbol: 'Bin 700', unitPrecision: 700, basicUM: 'lb' },
+      { unitName: 'Bin 500 lb', symbol: 'Bin 500 lb', unitPrecision: 500, basicUM: 'lb' },
+      { unitName: 'Kg', symbol: 'Kg', unitPrecision: 2.2, basicUM: 'lb' },
+      { unitName: 'ea 10 lb', symbol: 'ea 10 lb', unitPrecision: 10, basicUM: 'lb' },
+      { unitName: 'ea 5 lb', symbol: 'ea 5 lb', unitPrecision: 5, basicUM: 'lb' },
+      { unitName: 'Bag 50 lb', symbol: 'Bag 50 lb', unitPrecision: 50, basicUM: 'lb' },
+    ];
+
+    logInfo('Migrating dry ice UMs to database...');
+    
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const umData of DRY_ICE_UM_OPTIONS) {
+      try {
+        // Check if unit already exists
+        const existingUnit = await UnitOfMeasure.findOne({
+          where: { unitName: umData.unitName }
+        });
+
+        if (existingUnit) {
+          // Update existing unit if values differ
+          const needsUpdate = 
+            existingUnit.symbol !== umData.symbol ||
+            parseFloat(existingUnit.unitPrecision) !== umData.unitPrecision ||
+            existingUnit.basicUM !== umData.basicUM;
+          
+          if (needsUpdate) {
+            await existingUnit.update({
+              symbol: umData.symbol,
+              unitPrecision: umData.unitPrecision,
+              basicUM: umData.basicUM
+            });
+            updated++;
+            logSuccess(`Updated dry ice unit: ${umData.unitName}`);
+          } else {
+            skipped++;
+          }
+        } else {
+          // Create new unit
+          await UnitOfMeasure.create({
+            unitName: umData.unitName,
+            symbol: umData.symbol,
+            unitPrecision: umData.unitPrecision,
+            basicUM: umData.basicUM
+          });
+          created++;
+          logSuccess(`Created dry ice unit: ${umData.unitName}`);
+        }
+      } catch (err) {
+        if (err.name === 'SequelizeUniqueConstraintError') {
+          skipped++;
+          logInfo(`Skipped dry ice unit (already exists): ${umData.unitName}`);
+        } else {
+          logError(`Error processing dry ice unit ${umData.unitName}`, err);
+        }
+      }
+    }
+
+    if (created > 0 || updated > 0) {
+      logSuccess(`Dry ice UM migration completed: ${created} created, ${updated} updated, ${skipped} skipped`);
+    } else if (skipped === DRY_ICE_UM_OPTIONS.length) {
+      logInfo('All dry ice UMs already exist in database');
+    }
+  } catch (error) {
+    logWarning(`Could not migrate dry ice UMs: ${error.message}`);
+    // Don't fail server startup if migration fails
+  }
+};
+
 // Admin user creation is handled by bootstrap login mechanism in authController.js
 // Bootstrap credentials: accounting@subzeroiceservices.com / dryice000
 // This only works when database is empty (first-time setup)
@@ -726,9 +805,12 @@ const startServer = async () => {
           await ensureBankAccountColumn();
           await ensureCustomerProfileColumns();
           await ensureCustomerStatusColumn();
-          await ensureBasicUMColumn();
-          await ensureTransactionsTable();
+  await ensureBasicUMColumn();
+  await ensureTransactionsTable();
         }
+
+  // Migrate dry ice UMs to database
+  await migrateDryIceUMs();
 
   // Check and create admin user if none exists
   await checkAndCreateAdminUser();

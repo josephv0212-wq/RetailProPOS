@@ -17,13 +17,13 @@ import { AlertProvider } from './contexts/AlertContext';
 import { useAuth } from './contexts/AuthContext';
 import { useAlert } from './contexts/AlertContext';
 import { Customer, Product, CartItem, PaymentDetails, Sale, UnitOfMeasureOption } from './types';
-import { itemsAPI, customersAPI, salesAPI, zohoAPI, itemUnitsAPI } from '../services/api';
+import { itemsAPI, customersAPI, salesAPI, zohoAPI, itemUnitsAPI, unitsAPI } from '../services/api';
 import { SalesOrderInvoiceModal } from './components/SalesOrderInvoiceModal';
 import { PaymentMethodSelector } from './components/PaymentMethodSelector';
 import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
 import { logger } from '../utils/logger';
-import { DRY_ICE_UM_OPTIONS, isDryIceItem } from './components/ShoppingCart';
+import { isDryIceItem } from './components/ShoppingCart';
 
 type AppScreen = 'signin' | 'signup' | 'pos' | 'customers' | 'reports' | 'settings' | 'admin' | 'receipt';
 
@@ -43,22 +43,18 @@ export default function App() {
 const getItemPrice = (item: CartItem): number => {
   const basePrice = item.product.price;
   
-  // For dry ice items, use DRY_ICE_UM_OPTIONS
-  if (isDryIceItem(item.product.name) && item.selectedUM) {
-    const umOption = DRY_ICE_UM_OPTIONS.find(opt => opt.text === item.selectedUM);
-    if (umOption) {
-      return basePrice * umOption.rate;
-    }
-  }
-  
-  // For other items, use unitPrecision from availableUnits
+  // Use unitPrecision from availableUnits for all items (including dry ice)
   if (item.selectedUM && item.availableUnits && item.availableUnits.length > 0) {
     const selectedUnit = item.availableUnits.find(u => 
       (u.symbol === item.selectedUM) || (u.unitName === item.selectedUM)
     );
     if (selectedUnit && selectedUnit.unitPrecision > 0) {
       // Price = original price * unitPrecision (Unit Rate)
-      return basePrice * selectedUnit.unitPrecision;
+      // Convert to number in case it's a string from database
+      const rate = typeof selectedUnit.unitPrecision === 'string' 
+        ? parseFloat(selectedUnit.unitPrecision) 
+        : selectedUnit.unitPrecision;
+      return basePrice * rate;
     }
   }
   
@@ -89,6 +85,7 @@ function AppContent() {
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [pendingChargeItems, setPendingChargeItems] = useState<any[]>([]);
+  const [allUnits, setAllUnits] = useState<UnitOfMeasureOption[]>([]); // All units including basic UMs for dry ice
 
   // Memoized constants from user data
   const constants = useMemo(() => ({
@@ -105,21 +102,23 @@ function AppContent() {
     try {
       const response = await itemsAPI.getAll({ isActive: true });
       if (response.success && response.data?.items) {
-        // Transform API products to match UI format
-        const transformedProducts: Product[] = response.data.items.map((item: any) => {
-          // Handle imageData - could be base64 string or full data URL
-          let imageUrl = undefined;
-          if (item.imageData) {
-            // If it already has data: prefix, use as is, otherwise add it
-            imageUrl = item.imageData.startsWith('data:') 
-              ? item.imageData 
-              : `data:image/png;base64,${item.imageData}`;
-          }
-          return {
-            ...item,
-            imageUrl,
-          };
-        });
+        // Transform API products to match UI format and filter out items with price 0
+        const transformedProducts: Product[] = response.data.items
+          .filter((item: any) => item.price > 0) // Filter out items with price 0
+          .map((item: any) => {
+            // Handle imageData - could be base64 string or full data URL
+            let imageUrl = undefined;
+            if (item.imageData) {
+              // If it already has data: prefix, use as is, otherwise add it
+              imageUrl = item.imageData.startsWith('data:') 
+                ? item.imageData 
+                : `data:image/png;base64,${item.imageData}`;
+            }
+            return {
+              ...item,
+              imageUrl,
+            };
+          });
         setProducts(transformedProducts);
       }
     } catch (err: any) {
@@ -179,13 +178,26 @@ function AppContent() {
     toAdmin: () => setCurrentScreen('admin'),
   }), []);
 
-  // Load products and customers when authenticated
+  // Load all units (including basic UMs for dry ice)
+  const loadAllUnits = useCallback(async () => {
+    try {
+      const response = await unitsAPI.getAllIncludingBasic();
+      if (response.success && response.data?.units) {
+        setAllUnits(response.data.units as UnitOfMeasureOption[]);
+      }
+    } catch (err) {
+      logger.error('Failed to load all units', err);
+    }
+  }, []);
+
+  // Load products, customers, and units when authenticated
   useEffect(() => {
     if (isAuthenticated && user) {
       loadProducts();
       loadCustomers();
+      loadAllUnits();
     }
-  }, [isAuthenticated, user, loadProducts, loadCustomers]);
+  }, [isAuthenticated, user, loadProducts, loadCustomers, loadAllUnits]);
 
   // Track if we're syncing from URL to avoid loops
   const isSyncingFromUrl = useRef(false);
@@ -336,35 +348,73 @@ function AppContent() {
       let availableUnits: UnitOfMeasureOption[] | undefined;
       let selectedUM: string | undefined;
 
-      try {
-        const unitsResponse = await itemUnitsAPI.getItemUnits(product.id);
-        if (unitsResponse.success && unitsResponse.data?.units && unitsResponse.data.units.length > 0) {
-          availableUnits = unitsResponse.data.units as UnitOfMeasureOption[];
+      const isDryIce = isDryIceItem(product.name);
+      const itemNameLower = product.name.toLowerCase();
+      const isOnlineDryIce = itemNameLower.includes('online dry ice block') || 
+                            itemNameLower.includes('online dry ice pellets');
+      const isDryIcePellets = isDryIce && !isOnlineDryIce && itemNameLower.includes('dry ice pellets');
+      const isDryIceBlasting = isDryIce && !isOnlineDryIce && itemNameLower.includes('dry ice blasting');
 
-          // Prefer unit that matches the item's default unit field first
-          const matchByItemUnit = product.unit
-            ? availableUnits.find(u => (u.symbol || u.unitName) === product.unit)
-            : undefined;
-
-          // Then prefer one flagged as default in the join table
-          const matchByFlag = availableUnits.find(u => u.ItemUnitOfMeasure?.isDefault);
-
-          const defaultUnit =
-            matchByItemUnit || matchByFlag || availableUnits[0];
-
-          if (defaultUnit) {
-            selectedUM = defaultUnit.symbol || defaultUnit.unitName;
+      if (isDryIce && !isOnlineDryIce) {
+        // For dry ice items, use units from backend with basicUM='lb' or unitName='lb'
+        const dryIceUnits = allUnits.filter(unit => {
+          // Include 'lb' (basicUM=null) and units with basicUM='lb'
+          if (unit.unitName === 'lb' || unit.basicUM === 'lb') {
+            // Filter based on item type
+            if (isDryIcePellets) {
+              // Dry ice pellets: lb, Bin 500 lb, and Bag 50 lb
+              return unit.unitName === 'lb' || 
+                     unit.unitName === 'Bin 500 lb' || 
+                     unit.unitName === 'Bag 50 lb';
+            } else if (isDryIceBlasting) {
+              // Dry ice blasting: only lb and Bin 500 lb
+              return unit.unitName === 'lb' || unit.unitName === 'Bin 500 lb';
+            } else {
+              // Other dry ice items: all options
+              return true;
+            }
           }
+          return false;
+        });
+        
+        if (dryIceUnits.length > 0) {
+          availableUnits = dryIceUnits;
+          // Default to 'lb'
+          const lbUnit = dryIceUnits.find(u => u.unitName === 'lb');
+          selectedUM = lbUnit ? (lbUnit.symbol || lbUnit.unitName) : (dryIceUnits[0].symbol || dryIceUnits[0].unitName);
         }
-      } catch (err) {
-        logger.error('Failed to load item units', err);
+      } else {
+        // For non-dry-ice items, load units from itemUnitsAPI
+        try {
+          const unitsResponse = await itemUnitsAPI.getItemUnits(product.id);
+          if (unitsResponse.success && unitsResponse.data?.units && unitsResponse.data.units.length > 0) {
+            availableUnits = unitsResponse.data.units as UnitOfMeasureOption[];
+
+            // Prefer unit that matches the item's default unit field first
+            const matchByItemUnit = product.unit
+              ? availableUnits.find(u => (u.symbol || u.unitName) === product.unit)
+              : undefined;
+
+            // Then prefer one flagged as default in the join table
+            const matchByFlag = availableUnits.find(u => u.ItemUnitOfMeasure?.isDefault);
+
+            const defaultUnit =
+              matchByItemUnit || matchByFlag || availableUnits[0];
+
+            if (defaultUnit) {
+              selectedUM = defaultUnit.symbol || defaultUnit.unitName;
+            }
+          }
+        } catch (err) {
+          logger.error('Failed to load item units', err);
+        }
       }
 
       // Fallback: if no units from API, use product.unit (if present) or, for dry ice, default to "lb"
       if (!selectedUM) {
         if (product.unit) {
           selectedUM = product.unit;
-        } else if (isDryIceItem(product.name)) {
+        } else if (isDryIce) {
           selectedUM = 'lb';
         }
       }
@@ -614,19 +664,21 @@ function AppContent() {
             const pricebookItemsCount = pricebookItemsRes.data?.pricebookItemsCount || 0;
             
             if (allItems.length > 0) {
-              // Transform pricebook items
-              const transformedProducts: Product[] = allItems.map((item: any) => {
-                let imageUrl = undefined;
-                if (item.imageData) {
-                  imageUrl = item.imageData.startsWith('data:') 
-                    ? item.imageData 
-                    : `data:image/png;base64,${item.imageData}`;
-                }
-                return {
-                  ...item,
-                  imageUrl,
-                };
-              });
+              // Transform pricebook items and filter out items with price 0
+              const transformedProducts: Product[] = allItems
+                .filter((item: any) => item.price > 0) // Filter out items with price 0
+                .map((item: any) => {
+                  let imageUrl = undefined;
+                  if (item.imageData) {
+                    imageUrl = item.imageData.startsWith('data:') 
+                      ? item.imageData 
+                      : `data:image/png;base64,${item.imageData}`;
+                  }
+                  return {
+                    ...item,
+                    imageUrl,
+                  };
+                });
               
               // Update items with merged list (pricebook items have custom prices, others have regular prices)
               setProducts(transformedProducts);

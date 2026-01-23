@@ -17,7 +17,7 @@ export const UnitOfMeasure = sequelize.define('UnitOfMeasure', {
     allowNull: false
   },
   unitPrecision: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.DECIMAL(10, 2),
     allowNull: false,
     defaultValue: 0
   },

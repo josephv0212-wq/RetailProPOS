@@ -3,18 +3,6 @@ import { Customer, CartItem } from '../types';
 import { CustomerSelector } from './CustomerSelector';
 import { ShoppingCart as ShoppingCartIcon, CircleCheck, TriangleAlert, Info, Trash2, ArrowLeft } from 'lucide-react';
 
-// Dry Ice UM Configuration - shared with App.tsx
-export const DRY_ICE_UM_OPTIONS = [
-  { text: 'lb', rate: 1, description: 'all dry ice' },
-  { text: 'Bin 1950', rate: 1950, description: 'all dry ice' },
-  { text: 'Bin 700', rate: 700, description: 'all dry ice' },
-  { text: 'Bin 500 lb', rate: 500, description: 'all dry ice pellets and dry ice blasting' },
-  { text: 'Kg', rate: 2.2, description: 'all dry ice' },
-  { text: 'ea 10 lb', rate: 10, description: 'all dry ice' },
-  { text: 'ea 5 lb', rate: 5, description: 'all dry ice' },
-  { text: 'Bag 50 lb', rate: 50, description: 'all dry ice and dry ice pellets' },
-];
-
 export const isDryIceItem = (itemName: string): boolean => {
   return itemName.toLowerCase().includes('dry ice');
 };
@@ -52,22 +40,18 @@ export function ShoppingCart({
   const getItemPrice = (item: CartItem): number => {
     const basePrice = item.product.price;
     
-    // For dry ice items, use DRY_ICE_UM_OPTIONS
-    if (isDryIceItem(item.product.name) && item.selectedUM) {
-      const umOption = DRY_ICE_UM_OPTIONS.find(opt => opt.text === item.selectedUM);
-      if (umOption) {
-        return basePrice * umOption.rate;
-      }
-    }
-    
-    // For other items, use unitPrecision from availableUnits
+    // Use unitPrecision from availableUnits for all items (including dry ice)
     if (item.selectedUM && item.availableUnits && item.availableUnits.length > 0) {
       const selectedUnit = item.availableUnits.find(u => 
         (u.symbol === item.selectedUM) || (u.unitName === item.selectedUM)
       );
       if (selectedUnit && selectedUnit.unitPrecision > 0) {
         // Price = original price * unitPrecision (Unit Rate)
-        return basePrice * selectedUnit.unitPrecision;
+        // Convert to number in case it's a string from database
+        const rate = typeof selectedUnit.unitPrecision === 'string' 
+          ? parseFloat(selectedUnit.unitPrecision) 
+          : selectedUnit.unitPrecision;
+        return basePrice * rate;
       }
     }
     
@@ -175,30 +159,11 @@ export function ShoppingCart({
               const isOnlineDryIce = itemNameLower.includes('online dry ice block') || 
                                      itemNameLower.includes('online dry ice pellets');
               const isDryIce = isDryIceItem(item.product.name) && !isOnlineDryIce;
-              const isDryIcePellets = isDryIce && itemNameLower.includes('dry ice pellets');
-              const isDryIceBlasting = isDryIce && itemNameLower.includes('dry ice blasting');
               
-              // Get available UM options based on item type
-              let availableUMOptions = [];
-              if (isDryIcePellets) {
-                // Dry ice pellets: lb, Bin 500 lb, and Bag 50 lb
-                availableUMOptions = DRY_ICE_UM_OPTIONS.filter(um => 
-                  um.text === 'lb' || um.text === 'Bin 500 lb' || um.text === 'Bag 50 lb'
-                );
-              } else if (isDryIceBlasting) {
-                // Dry ice blasting: only lb and Bin 500 lb
-                availableUMOptions = DRY_ICE_UM_OPTIONS.filter(um => 
-                  um.text === 'lb' || um.text === 'Bin 500 lb'
-                );
-              } else if (isDryIce) {
-                // Other dry ice items: all options
-                availableUMOptions = DRY_ICE_UM_OPTIONS;
-              }
+              // Use availableUnits from backend (already filtered in App.tsx)
+              const availableUMOptions = item.availableUnits || [];
               
               const itemPrice = getItemPrice(item);
-              const selectedUMOption = isDryIce && item.selectedUM 
-                ? DRY_ICE_UM_OPTIONS.find(opt => opt.text === item.selectedUM)
-                : null;
 
               return (
                 <div key={item.product.id} className="flex items-start gap-3 pb-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
@@ -226,11 +191,14 @@ export function ShoppingCart({
                         className="text-xs border border-gray-300 dark:border-gray-600 rounded py-1 px-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                         style={{ minWidth: '100px' }}
                       >
-                        {availableUMOptions.map((um) => (
-                          <option key={um.text} value={um.text}>
-                            {um.text}
-                          </option>
-                        ))}
+                        {availableUMOptions.map((um) => {
+                          const label = um.symbol || um.unitName;
+                          return (
+                            <option key={um.id} value={label}>
+                              {label}
+                            </option>
+                          );
+                        })}
                       </select>
                     )}
                     
