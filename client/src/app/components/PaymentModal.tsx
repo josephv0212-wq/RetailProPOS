@@ -129,6 +129,27 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
   // Terminal discovery removed - Valor Connect only needs Terminal number (configured in Settings)
 
+  // Calculate price with UM conversion rate (same logic as ShoppingCart)
+  const getItemPrice = (item: CartItem): number => {
+    const basePrice = item.product.price;
+    
+    // Use unitPrecision from availableUnits for all items
+    if (item.selectedUM && item.availableUnits && item.availableUnits.length > 0) {
+      const selectedUnit = item.availableUnits.find(u => 
+        (u.symbol === item.selectedUM) || (u.unitName === item.selectedUM)
+      );
+      if (selectedUnit && selectedUnit.unitPrecision > 0) {
+        // Price = original price * unitPrecision (Unit Rate)
+        const rate = typeof selectedUnit.unitPrecision === 'string' 
+          ? parseFloat(selectedUnit.unitPrecision) 
+          : selectedUnit.unitPrecision;
+        return basePrice * rate;
+      }
+    }
+    
+    return basePrice;
+  };
+
   // Calculate convenience fee for CREDIT card payments and stored CREDIT card profiles
   const isCreditCardPayment = selectedMethod === 'credit_card' || 
     (selectedMethod === 'stored_payment' && selectedPaymentProfileId && 
@@ -584,21 +605,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             </div>
             
             <div className="divide-y divide-gray-100 dark:divide-gray-600">
-              {cartItems.map((item, index) => (
-                <div key={index} className="px-4 py-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <span className="font-medium text-gray-900 dark:text-white">{item.product.name}</span>
-                      <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
-                        ({item.quantity} × ${item.product.price.toFixed(2)})
-                      </span>
-                    </div>
-                    <div className="font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">
-                      ${(item.product.price * item.quantity).toFixed(2)}
+              {cartItems.map((item, index) => {
+                const itemPrice = getItemPrice(item);
+                const itemTotal = itemPrice * item.quantity;
+                return (
+                  <div key={index} className="px-4 py-3">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium text-gray-900 dark:text-white">{item.product.name}</span>
+                        <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
+                          ({item.quantity} × ${itemPrice.toFixed(2)})
+                        </span>
+                      </div>
+                      <div className="font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                        ${itemTotal.toFixed(2)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

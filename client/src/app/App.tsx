@@ -729,9 +729,26 @@ function AppContent() {
   };
 
   const handlePayNow = () => {
-    if (cartItems.length > 0 && selectedCustomer) {
-      setIsPaymentModalOpen(true);
+    if (cartItems.length === 0) {
+      showAlert({ message: 'Cart is empty. Please add items before checkout.' });
+      return;
     }
+    
+    if (!selectedCustomer) {
+      showAlert({ message: 'Please select a customer before checkout.' });
+      return;
+    }
+    
+    // Check if any item has quantity 0
+    const itemsWithZeroQty = cartItems.filter(item => !item.quantity || item.quantity === 0);
+    if (itemsWithZeroQty.length > 0) {
+      showAlert({ 
+        message: `Please set quantity greater than 0 for all items. ${itemsWithZeroQty.length} item(s) have quantity 0.` 
+      });
+      return;
+    }
+    
+    setIsPaymentModalOpen(true);
   };
 
   const handleConfirmPayment = async (paymentDetails: PaymentDetails): Promise<any> => {
