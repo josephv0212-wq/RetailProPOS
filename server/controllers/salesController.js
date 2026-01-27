@@ -255,17 +255,22 @@ export const createSale = async (req, res) => {
       subtotal += lineSubtotal;
       taxAmount += itemTax;
 
+      // Include selectedUM if provided
+      const selectedUM = saleItem.selectedUM || null;
+      const itemNameWithUM = selectedUM ? `${item.name} (${selectedUM})` : item.name;
+      
       saleItemsData.push({
         itemId: item.id,
         zohoItemId: item.zohoId,
-        itemName: item.name,
+        itemName: itemNameWithUM,
         quantity: quantity,
         price: price,
         taxPercentage: userTaxPercentage, // Use user's location tax rate
         taxAmount: itemTax,
         lineTotal: lineSubtotal + itemTax,
         // Send the user's/location tax_id for taxable line items, so Zoho uses the correct tax rule.
-        taxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null
+        taxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null,
+        selectedUM: selectedUM // Store selectedUM for Zoho sync
       });
     }
 

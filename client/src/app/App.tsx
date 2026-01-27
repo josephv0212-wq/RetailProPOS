@@ -833,6 +833,7 @@ function AppContent() {
             itemId: typeof item.product.id === 'number' ? item.product.id : parseInt(item.product.id),
             quantity: item.quantity,
             price: itemPrice, // Send converted price for dry ice items
+            selectedUM: item.selectedUM || null, // Include selected unit of measure
           };
         }),
         customerId: selectedCustomer.id,
@@ -887,11 +888,37 @@ function AppContent() {
 
       if (response.success && response.data?.sale) {
         // Transform API sale to match UI format
+        // Use sale.items from backend which have correct prices with UM conversion
+        // Map backend SaleItem format to match frontend CartItem format for display
+        const backendItems = (response.data.sale.items || []).map((saleItem: any) => {
+          // Extract UM from itemName if it's in format "Item Name (UM)"
+          const itemNameMatch = saleItem.itemName?.match(/^(.+?)\s*\((.+?)\)$/);
+          const baseItemName = itemNameMatch ? itemNameMatch[1] : saleItem.itemName;
+          const extractedUM = itemNameMatch ? itemNameMatch[2] : null;
+          
+          // Find matching cartItem to get product details and selectedUM
+          const matchingCartItem = cartItems.find(ci => 
+            String(ci.product.id) === String(saleItem.itemId)
+          );
+          
+          return {
+            ...saleItem,
+            product: matchingCartItem?.product || { 
+              id: saleItem.itemId, 
+              name: baseItemName,
+              price: saleItem.price 
+            },
+            selectedUM: matchingCartItem?.selectedUM || extractedUM || null,
+            // Use the price from backend (already includes UM conversion)
+            price: saleItem.price
+          };
+        });
+        
         const sale: Sale = {
           ...response.data.sale,
           receiptNumber: response.data.sale.transactionId,
           customer: selectedCustomer,
-          items: cartItems,
+          items: backendItems.length > 0 ? backendItems : cartItems, // Use backend items if available
           tax: response.data.sale.taxAmount,
           payment: paymentDetails,
           timestamp: new Date(response.data.sale.createdAt),

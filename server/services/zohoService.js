@@ -359,6 +359,13 @@ export const createSalesReceipt = async (saleData) => {
         lineItem.item_id = item.zohoItemId;
       }
       
+      // Include unit of measure if provided (Zoho supports unit field)
+      if (item.selectedUM) {
+        lineItem.unit = item.selectedUM;
+      } else if (item.unit) {
+        lineItem.unit = item.unit;
+      }
+      
       // If we know the tax for this item, let Zoho calculate it so totals match the POS
       if (isTaxable && effectiveTaxId) {
         lineItem.tax_id = effectiveTaxId;

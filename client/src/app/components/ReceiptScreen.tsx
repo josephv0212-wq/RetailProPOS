@@ -55,7 +55,8 @@ export function ReceiptScreen({
 
   // Get processing fee from sale object (already calculated and included in total)
   const processingFee = sale.ccFee || 0;
-  const taxRate = sale.tax > 0 ? ((sale.tax / sale.subtotal) * 100) : 0;
+  const taxAmount = sale.tax ?? sale.taxAmount ?? 0;
+  const taxRate = taxAmount > 0 ? ((taxAmount / sale.subtotal) * 100) : 0;
 
   // Format payment method
   const formatPaymentMethod = (method: string) => {
@@ -133,7 +134,7 @@ export function ReceiptScreen({
                       Date
                     </p>
                     <p className="text-[11px] font-bold text-gray-900 dark:text-white">
-                      {sale.timestamp.toLocaleString()}
+                      {(sale.timestamp ?? new Date(sale.createdAt)).toLocaleString()}
                     </p>
                   </div>
 
@@ -169,26 +170,46 @@ export function ReceiptScreen({
               </h2>
               
               <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                {sale.items.map((item, index) => (
-                  <div
-                    key={index}
-                    className={`flex justify-between items-start gap-4 px-[10px] py-[9px] ${
-                      index % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700/30' : 'bg-white dark:bg-gray-800'
-                    } ${index !== sale.items.length - 1 ? 'border-b border-gray-200 dark:border-gray-600' : ''}`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-bold text-gray-900 dark:text-white">
-                        {item.product.name}
-                      </p>
-                      <p className="text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">
-                        {item.quantity} × ${item.product.price.toFixed(2)}
-                      </p>
+                {(sale.items || []).map((item, index) => {
+                  // Use price from SaleItem (already includes UM conversion from backend)
+                  const itemPrice = item.price ?? (item as any).product?.price ?? 0;
+                  const itemQuantity = item.quantity ?? 1;
+                  // Calculate line total WITHOUT tax to match subtotal
+                  const itemLineSubtotal = itemPrice * itemQuantity;
+                  const itemsLength = sale.items?.length ?? 0;
+                  
+                  // Extract base item name (remove UM from itemName if present)
+                  const itemNameFull = item.itemName || (item as any).product?.name || 'Item';
+                  const itemNameMatch = itemNameFull.match(/^(.+?)\s*\((.+?)\)$/);
+                  const baseItemName = itemNameMatch ? itemNameMatch[1] : itemNameFull;
+                  
+                  // Get UM - prefer selectedUM, then extract from itemName, then from product.unit
+                  const displayUM = (item as any).selectedUM || 
+                                   (itemNameMatch ? itemNameMatch[2] : null) || 
+                                   (item as any).product?.unit || 
+                                   '';
+                  
+                  return (
+                    <div
+                      key={index}
+                      className={`flex justify-between items-start gap-4 px-[10px] py-[9px] ${
+                        index % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700/30' : 'bg-white dark:bg-gray-800'
+                      } ${index !== itemsLength - 1 ? 'border-b border-gray-200 dark:border-gray-600' : ''}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] font-bold text-gray-900 dark:text-white">
+                          {baseItemName}
+                        </p>
+                        <p className="text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">
+                          ({itemQuantity} {displayUM ? displayUM + ' ×' : '×'} ${itemPrice.toFixed(2)})
+                        </p>
+                      </div>
+                      <div className="text-[12px] font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                        ${itemLineSubtotal.toFixed(2)}
+                      </div>
                     </div>
-                    <div className="text-[12px] font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">
-                      ${(item.product.price * item.quantity).toFixed(2)}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -206,7 +227,7 @@ export function ReceiptScreen({
                   <span className="font-medium text-gray-700 dark:text-gray-300">
                     Tax ({taxRate.toFixed(2)}%):
                   </span>
-                  <span className="font-bold text-gray-900 dark:text-white">${sale.tax.toFixed(2)}</span>
+                  <span className="font-bold text-gray-900 dark:text-white">${taxAmount.toFixed(2)}</span>
                 </div>
 
                 {/* Processing Fee (if applicable) */}
@@ -237,18 +258,18 @@ export function ReceiptScreen({
                       Payment Method
                     </p>
                     <p className="text-[11px] font-bold text-gray-900 dark:text-white">
-                      {formatPaymentMethod(sale.payment.method)}
+                      {sale.payment ? formatPaymentMethod(sale.payment.method) : 'N/A'}
                     </p>
                   </div>
 
                   {/* Transaction ID (if exists) */}
-                  {sale.payment.confirmationNumber && (
+                  {sale.payment?.confirmationNumber && (
                     <div>
                       <p className="text-[9px] text-gray-500 dark:text-gray-400 font-bold uppercase mb-1">
                         Transaction ID
                       </p>
                       <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 font-mono">
-                        {sale.payment.confirmationNumber}
+                        {sale.payment?.confirmationNumber}
                       </p>
                     </div>
                   )}

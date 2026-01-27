@@ -608,13 +608,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               {cartItems.map((item, index) => {
                 const itemPrice = getItemPrice(item);
                 const itemTotal = itemPrice * item.quantity;
+                const displayUM = item.selectedUM || item.product.unit || '';
                 return (
                   <div key={index} className="px-4 py-3">
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex-1 min-w-0">
                         <span className="font-medium text-gray-900 dark:text-white">{item.product.name}</span>
                         <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
-                          ({item.quantity} × ${itemPrice.toFixed(2)})
+                          ({item.quantity} {displayUM ? displayUM + ' ×' : '×'} ${itemPrice.toFixed(2)})
                         </span>
                       </div>
                       <div className="font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">
