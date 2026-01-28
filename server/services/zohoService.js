@@ -11,6 +11,9 @@ const DEFAULT_PER_PAGE = 200;
 
 import { tokenCache } from '../utils/cache.js';
 import { zohoCache } from '../utils/cache.js';
+import { Op } from 'sequelize';
+import { Item } from '../models/Item.js';
+import { UnitOfMeasure } from '../models/UnitOfMeasure.js';
 
 let accessToken = null;
 let tokenExpiry = null;
@@ -330,6 +333,85 @@ export const createSalesReceipt = async (saleData) => {
   const resolvedLocationId = location_id || locationId || null;
   const resolvedDepositToAccountId = deposit_to_account_id || depositToAccountId || null;
 
+  // Ensure Zoho line item "rate" uses the current Item.price from the database (item table).
+  // This avoids relying on client-provided or SaleItem-stored pricing.
+  const safeLineItems = Array.isArray(lineItems) ? lineItems : [];
+  const rawItemIds = safeLineItems
+    .map((li) => li?.itemId)
+    .filter((id) => id !== null && id !== undefined)
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id));
+  const uniqueItemIds = Array.from(new Set(rawItemIds));
+
+  const itemPriceById = new Map();
+  if (uniqueItemIds.length > 0) {
+    try {
+      const dbItems = await Item.findAll({
+        where: { id: { [Op.in]: uniqueItemIds } },
+        attributes: ['id', 'price']
+      });
+      for (const dbItem of dbItems) {
+        const id = Number(dbItem?.id);
+        const price = parseFloat(dbItem?.price);
+        if (Number.isFinite(id) && Number.isFinite(price)) {
+          itemPriceById.set(id, price);
+        }
+      }
+    } catch (dbErr) {
+      console.warn(`⚠️ Failed to load Item.price for Zoho sales receipt: ${dbErr.message}`);
+    }
+  }
+
+  // Load unitPrecision multipliers for units (unit_of_measures.unitPrecision).
+  // Quantity sent to Zoho becomes: quantity = item.quantity * unitPrecision (defaults to 1 when unknown/invalid).
+  const extractUnitKey = (li) => {
+    const raw =
+      (li?.selectedUM ?? null) ||
+      (li?.unit ?? null) ||
+      // Best-effort: if itemName ends with "(Unit)", use that as the unit key (helps retry-sync payloads).
+      (() => {
+        const name = (li?.itemName ?? li?.name ?? '').toString();
+        const m = name.match(/\(([^)]+)\)\s*$/);
+        return m?.[1] ?? null;
+      })();
+
+    const key = raw ? String(raw).trim() : '';
+    return key.length > 0 ? key : null;
+  };
+
+  const unitKeys = Array.from(
+    new Set(
+      safeLineItems
+        .map(extractUnitKey)
+        .filter((k) => k !== null && k !== undefined && String(k).trim() !== '')
+        .map((k) => String(k).trim())
+    )
+  );
+
+  const unitPrecisionByKey = new Map();
+  if (unitKeys.length > 0) {
+    try {
+      const dbUnits = await UnitOfMeasure.findAll({
+        where: {
+          [Op.or]: [{ unitName: { [Op.in]: unitKeys } }, { symbol: { [Op.in]: unitKeys } }]
+        },
+        attributes: ['unitName', 'symbol', 'unitPrecision']
+      });
+
+      for (const u of dbUnits) {
+        const precision = parseFloat(u?.unitPrecision);
+        if (!Number.isFinite(precision) || precision <= 0) continue;
+
+        const unitName = u?.unitName ? String(u.unitName).trim() : null;
+        const symbol = u?.symbol ? String(u.symbol).trim() : null;
+        if (unitName) unitPrecisionByKey.set(unitName, precision);
+        if (symbol) unitPrecisionByKey.set(symbol, precision);
+      }
+    } catch (dbErr) {
+      console.warn(`⚠️ Failed to load UnitOfMeasure.unitPrecision for Zoho sales receipt: ${dbErr.message}`);
+    }
+  }
+
   // Use customer's location (place_of_contact) if available to enforce correct tax rate
   // Zoho uses place_of_contact to determine which tax rate to apply
   // If customer has a different assigned tax rate, we must use their location
@@ -340,15 +422,21 @@ export const createSalesReceipt = async (saleData) => {
     salesreceipt_number: forcedReceiptNumber || `POS-${saleId}`,
     date: resolvedDate || new Date().toISOString().split('T')[0],
     payment_mode: paymentMode,
-    line_items: lineItems.map(item => {
+    line_items: safeLineItems.map(item => {
       const taxRate = Number(item.taxPercentage ?? 0);
       const isTaxable = !Number.isNaN(taxRate) && taxRate > 0;
       const effectiveTaxId = (item.taxId || zohoTaxId || null) ? String(item.taxId || zohoTaxId).trim() : null;
+      const dbRate = itemPriceById.get(Number(item?.itemId));
+      const resolvedRate = Number.isFinite(dbRate) ? dbRate : parseFloat(item.rate ?? item.price);
+      const unitKey = extractUnitKey(item);
+      const unitPrecision = unitKey ? unitPrecisionByKey.get(unitKey) : null;
+      const quantityMultiplier = Number.isFinite(unitPrecision) && unitPrecision > 0 ? unitPrecision : 1;
+      const rawQty = parseFloat(item.quantity ?? 1);
+      const resolvedQuantity = (Number.isFinite(rawQty) ? rawQty : 1) * quantityMultiplier;
       const lineItem = {
-        name: item.itemName || item.name || 'Item',
         description: item.description || '',
-        rate: parseFloat(item.rate ?? item.price),
-        quantity: parseFloat(item.quantity ?? 1),
+        rate: resolvedRate,
+        quantity: resolvedQuantity,
         is_taxable: isTaxable,
         tax_percentage: isTaxable ? taxRate : 0
       };
@@ -358,12 +446,14 @@ export const createSalesReceipt = async (saleData) => {
       } else if (item.zohoItemId) {
         lineItem.item_id = item.zohoItemId;
       }
+      // If there's no item_id, Zoho may require a label; provide name only in that case.
+      if (!lineItem.item_id) {
+        lineItem.name = item.itemName || item.name || 'Item';
+      }
       
       // Include unit of measure if provided (Zoho supports unit field)
-      if (item.selectedUM) {
-        lineItem.unit = item.selectedUM;
-      } else if (item.unit) {
-        lineItem.unit = item.unit;
+      if (unitKey) {
+        lineItem.unit = unitKey;
       }
       
       // If we know the tax for this item, let Zoho calculate it so totals match the POS
@@ -405,15 +495,20 @@ export const createSalesReceipt = async (saleData) => {
 
   // Emit a warning if our calculated Zoho total would drift from the POS total
   if (!Number.isNaN(expectedTotal) && expectedTotal > 0) {
-    const computedTotal = (lineItems || []).reduce((sum, item) => {
-      const quantity = parseFloat(item.quantity) || 0;
-      const price = parseFloat(item.price) || 0;
+    const computedTotal = (safeLineItems || []).reduce((sum, item) => {
+      const unitKey = extractUnitKey(item);
+      const unitPrecision = unitKey ? unitPrecisionByKey.get(unitKey) : null;
+      const quantityMultiplier = Number.isFinite(unitPrecision) && unitPrecision > 0 ? unitPrecision : 1;
+      const quantity = (parseFloat(item.quantity) || 0) * quantityMultiplier;
+      const dbRate = itemPriceById.get(Number(item?.itemId));
+      const price = Number.isFinite(dbRate) ? dbRate : (parseFloat(item.rate ?? item.price) || 0);
       const taxRate = Number(item.taxPercentage ?? 0);
       const hasTax = !Number.isNaN(taxRate) && taxRate > 0;
       const lineTotalFromItem = parseFloat(item.lineTotal);
-      const calculatedLineTotal = !Number.isNaN(lineTotalFromItem)
-        ? lineTotalFromItem
-        : price * quantity * (1 + (hasTax ? taxRate / 100 : 0));
+      const calculatedLineTotal =
+        Number.isFinite(price) && Number.isFinite(quantity)
+          ? price * quantity * (1 + (hasTax ? taxRate / 100 : 0))
+          : (!Number.isNaN(lineTotalFromItem) ? lineTotalFromItem : 0);
 
       return sum + calculatedLineTotal;
     }, 0) + processingFee;
@@ -1208,7 +1303,6 @@ const mapSalesOrderLineItemForUpdate = (li) => {
   const mapped = {
     line_item_id: li?.line_item_id,
     item_id: li?.item_id,
-    name: li?.name,
     description: li?.description,
     rate: li?.rate,
     quantity: li?.quantity,
