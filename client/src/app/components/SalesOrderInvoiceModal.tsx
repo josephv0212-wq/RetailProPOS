@@ -285,7 +285,7 @@ export function SalesOrderInvoiceModal({
               disabled={!hasSelection}
               className="flex-1 px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:from-gray-400 disabled:to-gray-400"
             >
-              Charge via Authorize.net ({selectedItems.size})
+              Continue ({selectedItems.size})
             </button>
           </div>
         </div>

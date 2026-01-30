@@ -20,6 +20,7 @@ import { Customer, Product, CartItem, PaymentDetails, Sale, UnitOfMeasureOption 
 import { itemsAPI, customersAPI, salesAPI, zohoAPI, itemUnitsAPI, unitsAPI } from '../services/api';
 import { SalesOrderInvoiceModal } from './components/SalesOrderInvoiceModal';
 import { PaymentMethodSelector } from './components/PaymentMethodSelector';
+import { ZohoPaymentOptionsModal } from './components/ZohoPaymentOptionsModal';
 import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
 import { logger } from '../utils/logger';
@@ -85,6 +86,10 @@ function AppContent() {
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [pendingChargeItems, setPendingChargeItems] = useState<any[]>([]);
+  const [isZohoPaymentOptionsOpen, setIsZohoPaymentOptionsOpen] = useState(false);
+  const [isZohoDocsPaymentModalOpen, setIsZohoDocsPaymentModalOpen] = useState(false);
+  const [zohoDocsCartItems, setZohoDocsCartItems] = useState<CartItem[]>([]);
+  const [zohoDocsTotals, setZohoDocsTotals] = useState<{ total: number; subtotal: number; tax: number }>({ total: 0, subtotal: 0, tax: 0 });
   const [allUnits, setAllUnits] = useState<UnitOfMeasureOption[]>([]); // All units including basic UMs for dry ice
 
   // Memoized constants from user data
@@ -460,7 +465,7 @@ function AppContent() {
     }
   };
 
-  // Handle selection of sales orders and/or invoices - show payment method selector first
+  // Handle selection of sales orders and/or invoices - show payment options (Zoho vs POS methods)
   const handleSelectOrdersInvoices = async (items: any[]) => {
     if (items.length === 0) return;
 
@@ -502,12 +507,46 @@ function AppContent() {
       return;
     }
 
-    // Store items and show payment method selector
+    // Store items and show payment options
     setPendingChargeItems(chargeItems);
     setIsOrderInvoiceModalOpen(false);
     setOpenSalesOrders([]);
     setInvoices([]);
-    setIsPaymentMethodSelectorOpen(true);
+    setIsZohoPaymentOptionsOpen(true);
+  };
+
+  const openZohoDocsPosPaymentModal = () => {
+    const totalAmount = (pendingChargeItems || []).reduce((sum, it: any) => sum + (Number(it.amount) || 0), 0);
+    const fakeCartItems: CartItem[] = (pendingChargeItems || []).map((it: any) => ({
+      product: {
+        id: `${it.type}-${it.id}`,
+        name: `${it.type === 'invoice' ? 'Invoice' : 'Sales Order'} ${it.number}`,
+        price: Number(it.amount) || 0,
+      } as any,
+      quantity: 1,
+      selectedUM: null,
+      availableUnits: [],
+    }));
+
+    setZohoDocsCartItems(fakeCartItems);
+    setZohoDocsTotals({ total: totalAmount, subtotal: totalAmount, tax: 0 });
+    setIsZohoDocsPaymentModalOpen(true);
+  };
+
+  const handleConfirmZohoDocsPayment = async (paymentDetails: PaymentDetails): Promise<any> => {
+    const count = pendingChargeItems.length;
+    const totalAmount = (pendingChargeItems || []).reduce((sum, it: any) => sum + (Number(it.amount) || 0), 0);
+
+    showToast(
+      `Payment completed for ${count} document${count !== 1 ? 's' : ''} ($${totalAmount.toFixed(2)}) via ${paymentDetails.method.toUpperCase()}.`,
+      'success',
+      6000
+    );
+
+    setIsZohoDocsPaymentModalOpen(false);
+    setIsZohoPaymentOptionsOpen(false);
+    setPendingChargeItems([]);
+    return { success: true };
   };
 
   // Handle payment method selection and charge
@@ -1151,6 +1190,25 @@ function AppContent() {
         tax={totalsForReceipt.tax}
         cartItems={cartItems}
         onConfirmPayment={handleConfirmPayment}
+        context="sale"
+        userTerminalNumber={user?.terminalNumber}
+        userTerminalIP={user?.terminalIP}
+        userTerminalPort={user?.terminalPort}
+        cardReaderMode={user?.cardReaderMode || 'integrated'}
+        customerId={selectedCustomer?.id || null}
+        customerName={selectedCustomer?.name || selectedCustomer?.contactName || null}
+      />
+
+      {/* POS Payment Modal for Zoho invoices/sales orders */}
+      <PaymentModal
+        isOpen={isZohoDocsPaymentModalOpen}
+        onClose={() => setIsZohoDocsPaymentModalOpen(false)}
+        total={zohoDocsTotals.total}
+        subtotal={zohoDocsTotals.subtotal}
+        tax={zohoDocsTotals.tax}
+        cartItems={zohoDocsCartItems}
+        onConfirmPayment={handleConfirmZohoDocsPayment}
+        context="zohoDocuments"
         userTerminalNumber={user?.terminalNumber}
         userTerminalIP={user?.terminalIP}
         userTerminalPort={user?.terminalPort}
@@ -1191,6 +1249,25 @@ function AppContent() {
           customerId={selectedCustomer.id}
           customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
           loading={loadingOrders}
+        />
+      )}
+
+      {/* Payment Options (Zoho vs POS methods) */}
+      {selectedCustomer && (
+        <ZohoPaymentOptionsModal
+          isOpen={isZohoPaymentOptionsOpen}
+          onClose={() => setIsZohoPaymentOptionsOpen(false)}
+          customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
+          itemCount={pendingChargeItems.length}
+          totalAmount={(pendingChargeItems || []).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0)}
+          onChooseZohoPayment={() => {
+            setIsZohoPaymentOptionsOpen(false);
+            setIsPaymentMethodSelectorOpen(true);
+          }}
+          onChoosePosPayment={() => {
+            setIsZohoPaymentOptionsOpen(false);
+            openZohoDocsPosPaymentModal();
+          }}
         />
       )}
     </div>

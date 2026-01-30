@@ -20,6 +20,7 @@ interface PaymentModalProps {
   tax: number;
   cartItems: CartItem[];
   onConfirmPayment: (details: PaymentDetails) => Promise<any> | void;
+  context?: 'sale' | 'zohoDocuments';
   userTerminalNumber?: string | null;
   userTerminalIP?: string | null;
   userTerminalPort?: number | string | null;
@@ -37,7 +38,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, context = 'sale', userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName }: PaymentModalProps) {
   const { showToast } = useToast();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
@@ -98,13 +99,13 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
   // Load payment profiles when customer is available
   useEffect(() => {
-    if (isOpen && customerId) {
+    if (context === 'sale' && isOpen && customerId) {
       loadPaymentProfiles();
     } else {
       setPaymentProfiles([]);
       setSelectedPaymentProfileId(null);
     }
-  }, [isOpen, customerId]);
+  }, [isOpen, customerId, context]);
 
   const loadPaymentProfiles = async () => {
     if (!customerId) return;
@@ -175,11 +176,17 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
         await onConfirmPayment(paymentDetails);
         setIsProcessing(false);
         onClose();
-        showToast('Sale recorded. Please process payment manually on the external card reader.', 'success', 5000);
+        showToast(
+          context === 'zohoDocuments'
+            ? 'Payment recorded. Please process payment manually on the external card reader.'
+            : 'Sale recorded. Please process payment manually on the external card reader.',
+          'success',
+          5000
+        );
       } catch (err: any) {
-        setError(err.message || 'Failed to record sale');
+        setError(err.message || (context === 'zohoDocuments' ? 'Failed to record payment' : 'Failed to record sale'));
         setIsProcessing(false);
-        showToast('Failed to record sale', 'error', 4000);
+        showToast(context === 'zohoDocuments' ? 'Failed to record payment' : 'Failed to record sale', 'error', 4000);
       }
       return;
     }
@@ -711,7 +718,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                 <span className="text-sm">DC</span>
               </button>
               
-              {customerId && paymentProfiles.length > 0 && (
+              {context !== 'zohoDocuments' && customerId && paymentProfiles.length > 0 && (
                 <button
                   onClick={() => {
                     setSelectedMethod('stored_payment');
@@ -768,25 +775,27 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
               <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
-                <div className="flex justify-center">
-                  {cardPaymentMethod !== 'manual' ? (
-                    <button
-                      onClick={() => setCardPaymentMethod('manual')}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                    >
-                      Manual Entry
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setCardPaymentMethod('valor_api')}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                    >
-                      Use Terminal
-                    </button>
-                  )}
-                </div>
+                {context !== 'zohoDocuments' && (
+                  <div className="flex justify-center">
+                    {cardPaymentMethod !== 'manual' ? (
+                      <button
+                        onClick={() => setCardPaymentMethod('manual')}
+                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      >
+                        Manual Entry
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setCardPaymentMethod('valor_api')}
+                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      >
+                        Use Terminal
+                      </button>
+                    )}
+                  </div>
+                )}
 
-                {cardPaymentMethod !== 'manual' ? null : (
+                {context === 'zohoDocuments' || cardPaymentMethod !== 'manual' ? null : (
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -848,7 +857,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {selectedMethod === 'zelle' && null}
 
-            {selectedMethod === 'stored_payment' && (
+            {context !== 'zohoDocuments' && selectedMethod === 'stored_payment' && (
               <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-400 rounded-xl p-6 space-y-3">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center">
