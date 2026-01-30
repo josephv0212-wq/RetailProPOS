@@ -200,9 +200,9 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
                         }}
                       >
                         {theme === 'dark' ? (
-                          <Moon className="w-3 h-3 text-blue-600" />
+                          <Moon className="w-3 h-3 text-blue-600 dark:text-blue-400" />
                         ) : (
-                          <Sun className="w-3 h-3 text-gray-500" />
+                          <Sun className="w-3 h-3 text-gray-500 dark:text-gray-400" />
                         )}
                       </span>
                     </button>

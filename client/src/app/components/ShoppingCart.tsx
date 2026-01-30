@@ -256,12 +256,12 @@ export function ShoppingCart({
                   )}
                   
                   {/* Calculated Price (UM Rate × Basic Price) */}
-                  <p className="text-xs text-white whitespace-nowrap flex-shrink-0">
+                  <p className="text-xs text-gray-900 dark:text-white whitespace-nowrap flex-shrink-0">
                     ${itemPrice.toFixed(2)} =
                   </p>
                   
                   {/* Amount */}
-                  <p className="text-base font-medium text-white whitespace-nowrap flex-shrink-0">
+                  <p className="text-base font-medium text-gray-900 dark:text-white whitespace-nowrap flex-shrink-0">
                     ${amount.toFixed(2)}
                   </p>
                   

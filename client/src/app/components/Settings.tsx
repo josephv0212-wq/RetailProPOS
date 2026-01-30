@@ -512,7 +512,7 @@ function SystemInfoEditButton({ locationName, userName, userRole }: { locationNa
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
                   </>
                 )}
               </div>
@@ -670,7 +670,7 @@ function ValorApiConfig() {
       {/* Terminal Serial Number */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Terminal Serial Number <span className="text-red-500">*</span>
+          Terminal Serial Number <span className="text-red-500 dark:text-red-400">*</span>
         </label>
         <input
           type="text"

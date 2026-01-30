@@ -775,27 +775,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
 
             {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
               <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
-                {context !== 'zohoDocuments' && (
-                  <div className="flex justify-center">
-                    {cardPaymentMethod !== 'manual' ? (
-                      <button
-                        onClick={() => setCardPaymentMethod('manual')}
-                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                      >
-                        Manual Entry
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setCardPaymentMethod('valor_api')}
-                        className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
-                      >
-                        Use Terminal
-                      </button>
-                    )}
-                  </div>
-                )}
+                <div className="flex justify-center">
+                  {cardPaymentMethod !== 'manual' ? (
+                    <button
+                      onClick={() => setCardPaymentMethod('manual')}
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500 transition-all text-sm font-medium"
+                    >
+                      Manual Entry
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setCardPaymentMethod('valor_api')}
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500 transition-all text-sm font-medium"
+                    >
+                      Use Terminal
+                    </button>
+                  )}
+                </div>
 
-                {context === 'zohoDocuments' || cardPaymentMethod !== 'manual' ? null : (
+                {cardPaymentMethod !== 'manual' ? null : (
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -806,7 +804,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         value={cardNumber}
                         onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, '').slice(0, 16))}
                         placeholder="1234 5678 9012 3456"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900 dark:caret-gray-200"
                       />
                     </div>
                     
@@ -820,7 +818,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={cardExpiry}
                           onChange={(e) => setCardExpiry(e.target.value)}
                           placeholder="MM/YY"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900 dark:caret-gray-200"
                         />
                       </div>
                       
@@ -833,7 +831,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={cardCvv}
                           onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
                           placeholder="123"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900 dark:caret-gray-200"
                         />
                       </div>
                       
@@ -846,7 +844,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={cardZip}
                           onChange={(e) => setCardZip(e.target.value.slice(0, 5))}
                           placeholder="12345"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900 dark:caret-gray-200"
                         />
                       </div>
                     </div>
@@ -858,23 +856,23 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             {selectedMethod === 'zelle' && null}
 
             {context !== 'zohoDocuments' && selectedMethod === 'stored_payment' && (
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-400 rounded-xl p-6 space-y-3">
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-400 dark:border-green-600 rounded-xl p-6 space-y-3">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center">
                     <Wallet className="w-7 h-7 text-white" />
                   </div>
-                  <h3 className="text-xl font-semibold text-gray-900">Stored Payment Method</h3>
+                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Stored Payment Method</h3>
                 </div>
 
                 {loadingPaymentProfiles ? (
                   <div className="text-center py-8">
-                    <Loader className="w-8 h-8 text-green-600 mx-auto animate-spin mb-2" />
-                    <p className="text-gray-600">Loading payment methods...</p>
+                    <Loader className="w-8 h-8 text-green-600 dark:text-green-400 mx-auto animate-spin mb-2" />
+                    <p className="text-gray-600 dark:text-gray-400">Loading payment methods...</p>
                   </div>
                 ) : paymentProfiles.length === 0 ? (
                   <div className="text-center py-8">
-                    <p className="text-gray-600 mb-2">No stored payment methods available</p>
-                    <p className="text-sm text-gray-500">This customer does not have any stored payment methods in Authorize.net</p>
+                    <p className="text-gray-600 dark:text-gray-400 mb-2">No stored payment methods available</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">This customer does not have any stored payment methods in Authorize.net</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -955,14 +953,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   {achEntryMode !== 'details' ? (
                     <button
                       onClick={() => setAchEntryMode('details')}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500 transition-all text-sm font-medium"
                     >
                       Enter Details
                     </button>
                   ) : (
                     <button
                       onClick={() => setAchEntryMode('hidden')}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-700 hover:border-gray-400 transition-all text-sm font-medium"
+                      className="px-3 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500 transition-all text-sm font-medium"
                     >
                       Hide Details
                     </button>
@@ -980,7 +978,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         value={achName}
                         onChange={(e) => setAchName(e.target.value)}
                         placeholder="John Doe"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900 dark:caret-gray-200"
                       />
                     </div>
                     
@@ -994,7 +992,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={achRouting}
                           onChange={(e) => setAchRouting(e.target.value.replace(/\D/g, '').slice(0, 9))}
                           placeholder="123456789"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900 dark:caret-gray-200"
                         />
                       </div>
                       
@@ -1007,7 +1005,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={achAccount}
                           onChange={(e) => setAchAccount(e.target.value.replace(/\D/g, ''))}
                           placeholder="1234567890"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900 dark:caret-gray-200"
                         />
                       </div>
                     </div>
@@ -1020,7 +1018,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         <select
                           value={achAccountType}
                           onChange={(e) => setAchAccountType(e.target.value as 'checking' | 'savings')}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         >
                           <option value="checking">Checking</option>
                           <option value="savings">Savings</option>
@@ -1036,7 +1034,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                           value={achBankName}
                           onChange={(e) => setAchBankName(e.target.value)}
                           placeholder="Bank of America"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white text-gray-900 dark:bg-white dark:text-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 caret-gray-900 dark:caret-gray-200"
                         />
                       </div>
                     </div>
@@ -1049,7 +1047,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           {/* Error Display */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <p className="text-sm text-red-700">{error}</p>
+              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
             </div>
           )}
           
