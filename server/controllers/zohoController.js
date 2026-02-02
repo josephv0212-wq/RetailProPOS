@@ -3,6 +3,7 @@ import { Customer, Item, Sale } from '../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
+import { sequelize } from '../config/db.js';
 
 const DEFAULT_CUSTOMERS = {
   'LOC001': 'MIA Dry Ice - WALK IN MIAMI',
