@@ -456,6 +456,8 @@ export const salesAPI = {
         success: boolean;
         underReview?: boolean;
         reviewStatus?: string | null;
+        zohoPaymentRecorded?: boolean;
+        zohoPaymentError?: string;
       }>;
       errors: Array<{
         item: { type: string; id: string; number: string };

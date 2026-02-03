@@ -632,6 +632,16 @@ function AppContent() {
             6000
           );
         }
+
+        // Warn if any invoice payment was not recorded in Zoho
+        const invoiceResults = results.filter((r: any) => r.type === 'invoice');
+        const zohoFailed = invoiceResults.filter((r: any) => r.zohoPaymentError);
+        if (zohoFailed.length > 0) {
+          const msg = zohoFailed.length === 1
+            ? `Payment was charged but could not be recorded in Zoho Books: ${zohoFailed[0].zohoPaymentError}`
+            : `${zohoFailed.length} invoice(s): payment charged but not recorded in Zoho. Check server logs.`;
+          showToast(msg, 'warning', 8000);
+        }
       } else {
         showToast(
           response.error || 'Failed to charge invoices/sales orders',

@@ -719,16 +719,22 @@ export const createCustomerPayment = async (params) => {
   if (locationId && String(locationId).trim() !== '') payload.location_id = String(locationId).trim();
 
   try {
+    console.log(`📤 Zoho: Creating customer payment for invoice ${invoiceId}, amount ${amount}, mode ${paymentMode}`);
     const response = await makeZohoRequest('/customerpayments', 'POST', payload);
-    if (response.code === 0 && response.payment) {
+    const payment = response.payment || response.customer_payment;
+    if (response.code === 0 && payment) {
+      const paymentId = payment.payment_id;
+      console.log(`✅ Zoho: Customer payment created for invoice ${invoiceId}, payment_id: ${paymentId}`);
       return {
         success: true,
-        paymentId: response.payment.payment_id
+        paymentId: paymentId || null
       };
     }
+    const errMsg = response.message || 'Failed to create customer payment in Zoho';
+    console.warn(`⚠️ Zoho createCustomerPayment non-OK: ${errMsg}`);
     return {
       success: false,
-      error: response.message || 'Failed to create customer payment in Zoho'
+      error: errMsg
     };
   } catch (error) {
     const errorMsg = error.response?.data?.message || error.message || 'Unknown error';

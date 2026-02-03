@@ -1490,6 +1490,33 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
         });
 
         if (chargeResult.success) {
+          let zohoPaymentRecorded = false;
+          let zohoPaymentError = null;
+
+          if (type === 'invoice') {
+            const zohoCustomerId = (customer.zohoId && String(customer.zohoId).trim()) || null;
+            if (!zohoCustomerId) {
+              zohoPaymentError = 'Customer has no Zoho ID. Sync customers from Zoho to record payment in Zoho Books.';
+              console.warn(`⚠️ Zoho: skipping payment for invoice ${number}: ${zohoPaymentError}`);
+            } else {
+              const zohoPaymentMode = paymentType === 'debit_card' ? 'debitcard' : 'creditcard';
+              const zohoPaymentResult = await createCustomerPayment({
+                customerId: zohoCustomerId,
+                invoiceId: String(id).trim(),
+                amount: parseFloat(amount),
+                paymentMode: zohoPaymentMode,
+                referenceNumber: chargeResult.transactionId || undefined,
+                description: `Invoice ${number} - POS payment (${paymentType === 'debit_card' ? 'Debit' : 'Credit'} card)`
+              });
+              if (zohoPaymentResult.success) {
+                zohoPaymentRecorded = true;
+              } else {
+                zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
+                console.error(`⚠️ Zoho: could not record payment for invoice ${number}: ${zohoPaymentError}`);
+              }
+            }
+          }
+
           results.push({
             type,
             id,
@@ -1500,23 +1527,10 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
             message: chargeResult.message,
             success: true,
             underReview: chargeResult.underReview || false,
-            reviewStatus: chargeResult.reviewStatus || null
+            reviewStatus: chargeResult.reviewStatus || null,
+            zohoPaymentRecorded: type === 'invoice' ? zohoPaymentRecorded : undefined,
+            zohoPaymentError: type === 'invoice' && zohoPaymentError ? zohoPaymentError : undefined
           });
-
-          if (type === 'invoice' && customer.zohoId) {
-            const zohoPaymentMode = paymentType === 'debit_card' ? 'debitcard' : 'creditcard';
-            const zohoPaymentResult = await createCustomerPayment({
-              customerId: customer.zohoId,
-              invoiceId: id,
-              amount: parseFloat(amount),
-              paymentMode: zohoPaymentMode,
-              referenceNumber: chargeResult.transactionId || undefined,
-              description: `Invoice ${number} - POS payment (${paymentType === 'debit_card' ? 'Debit' : 'Credit'} card)`
-            });
-            if (!zohoPaymentResult.success) {
-              console.error(`⚠️ Zoho: could not record payment for invoice ${number}: ${zohoPaymentResult.error}`);
-            }
-          }
         } else {
           errors.push({
             item: { type, id, number },
