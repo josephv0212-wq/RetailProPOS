@@ -802,27 +802,6 @@ export const chargeCustomerProfile = async (paymentData) => {
     }
   };
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: 'debug-session',
-      runId: 'pre-fix',
-      hypothesisId: 'H6',
-      location: 'server/services/authorizeNetService.js:chargeCustomerProfile:request',
-      message: 'Authorize.Net chargeCustomerProfile request summary',
-      data: {
-        customerProfileId: customerProfileId?.toString?.().slice(0, 8) || null,
-        customerPaymentProfileId: customerPaymentProfileId?.toString?.().slice(0, 8) || null,
-        amount: parseFloat(amount),
-        invoiceNumber: invoiceNumber || null
-      },
-      timestamp: Date.now()
-    })
-  }).catch(() => {});
-  // #endregion
-
   try {
     const response = await axios.post(AUTHORIZE_NET_ENDPOINT, requestBody, {
       headers: {

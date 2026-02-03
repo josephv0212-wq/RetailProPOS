@@ -166,30 +166,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     setError('');
     setIsProcessing(true);
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: 'debug-session',
-        runId: 'pre-fix',
-        hypothesisId: 'H7',
-        location: 'client/src/app/components/PaymentModal.tsx:handleConfirmPayment:entry',
-        message: 'PaymentModal handleConfirmPayment entry',
-        data: {
-          selectedMethod,
-          cardPaymentMethod,
-          cardReaderMode,
-          finalTotal,
-          context,
-          hasCustomerId: !!customerId,
-          hasSelectedPaymentProfileId: !!selectedPaymentProfileId
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-
     // Standalone mode: Skip payment processing, just record the sale
     if (cardReaderMode === 'standalone' && (selectedMethod === 'credit_card' || selectedMethod === 'debit_card')) {
       const paymentDetails: PaymentDetails = {

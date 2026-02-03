@@ -217,32 +217,6 @@ export const createSale = async (req, res) => {
     const locationId = req.user.locationId;
     const locationName = req.user.locationName;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: 'debug-session',
-        runId: 'pre-fix',
-        hypothesisId: 'H1',
-        location: 'server/controllers/salesController.js:createSale:entry',
-        message: 'createSale entry',
-        data: {
-          requestPaymentType,
-          useValorApi,
-          useOpaqueData,
-          useBluetoothReader,
-          useStoredPayment,
-          itemsCount: Array.isArray(items) ? items.length : null,
-          userId,
-          locationId,
-          isStandaloneMode
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-    
     // Check if customer is tax exempt
     const isTaxExempt = customerTaxPreference === 'SALES TAX EXCEPTION CERTIFICATE';
     
@@ -407,30 +381,6 @@ export const createSale = async (req, res) => {
       : 0;
 
     const total = baseTotal + cardProcessingFee;
-
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: 'debug-session',
-        runId: 'pre-fix',
-        hypothesisId: 'H2',
-        location: 'server/controllers/salesController.js:createSale:totals',
-        message: 'createSale totals computed',
-        data: {
-          subtotal,
-          taxAmount,
-          baseTotal,
-          cardProcessingFee,
-          total,
-          actualPaymentType,
-          isStandaloneMode
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
 
     let transactionId = null;
     let paymentResult = null;
@@ -672,36 +622,6 @@ export const createSale = async (req, res) => {
       };
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: 'debug-session',
-        runId: 'pre-fix',
-        hypothesisId: 'H3',
-        location: 'server/controllers/salesController.js:createSale:paymentResult',
-        message: 'createSale payment result summary',
-        data: {
-          paymentType,
-          transactionId,
-          hasPaymentResult: !!paymentResult,
-          paymentSuccess: paymentResult?.success ?? null,
-          paymentError: paymentResult?.error || null,
-          flags: {
-            useValorApi,
-            useOpaqueData,
-            useBluetoothReader,
-            useStoredPayment,
-            isStandaloneMode,
-            savePaymentMethod: savePaymentMethod === true || paymentDetails?.savePaymentMethod === true
-          }
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-
     // Optionally save payment method in Authorize.Net CIM when a customer is present and
     // we processed the payment directly through Authorize.Net (not Valor/terminal/standalone).
     const shouldSavePaymentMethod =
@@ -818,27 +738,6 @@ export const createSale = async (req, res) => {
           zohoTaxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null,
           saleId: sale.id
         });
-
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: 'debug-session',
-            runId: 'pre-fix',
-            hypothesisId: 'H4',
-            location: 'server/controllers/salesController.js:createSale:zohoResult',
-            message: 'Zoho sales receipt result from createSale',
-            data: {
-              saleId: sale.id,
-              zohoSuccess: zohoResult?.success ?? null,
-              zohoSalesReceiptId: zohoResult?.salesReceiptId || null,
-              zohoError: zohoResult?.error || null
-            },
-            timestamp: Date.now()
-          })
-        }).catch(() => {});
-        // #endregion
 
         if (zohoResult.success) {
           await sale.update({
