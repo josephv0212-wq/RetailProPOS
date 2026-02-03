@@ -295,7 +295,7 @@ export const createSalesReceipt = async (saleData) => {
   const paymentModeMap = {
     cash: 'cash',
     credit_card: 'creditcard',
-    debit_card: 'creditcard',
+    debit_card: 'debit_card',
     zelle: 'banktransfer',
     ach: 'banktransfer'
   };
@@ -664,7 +664,75 @@ export const voidSalesReceipt = async (salesReceiptId) => {
     if (error.response?.status) {
       console.error(`   HTTP Status: ${error.response.status}`);
     }
-    
+    return {
+      success: false,
+      error: errorMsg
+    };
+  }
+};
+
+/**
+ * Record a customer payment against an invoice in Zoho Books (POST /customerpayments).
+ * Use this when the POS has already charged the card via Authorize.net and we need to
+ * record the payment in Zoho so the invoice shows as paid.
+ * @param {Object} params
+ * @param {string} params.customerId - Zoho customer (contact) ID
+ * @param {string} params.invoiceId - Zoho invoice ID
+ * @param {number} params.amount - Amount paid
+ * @param {string} params.paymentMode - Zoho payment_mode: 'cash' | 'creditcard' | 'debitcard' | 'banktransfer' | 'check' | 'bankremittance' | 'autotransaction' | 'others'
+ * @param {string} [params.date] - Date of payment (yyyy-mm-dd)
+ * @param {string} [params.referenceNumber] - Reference (e.g. transaction ID)
+ * @param {string} [params.description] - Description
+ * @param {string} [params.locationId] - Zoho location ID
+ * @returns {Promise<{ success: boolean, paymentId?: string, error?: string }>}
+ */
+export const createCustomerPayment = async (params) => {
+  const {
+    customerId,
+    invoiceId,
+    amount,
+    paymentMode,
+    date,
+    referenceNumber,
+    description,
+    locationId
+  } = params;
+
+  if (!customerId || !invoiceId || amount == null || amount <= 0) {
+    return {
+      success: false,
+      error: 'customerId, invoiceId, and positive amount are required'
+    };
+  }
+
+  const payload = {
+    customer_id: customerId,
+    payment_mode: paymentMode || 'creditcard',
+    amount: parseFloat(amount),
+    date: date || new Date().toISOString().split('T')[0],
+    invoices: [
+      { invoice_id: invoiceId, amount_applied: parseFloat(amount) }
+    ]
+  };
+  if (referenceNumber) payload.reference_number = String(referenceNumber);
+  if (description) payload.description = String(description);
+  if (locationId && String(locationId).trim() !== '') payload.location_id = String(locationId).trim();
+
+  try {
+    const response = await makeZohoRequest('/customerpayments', 'POST', payload);
+    if (response.code === 0 && response.payment) {
+      return {
+        success: true,
+        paymentId: response.payment.payment_id
+      };
+    }
+    return {
+      success: false,
+      error: response.message || 'Failed to create customer payment in Zoho'
+    };
+  } catch (error) {
+    const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+    console.error('❌ Zoho createCustomerPayment error:', errorMsg);
     return {
       success: false,
       error: errorMsg

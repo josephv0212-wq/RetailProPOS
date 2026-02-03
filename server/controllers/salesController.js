@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
-import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt } from '../services/zohoService.js';
+import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
@@ -1341,7 +1341,8 @@ export const getSyncStatus = async (req, res) => {
  */
 export const chargeInvoicesSalesOrders = async (req, res) => {
   try {
-    const { customerId, items, paymentProfileId } = req.body;
+    const { customerId, items, paymentProfileId, paymentType: requestPaymentType } = req.body;
+    const paymentType = (requestPaymentType && String(requestPaymentType).toLowerCase() === 'debit_card') ? 'debit_card' : 'credit_card';
 
     if (!customerId) {
       return sendValidationError(res, 'Customer ID is required');
@@ -1501,6 +1502,21 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
             underReview: chargeResult.underReview || false,
             reviewStatus: chargeResult.reviewStatus || null
           });
+
+          if (type === 'invoice' && customer.zohoId) {
+            const zohoPaymentMode = paymentType === 'debit_card' ? 'debitcard' : 'creditcard';
+            const zohoPaymentResult = await createCustomerPayment({
+              customerId: customer.zohoId,
+              invoiceId: id,
+              amount: parseFloat(amount),
+              paymentMode: zohoPaymentMode,
+              referenceNumber: chargeResult.transactionId || undefined,
+              description: `Invoice ${number} - POS payment (${paymentType === 'debit_card' ? 'Debit' : 'Credit'} card)`
+            });
+            if (!zohoPaymentResult.success) {
+              console.error(`⚠️ Zoho: could not record payment for invoice ${number}: ${zohoPaymentResult.error}`);
+            }
+          }
         } else {
           errors.push({
             item: { type, id, number },

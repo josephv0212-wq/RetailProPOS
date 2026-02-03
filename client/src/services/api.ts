@@ -430,6 +430,7 @@ export const salesAPI = {
   chargeInvoicesSalesOrders: async (data: {
     customerId: number;
     paymentProfileId: string;
+    paymentType?: 'credit_card' | 'debit_card';
     items: Array<{
       type: 'invoice' | 'salesorder';
       id: string;
