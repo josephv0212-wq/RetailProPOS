@@ -56,11 +56,10 @@ export function ReceiptScreen({
   // Get processing fee from sale object (already calculated and included in total)
   const processingFee = sale.ccFee || 0;
   const taxAmount = sale.tax ?? sale.taxAmount ?? 0;
-  // Use the stored tax percentage from the sale (Zoho/user rate: e.g. 6.5%, 7%) so the receipt
-  // shows the actual configured rate. Only derive from tax/subtotal when taxPercentage is missing (e.g. legacy data).
-  const storedTaxPct = typeof sale.taxPercentage === 'number' && Number.isFinite(sale.taxPercentage) ? sale.taxPercentage : null;
-  const derivedTaxPct = taxAmount > 0 && sale.subtotal > 0 ? (taxAmount / sale.subtotal) * 100 : 0;
-  const taxRate = storedTaxPct != null ? storedTaxPct : derivedTaxPct;
+  // Show the user's configured tax rate only (no recalculation). API may return taxPercentage as number or string (e.g. DECIMAL).
+  const rawPct = sale.taxPercentage;
+  const parsedPct = rawPct != null ? parseFloat(String(rawPct)) : NaN;
+  const taxRate = Number.isFinite(parsedPct) ? parsedPct : 0;
 
   // Format payment method
   const formatPaymentMethod = (method: string) => {
@@ -107,6 +106,11 @@ export function ReceiptScreen({
           .receipt-card {
             box-shadow: none;
             border: none;
+          }
+          .receipt-total-amount {
+            color: #000 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
         }
       `}</style>
@@ -245,7 +249,7 @@ export function ReceiptScreen({
                 {/* Grand Total */}
                 <div className="flex justify-between items-center pt-2 border-t border-gray-300 dark:border-gray-600">
                   <span className="text-[19px] font-extrabold text-gray-900 dark:text-white">TOTAL:</span>
-                  <span className="text-[19px] font-extrabold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-purple-400">
+                  <span className="receipt-total-amount text-[19px] font-extrabold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-purple-400">
                     ${sale.total.toFixed(2)}
                   </span>
                 </div>
