@@ -789,9 +789,13 @@ export const createSale = async (req, res) => {
       }))
     );
 
-    // Attempt Zoho sync if customer has zohoId
-    // IMPORTANT: We use customer.zohoId (the Zoho Books contact_id) to create invoices
-    const isZohoCustomer = customer && customer.zohoId && zohoContactType === 'customer';
+    // Attempt Zoho sync if customer has zohoId and is a customer (or we couldn't determine type)
+    // Only skip when we explicitly know the contact is not a customer (e.g. vendor)
+    const isVendorOrOther = zohoContactType && zohoContactType !== 'customer';
+    const isZohoCustomer = customer && customer.zohoId && !isVendorOrOther;
+    if (!isZohoCustomer && customer?.zohoId && isVendorOrOther) {
+      console.log(`ℹ️ Zoho sync skipped for sale: contact type "${zohoContactType}" is not a customer`);
+    }
     if (isZohoCustomer) {
       try {
         // For Zoho, ccFee is the credit card processing fee (if any)
