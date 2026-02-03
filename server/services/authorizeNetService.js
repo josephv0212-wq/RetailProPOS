@@ -579,6 +579,82 @@ export const searchCustomerProfileIteratively = async (name = null, email = null
 };
 
 /**
+ * Create an Authorize.Net CIM customer + payment profile from an existing transaction.
+ * This avoids handling raw card/bank data again by reusing the approved transaction.
+ * @param {Object} options
+ * @param {string} options.transactionId - Authorize.Net transaction ID (transId)
+ * @param {string} [options.email] - Customer email
+ * @param {string} [options.description] - Customer description (e.g., customer name)
+ * @param {string} [options.merchantCustomerId] - Merchant customer ID (we typically use Zoho customer id)
+ * @returns {Promise<{success: boolean, customerProfileId?: string, customerPaymentProfileId?: string, error?: string}>}
+ */
+export const createCustomerProfileFromTransaction = async (options) => {
+  const { transactionId, email, description, merchantCustomerId } = options || {};
+
+  if (!transactionId) {
+    return {
+      success: false,
+      error: 'transactionId is required to create customer profile from transaction'
+    };
+  }
+
+  // Authorize.Net CIM API uses XML format for this request
+  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<createCustomerProfileFromTransactionRequest xmlns="AnetApi/xml/v1/schema/AnetApiSchema.xsd">
+  <merchantAuthentication>
+    <name>${process.env.AUTHORIZE_NET_API_LOGIN_ID}</name>
+    <transactionKey>${process.env.AUTHORIZE_NET_TRANSACTION_KEY}</transactionKey>
+  </merchantAuthentication>
+  <transId>${transactionId}</transId>
+  <customer>
+    ${email ? `<email>${email}</email>` : ''}
+    ${description ? `<description>${description}</description>` : ''}
+    ${merchantCustomerId ? `<merchantCustomerId>${merchantCustomerId}</merchantCustomerId>` : ''}
+  </customer>
+</createCustomerProfileFromTransactionRequest>`;
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, xmlBody, {
+      headers: {
+        'Content-Type': 'text/xml'
+      }
+    });
+
+    const result = await parseStringPromise(response.data);
+    const root = result.createCustomerProfileFromTransactionResponse;
+    const messages = root?.messages?.[0];
+    const resultCode = messages?.resultCode?.[0];
+
+    if (resultCode === 'Ok') {
+      const customerProfileId = root?.customerProfileId?.[0] || null;
+      const numericStrings = root?.customerPaymentProfileIdList?.[0]?.numericString || [];
+      const paymentProfileId = Array.isArray(numericStrings) ? numericStrings[0] : numericStrings || null;
+
+      return {
+        success: true,
+        customerProfileId: customerProfileId || undefined,
+        customerPaymentProfileId: paymentProfileId || undefined
+      };
+    }
+
+    const errorText = messages?.message?.[0]?.text?.[0] || 'Failed to create customer profile from transaction';
+    return {
+      success: false,
+      error: errorText
+    };
+  } catch (error) {
+    console.error('Create Customer Profile From Transaction Error:', error.message);
+    if (error.response?.data) {
+      console.error('Response data:', error.response.data);
+    }
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message
+    };
+  }
+};
+
+/**
  * Extract bank account information from Authorize.net customer profile
  * Handles deeply nested XML array structure: paymentProfiles[].payment[].bankAccount[].accountNumber[]
  * @param {Object} profile - Authorize.net customer profile
@@ -725,6 +801,27 @@ export const chargeCustomerProfile = async (paymentData) => {
       }
     }
   };
+
+  // #region agent log
+  fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 'debug-session',
+      runId: 'pre-fix',
+      hypothesisId: 'H6',
+      location: 'server/services/authorizeNetService.js:chargeCustomerProfile:request',
+      message: 'Authorize.Net chargeCustomerProfile request summary',
+      data: {
+        customerProfileId: customerProfileId?.toString?.().slice(0, 8) || null,
+        customerPaymentProfileId: customerPaymentProfileId?.toString?.().slice(0, 8) || null,
+        amount: parseFloat(amount),
+        invoiceNumber: invoiceNumber || null
+      },
+      timestamp: Date.now()
+    })
+  }).catch(() => {});
+  // #endregion
 
   try {
     const response = await axios.post(AUTHORIZE_NET_ENDPOINT, requestBody, {

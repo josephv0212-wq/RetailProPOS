@@ -66,6 +66,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const [selectedPaymentProfileId, setSelectedPaymentProfileId] = useState<string | null>(null);
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [loadingPaymentProfiles, setLoadingPaymentProfiles] = useState(false);
+  const [savePaymentMethod, setSavePaymentMethod] = useState(false);
 
   // Load Accept.js on mount
   useEffect(() => {
@@ -155,7 +156,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const isCreditCardPayment = selectedMethod === 'credit_card' || 
     (selectedMethod === 'stored_payment' && selectedPaymentProfileId && 
      paymentProfiles.find((p: any) => p.paymentProfileId === selectedPaymentProfileId)?.type === 'credit_card');
-  const convenienceFee = isCreditCardPayment ? total * 0.03 : 0;
+  // Only apply 3% surcharge on normal POS sales (not invoice/sales-order payments).
+  const convenienceFee = context === 'sale' && isCreditCardPayment ? total * 0.03 : 0;
   const finalTotal = total + convenienceFee;
 
   if (!isOpen) return null;
@@ -163,6 +165,30 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const handleConfirmPayment = async () => {
     setError('');
     setIsProcessing(true);
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H7',
+        location: 'client/src/app/components/PaymentModal.tsx:handleConfirmPayment:entry',
+        message: 'PaymentModal handleConfirmPayment entry',
+        data: {
+          selectedMethod,
+          cardPaymentMethod,
+          cardReaderMode,
+          finalTotal,
+          context,
+          hasCustomerId: !!customerId,
+          hasSelectedPaymentProfileId: !!selectedPaymentProfileId
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {});
+    // #endregion
 
     // Standalone mode: Skip payment processing, just record the sale
     if (cardReaderMode === 'standalone' && (selectedMethod === 'credit_card' || selectedMethod === 'debit_card')) {
@@ -246,6 +272,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     const paymentDetails: PaymentDetails = {
       method: paymentMethod,
       amount: finalTotal,
+      savePaymentMethod: savePaymentMethod && !!customerId,
     };
 
     if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
@@ -850,6 +877,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                     </div>
                   </div>
                 )}
+
+                {/* Save payment method option (only when a customer is selected and not in Zoho docs mode) */}
+                {context === 'sale' && customerId && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <input
+                      id="save-payment-method"
+                      type="checkbox"
+                      checked={savePaymentMethod}
+                      onChange={(e) => setSavePaymentMethod(e.target.checked)}
+                      className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    />
+                    <label
+                      htmlFor="save-payment-method"
+                      className="text-xs text-gray-700 dark:text-gray-300"
+                    >
+                      Save this payment method to customer for future use
+                    </label>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1038,6 +1084,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                         />
                       </div>
                     </div>
+
+                    {/* Save ACH payment method option (only when a customer is selected and not in Zoho docs mode) */}
+                    {context === 'sale' && customerId && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          id="save-ach-payment-method"
+                          type="checkbox"
+                          checked={savePaymentMethod}
+                          onChange={(e) => setSavePaymentMethod(e.target.checked)}
+                          className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        />
+                        <label
+                          htmlFor="save-ach-payment-method"
+                          className="text-xs text-gray-700 dark:text-gray-300"
+                        >
+                          Save this bank account to customer for future use
+                        </label>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

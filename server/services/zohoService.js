@@ -466,6 +466,33 @@ export const createSalesReceipt = async (saleData) => {
     notes: notes || `Sale from POS - Location: ${locationName || locationId || 'Unknown'}`
   };
 
+  // #region agent log
+  fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 'debug-session',
+      runId: 'pre-fix',
+      hypothesisId: 'H4',
+      location: 'server/services/zohoService.js:createSalesReceipt:payload',
+      message: 'Zoho createSalesReceipt payload summary',
+      data: {
+        saleId,
+        customerId,
+        paymentMode,
+        expectedTotal,
+        taxAmount,
+        processingFee,
+        lineItemsCount: safeLineItems.length,
+        locationId: resolvedLocationId,
+        placeOfContact,
+        hasZohoTaxId: !!zohoTaxId
+      },
+      timestamp: Date.now()
+    })
+  }).catch(() => {});
+  // #endregion
+
   // Zoho Books: associate the receipt with a specific location (if locations feature is enabled)
   if (resolvedLocationId && String(resolvedLocationId).trim() !== '') {
     salesReceiptData.location_id = String(resolvedLocationId).trim();
@@ -1031,6 +1058,28 @@ export const getZohoTaxIdForPercentage = async (taxPercentage) => {
 
   const active = matches.find(t => t?.isActive);
   const chosen = active || matches[0];
+
+  // #region agent log
+  fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 'debug-session',
+      runId: 'pre-fix',
+      hypothesisId: 'H5',
+      location: 'server/services/zohoService.js:getZohoTaxIdForPercentage',
+      message: 'Zoho taxId resolved for percentage',
+      data: {
+        requestedPct: pct,
+        taxesCount: Array.isArray(taxes) ? taxes.length : null,
+        matchesCount: matches.length,
+        chosenTaxId: chosen?.taxId || null
+      },
+      timestamp: Date.now()
+    })
+  }).catch(() => {});
+  // #endregion
+
   return chosen?.taxId || null;
 };
 

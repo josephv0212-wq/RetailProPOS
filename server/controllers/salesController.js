@@ -1,10 +1,27 @@
 import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer } from '../models/index.js';
 import { sequelize } from '../config/db.js';
-import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
+import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
 import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
+
+// Authorize.Net invoiceNumber has strict limits (max 20 chars). Zoho document numbers can exceed this.
+// Normalize to a safe, short identifier while keeping type prefix + uniqueness.
+const normalizeAuthorizeNetInvoiceNumber = ({ type, number, id }) => {
+  const prefix = type === 'salesorder' ? 'SO' : 'INV';
+  const raw = `${number ?? ''}`;
+  // Allow only simple characters to avoid gateway validation errors.
+  const cleaned = raw.trim().replace(/[^A-Za-z0-9\-_]/g, '');
+  const fallback = `${prefix}-${Date.now()}`;
+  const keepPrefix = `${prefix}-`;
+  const maxLen = 20;
+  const tailLen = maxLen - keepPrefix.length;
+  const tailSource = (cleaned && cleaned.length > 0 ? cleaned : `${id ?? ''}`.replace(/[^A-Za-z0-9]/g, '')) || fallback;
+  const tail = tailSource.length > tailLen ? tailSource.slice(-tailLen) : tailSource;
+  const out = `${keepPrefix}${tail}`;
+  return out.length > maxLen ? out.slice(0, maxLen) : out;
+};
 
 // Best-effort loader for legacy "transactions" SQLite tables.
 // This keeps the Reports > Transactions tab working when older installs stored history
@@ -187,7 +204,10 @@ export const createSale = async (req, res) => {
       paymentProfileId, 
       terminalNumber, 
       valorTransactionId, 
-      useStandaloneMode 
+      useStandaloneMode,
+      // When true (or when paymentDetails.savePaymentMethod is true), we will create/update
+      // an Authorize.Net CIM profile for the customer using the successful transaction.
+      savePaymentMethod 
     } = req.body;
     let paymentType = requestPaymentType;
     
@@ -196,6 +216,32 @@ export const createSale = async (req, res) => {
     const userId = req.user.id;
     const locationId = req.user.locationId;
     const locationName = req.user.locationName;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H1',
+        location: 'server/controllers/salesController.js:createSale:entry',
+        message: 'createSale entry',
+        data: {
+          requestPaymentType,
+          useValorApi,
+          useOpaqueData,
+          useBluetoothReader,
+          useStoredPayment,
+          itemsCount: Array.isArray(items) ? items.length : null,
+          userId,
+          locationId,
+          isStandaloneMode
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {});
+    // #endregion
     
     // Check if customer is tax exempt
     const isTaxExempt = customerTaxPreference === 'SALES TAX EXCEPTION CERTIFICATE';
@@ -361,6 +407,30 @@ export const createSale = async (req, res) => {
       : 0;
 
     const total = baseTotal + cardProcessingFee;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H2',
+        location: 'server/controllers/salesController.js:createSale:totals',
+        message: 'createSale totals computed',
+        data: {
+          subtotal,
+          taxAmount,
+          baseTotal,
+          cardProcessingFee,
+          total,
+          actualPaymentType,
+          isStandaloneMode
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {});
+    // #endregion
 
     let transactionId = null;
     let paymentResult = null;
@@ -602,6 +672,87 @@ export const createSale = async (req, res) => {
       };
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H3',
+        location: 'server/controllers/salesController.js:createSale:paymentResult',
+        message: 'createSale payment result summary',
+        data: {
+          paymentType,
+          transactionId,
+          hasPaymentResult: !!paymentResult,
+          paymentSuccess: paymentResult?.success ?? null,
+          paymentError: paymentResult?.error || null,
+          flags: {
+            useValorApi,
+            useOpaqueData,
+            useBluetoothReader,
+            useStoredPayment,
+            isStandaloneMode,
+            savePaymentMethod: savePaymentMethod === true || paymentDetails?.savePaymentMethod === true
+          }
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {});
+    // #endregion
+
+    // Optionally save payment method in Authorize.Net CIM when a customer is present and
+    // we processed the payment directly through Authorize.Net (not Valor/terminal/standalone).
+    const shouldSavePaymentMethod =
+      !!customer &&
+      !!transactionId &&
+      (paymentType === 'credit_card' || paymentType === 'debit_card' || paymentType === 'ach') &&
+      !useValorApi &&
+      !useStoredPayment &&
+      !isStandaloneMode &&
+      (savePaymentMethod === true || paymentDetails?.savePaymentMethod === true);
+
+    if (shouldSavePaymentMethod) {
+      try {
+        const profileResult = await createCustomerProfileFromTransaction({
+          transactionId,
+          email: customer.email || null,
+          description: customer.contactName || null,
+          merchantCustomerId: customer.zohoId || String(customer.id)
+        });
+
+        if (profileResult.success && profileResult.customerProfileId && profileResult.customerPaymentProfileId) {
+          // Update customer record with CIM identifiers and masked account info (last4 only).
+          const masked = paymentResult?.accountNumber || '';
+          const digits = typeof masked === 'string' ? masked.replace(/\D/g, '') : '';
+          const last4 = digits.length >= 4 ? digits.slice(-4) : null;
+
+          const updates = {
+            customerProfileId: profileResult.customerProfileId.toString(),
+            customerPaymentProfileId: profileResult.customerPaymentProfileId.toString(),
+            hasPaymentMethod: true,
+            paymentMethodType: paymentType
+          };
+
+          if (paymentType === 'credit_card' || paymentType === 'debit_card') {
+            if (last4) {
+              updates.last_four_digits = last4;
+            }
+          } else if (paymentType === 'ach') {
+            if (last4) {
+              updates.bankAccountLast4 = last4;
+            }
+          }
+
+          await customer.update(updates);
+        }
+      } catch (saveErr) {
+        // Never fail the sale if saving to CIM fails.
+        console.warn(`⚠️ Failed to save payment method to Authorize.Net CIM for customer ${customer.id}:`, saveErr.message);
+      }
+    }
+
     // Warn if customer has no Zoho ID (for production error tracking)
     if (customer && !customer.zohoId) {
       console.warn(`⚠️ Customer "${customer.contactName}" has no Zoho ID. Invoice will not be created in Zoho Books.`);
@@ -663,6 +814,27 @@ export const createSale = async (req, res) => {
           zohoTaxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null,
           saleId: sale.id
         });
+
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: 'debug-session',
+            runId: 'pre-fix',
+            hypothesisId: 'H4',
+            location: 'server/controllers/salesController.js:createSale:zohoResult',
+            message: 'Zoho sales receipt result from createSale',
+            data: {
+              saleId: sale.id,
+              zohoSuccess: zohoResult?.success ?? null,
+              zohoSalesReceiptId: zohoResult?.salesReceiptId || null,
+              zohoError: zohoResult?.error || null
+            },
+            timestamp: Date.now()
+          })
+        }).catch(() => {});
+        // #endregion
 
         if (zohoResult.success) {
           await sale.update({
@@ -1303,7 +1475,7 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       }
 
       try {
-        const invoiceNumber = type === 'invoice' ? number : `SO-${number}`;
+        const invoiceNumber = normalizeAuthorizeNetInvoiceNumber({ type, number, id });
         const description = type === 'invoice' 
           ? `Invoice Payment: ${number}`
           : `Sales Order Payment: ${number}`;

@@ -355,22 +355,54 @@ function AppContent() {
 
       const isDryIce = isDryIceItem(product.name);
       const itemNameLower = product.name.toLowerCase();
-      const isOnlineDryIce = itemNameLower.includes('online dry ice block') || 
-                            itemNameLower.includes('online dry ice pellets');
-      const isDryIcePellets = isDryIce && !isOnlineDryIce && itemNameLower.includes('dry ice pellets');
-      const isDryIceBlasting = isDryIce && !isOnlineDryIce && itemNameLower.includes('dry ice blasting');
+      const isOnlineDryIce =
+        itemNameLower.includes('online dry ice block') ||
+        itemNameLower.includes('online dry ice pellets');
+      const isDryIcePellets =
+        isDryIce && !isOnlineDryIce && itemNameLower.includes('dry ice pellets');
+      const isDryIceBlasting =
+        isDryIce && !isOnlineDryIce && itemNameLower.includes('dry ice blasting');
 
-      if (isDryIce && !isOnlineDryIce) {
-        // For dry ice items, use units from backend with basicUM='lb' or unitName='lb'
+      // 1) Always prefer item-specific unit assignments (admin-configured) for ALL items,
+      //    including dry ice. This ensures admin control over which UMs appear per item.
+      try {
+        const unitsResponse = await itemUnitsAPI.getItemUnits(product.id);
+        if (unitsResponse.success && unitsResponse.data?.units && unitsResponse.data.units.length > 0) {
+          availableUnits = unitsResponse.data.units as UnitOfMeasureOption[];
+
+          // Prefer unit that matches the item's default unit field first
+          const matchByItemUnit = product.unit
+            ? availableUnits.find(u => (u.symbol || u.unitName) === product.unit)
+            : undefined;
+
+          // Then prefer one flagged as default in the join table
+          const matchByFlag = availableUnits.find(u => u.ItemUnitOfMeasure?.isDefault);
+
+          const defaultUnit =
+            matchByItemUnit || matchByFlag || availableUnits[0];
+
+          if (defaultUnit) {
+            selectedUM = defaultUnit.symbol || defaultUnit.unitName;
+          }
+        }
+      } catch (err) {
+        logger.error('Failed to load item units', err);
+      }
+
+      // 2) Backward-compatible fallback: if no item-specific units exist AND this is a dry ice
+      //    item, fall back to the legacy allUnits-based dry ice list so older databases still work.
+      if (!availableUnits && isDryIce && !isOnlineDryIce) {
         const dryIceUnits = allUnits.filter(unit => {
           // Include 'lb' (basicUM=null) and units with basicUM='lb'
           if (unit.unitName === 'lb' || unit.basicUM === 'lb') {
             // Filter based on item type
             if (isDryIcePellets) {
               // Dry ice pellets: lb, Bin 500 lb, and Bag 50 lb
-              return unit.unitName === 'lb' || 
-                     unit.unitName === 'Bin 500 lb' || 
-                     unit.unitName === 'Bag 50 lb';
+              return (
+                unit.unitName === 'lb' ||
+                unit.unitName === 'Bin 500 lb' ||
+                unit.unitName === 'Bag 50 lb'
+              );
             } else if (isDryIceBlasting) {
               // Dry ice blasting: only lb and Bin 500 lb
               return unit.unitName === 'lb' || unit.unitName === 'Bin 500 lb';
@@ -381,37 +413,14 @@ function AppContent() {
           }
           return false;
         });
-        
+
         if (dryIceUnits.length > 0) {
           availableUnits = dryIceUnits;
           // Default to 'lb'
           const lbUnit = dryIceUnits.find(u => u.unitName === 'lb');
-          selectedUM = lbUnit ? (lbUnit.symbol || lbUnit.unitName) : (dryIceUnits[0].symbol || dryIceUnits[0].unitName);
-        }
-      } else {
-        // For non-dry-ice items, load units from itemUnitsAPI
-        try {
-          const unitsResponse = await itemUnitsAPI.getItemUnits(product.id);
-          if (unitsResponse.success && unitsResponse.data?.units && unitsResponse.data.units.length > 0) {
-            availableUnits = unitsResponse.data.units as UnitOfMeasureOption[];
-
-            // Prefer unit that matches the item's default unit field first
-            const matchByItemUnit = product.unit
-              ? availableUnits.find(u => (u.symbol || u.unitName) === product.unit)
-              : undefined;
-
-            // Then prefer one flagged as default in the join table
-            const matchByFlag = availableUnits.find(u => u.ItemUnitOfMeasure?.isDefault);
-
-            const defaultUnit =
-              matchByItemUnit || matchByFlag || availableUnits[0];
-
-            if (defaultUnit) {
-              selectedUM = defaultUnit.symbol || defaultUnit.unitName;
-            }
-          }
-        } catch (err) {
-          logger.error('Failed to load item units', err);
+          selectedUM = lbUnit
+            ? lbUnit.symbol || lbUnit.unitName
+            : dryIceUnits[0].symbol || dryIceUnits[0].unitName;
         }
       }
 

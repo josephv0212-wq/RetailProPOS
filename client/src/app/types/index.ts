@@ -120,6 +120,9 @@ export interface PaymentDetails {
   expirationDate?: string;
   cvv?: string;
   zip?: string;
+  // When true, backend will attempt to save this payment method
+  // to Authorize.Net CIM for future "stored payment" use.
+  savePaymentMethod?: boolean;
 }
 
 export interface SaleItem {
