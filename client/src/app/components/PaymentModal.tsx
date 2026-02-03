@@ -878,8 +878,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   </div>
                 )}
 
-                {/* Save payment method option (only when a customer is selected and not in Zoho docs mode) */}
-                {context === 'sale' && customerId && (
+                {/* Save payment method option only when customer is selected and user is entering CC/DC manually (not via terminal) */}
+                {context === 'sale' && customerId && cardPaymentMethod === 'manual' && (
                   <div className="flex items-center gap-2 mt-2">
                     <input
                       id="save-payment-method"

@@ -56,7 +56,11 @@ export function ReceiptScreen({
   // Get processing fee from sale object (already calculated and included in total)
   const processingFee = sale.ccFee || 0;
   const taxAmount = sale.tax ?? sale.taxAmount ?? 0;
-  const taxRate = taxAmount > 0 ? ((taxAmount / sale.subtotal) * 100) : 0;
+  // Use the stored tax percentage from the sale (Zoho/user rate: e.g. 6.5%, 7%) so the receipt
+  // shows the actual configured rate. Only derive from tax/subtotal when taxPercentage is missing (e.g. legacy data).
+  const storedTaxPct = typeof sale.taxPercentage === 'number' && Number.isFinite(sale.taxPercentage) ? sale.taxPercentage : null;
+  const derivedTaxPct = taxAmount > 0 && sale.subtotal > 0 ? (taxAmount / sale.subtotal) * 100 : 0;
+  const taxRate = storedTaxPct != null ? storedTaxPct : derivedTaxPct;
 
   // Format payment method
   const formatPaymentMethod = (method: string) => {
