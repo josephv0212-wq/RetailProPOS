@@ -156,8 +156,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
   const isCreditCardPayment = selectedMethod === 'credit_card' || 
     (selectedMethod === 'stored_payment' && selectedPaymentProfileId && 
      paymentProfiles.find((p: any) => p.paymentProfileId === selectedPaymentProfileId)?.type === 'credit_card');
-  // Only apply 3% surcharge on normal POS sales (not invoice/sales-order payments).
-  const convenienceFee = context === 'sale' && isCreditCardPayment ? total * 0.03 : 0;
+  // Apply 3% surcharge for credit card on both normal POS sales and invoice/sales-order POS payments.
+  const convenienceFee = (context === 'sale' || context === 'zohoDocuments') && isCreditCardPayment ? total * 0.03 : 0;
   const finalTotal = total + convenienceFee;
 
   if (!isOpen) return null;

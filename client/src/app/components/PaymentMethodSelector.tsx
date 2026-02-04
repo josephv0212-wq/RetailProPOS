@@ -16,10 +16,12 @@ interface PaymentProfile {
 interface PaymentMethodSelectorProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (paymentProfileId: string) => void;
+  onSelect: (paymentProfileId: string, profileType?: 'credit_card' | 'ach') => void;
   customerId: number;
   customerName: string;
   loading?: boolean;
+  /** When set (e.g. invoice/sales order charge), show subtotal + 3% CC surcharge when a credit card is selected */
+  totalAmount?: number;
 }
 
 export function PaymentMethodSelector({
@@ -29,6 +31,7 @@ export function PaymentMethodSelector({
   customerId,
   customerName,
   loading: externalLoading = false,
+  totalAmount,
 }: PaymentMethodSelectorProps) {
   const [paymentProfiles, setPaymentProfiles] = useState<PaymentProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -67,9 +70,17 @@ export function PaymentMethodSelector({
     }
   };
 
+  const selectedProfile = selectedProfileId
+    ? paymentProfiles.find((p) => p.paymentProfileId === selectedProfileId)
+    : null;
+  const isCreditCard = selectedProfile?.type === 'credit_card';
+  const showTotals = totalAmount != null && totalAmount > 0;
+  const ccSurcharge = showTotals && isCreditCard ? Math.round(totalAmount * 0.03 * 100) / 100 : 0;
+  const totalWithFee = showTotals ? totalAmount + ccSurcharge : 0;
+
   const handleSelect = () => {
-    if (selectedProfileId) {
-      onSelect(selectedProfileId);
+    if (selectedProfileId && selectedProfile) {
+      onSelect(selectedProfileId, selectedProfile.type);
       onClose();
     }
   };
@@ -204,6 +215,28 @@ export function PaymentMethodSelector({
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* Totals (invoice/sales order): show subtotal + 3% CC surcharge when credit card selected */}
+          {showTotals && hasProfiles && (
+            <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
+                <span className="font-medium text-gray-900 dark:text-white">${totalAmount.toFixed(2)}</span>
+              </div>
+              {isCreditCard && ccSurcharge > 0 && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">Credit Card Surcharge 3%</span>
+                    <span className="font-medium text-gray-900 dark:text-white">${ccSurcharge.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-600">
+                <span className="font-semibold text-gray-900 dark:text-white">Total</span>
+                <span className="font-semibold text-gray-900 dark:text-white">${totalWithFee.toFixed(2)}</span>
+              </div>
             </div>
           )}
         </div>

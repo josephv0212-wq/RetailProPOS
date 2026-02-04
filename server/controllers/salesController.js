@@ -1245,7 +1245,8 @@ export const getSyncStatus = async (req, res) => {
 export const chargeInvoicesSalesOrders = async (req, res) => {
   try {
     const { customerId, items, paymentProfileId, paymentType: requestPaymentType } = req.body;
-    const paymentType = (requestPaymentType && String(requestPaymentType).toLowerCase() === 'debit_card') ? 'debit_card' : 'credit_card';
+    const raw = requestPaymentType && String(requestPaymentType).toLowerCase();
+    const paymentType = raw === 'debit_card' ? 'debit_card' : raw === 'ach' ? 'ach' : 'credit_card';
 
     if (!customerId) {
       return sendValidationError(res, 'Customer ID is required');
@@ -1380,14 +1381,20 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
 
       try {
         const invoiceNumber = normalizeAuthorizeNetInvoiceNumber({ type, number, id });
-        const description = type === 'invoice' 
+        const description = type === 'invoice'
           ? `Invoice Payment: ${number}`
           : `Sales Order Payment: ${number}`;
+
+        const originalAmount = parseFloat(amount);
+        const isCreditCard = paymentType === 'credit_card';
+        const chargeAmount = isCreditCard
+          ? Math.round(originalAmount * 1.03 * 100) / 100
+          : originalAmount;
 
         const chargeResult = await chargeCustomerProfile({
           customerProfileId,
           customerPaymentProfileId,
-          amount: parseFloat(amount),
+          amount: chargeAmount,
           invoiceNumber,
           description
         });
@@ -1402,14 +1409,15 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
               zohoPaymentError = 'Customer has no Zoho ID. Sync customers from Zoho to record payment in Zoho Books.';
               console.warn(`⚠️ Zoho: skipping payment for invoice ${number}: ${zohoPaymentError}`);
             } else {
-              const zohoPaymentMode = paymentType === 'debit_card' ? 'debitcard' : 'creditcard';
+              const zohoPaymentMode = paymentType === 'ach' ? 'banktransfer' : paymentType === 'debit_card' ? 'debitcard' : 'creditcard';
+              const paymentLabel = paymentType === 'ach' ? 'ACH' : paymentType === 'debit_card' ? 'Debit card' : 'Credit card';
               const zohoPaymentResult = await createCustomerPayment({
                 customerId: zohoCustomerId,
                 invoiceId: String(id).trim(),
                 amount: parseFloat(amount),
                 paymentMode: zohoPaymentMode,
                 referenceNumber: chargeResult.transactionId || undefined,
-                description: `Invoice ${number} - POS payment (${paymentType === 'debit_card' ? 'Debit' : 'Credit'} card)`
+                description: `Invoice ${number} - POS payment (${paymentLabel})`
               });
               if (zohoPaymentResult.success) {
                 zohoPaymentRecorded = true;
@@ -1424,7 +1432,9 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
             type,
             id,
             number,
-            amount: parseFloat(amount),
+            amount: originalAmount,
+            amountCharged: chargeAmount,
+            ccFee: isCreditCard ? Math.round((chargeAmount - originalAmount) * 100) / 100 : 0,
             transactionId: chargeResult.transactionId,
             authCode: chargeResult.authCode,
             message: chargeResult.message,

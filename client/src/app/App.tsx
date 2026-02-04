@@ -20,6 +20,7 @@ import { Customer, Product, CartItem, PaymentDetails, Sale, UnitOfMeasureOption 
 import { itemsAPI, customersAPI, salesAPI, zohoAPI, itemUnitsAPI, unitsAPI } from '../services/api';
 import { SalesOrderInvoiceModal } from './components/SalesOrderInvoiceModal';
 import { PaymentMethodSelector } from './components/PaymentMethodSelector';
+import { InvoicePaymentReceiptPreview } from './components/InvoicePaymentReceiptPreview';
 import { ZohoPaymentOptionsModal } from './components/ZohoPaymentOptionsModal';
 import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
@@ -86,6 +87,8 @@ function AppContent() {
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [pendingChargeItems, setPendingChargeItems] = useState<any[]>([]);
+  const [isInvoicePaymentReceiptPreviewOpen, setIsInvoicePaymentReceiptPreviewOpen] = useState(false);
+  const [pendingStoredPaymentSelection, setPendingStoredPaymentSelection] = useState<{ paymentProfileId: string; profileType: 'credit_card' | 'ach' } | null>(null);
   const [isZohoPaymentOptionsOpen, setIsZohoPaymentOptionsOpen] = useState(false);
   const [isZohoDocsPaymentModalOpen, setIsZohoDocsPaymentModalOpen] = useState(false);
   const [zohoDocsCartItems, setZohoDocsCartItems] = useState<CartItem[]>([]);
@@ -544,10 +547,10 @@ function AppContent() {
 
   const handleConfirmZohoDocsPayment = async (paymentDetails: PaymentDetails): Promise<any> => {
     const count = pendingChargeItems.length;
-    const totalAmount = (pendingChargeItems || []).reduce((sum, it: any) => sum + (Number(it.amount) || 0), 0);
+    const amountCharged = Number(paymentDetails.amount) ?? (pendingChargeItems || []).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
 
     showToast(
-      `Payment completed for ${count} document${count !== 1 ? 's' : ''} ($${totalAmount.toFixed(2)}) via ${paymentDetails.method.toUpperCase()}.`,
+      `Payment completed for ${count} document${count !== 1 ? 's' : ''} ($${amountCharged.toFixed(2)}) via ${paymentDetails.method?.toUpperCase() ?? 'POS'}.`,
       'success',
       6000
     );
@@ -558,21 +561,33 @@ function AppContent() {
     return { success: true };
   };
 
-  // Handle payment method selection and charge
-  const handlePaymentMethodSelected = async (paymentProfileId: string) => {
+  // Open receipt preview when user selects a stored payment method (before charging)
+  const handleOpenReceiptPreview = (paymentProfileId: string, profileType?: 'credit_card' | 'ach') => {
+    setPendingStoredPaymentSelection({
+      paymentProfileId,
+      profileType: profileType === 'ach' ? 'ach' : 'credit_card',
+    });
+    setIsPaymentMethodSelectorOpen(false);
+    setIsInvoicePaymentReceiptPreviewOpen(true);
+  };
+
+  // Handle payment method selection and charge (called from receipt preview "Confirm & Pay")
+  const handlePaymentMethodSelected = async (paymentProfileId: string, profileType?: 'credit_card' | 'ach') => {
     if (!selectedCustomer || !selectedCustomer.id || pendingChargeItems.length === 0) {
       return;
     }
 
     try {
-      // Show loading state
       setLoadingOrders(true);
       setIsPaymentMethodSelectorOpen(false);
 
-      // Charge invoices/sales orders via Authorize.net CIM
+      const paymentType = profileType === 'ach' ? 'ach' : 'credit_card';
+
+      // Charge invoices/sales orders via Authorize.net CIM (backend adds 3% CC fee when paymentType is credit_card)
       const response = await salesAPI.chargeInvoicesSalesOrders({
         customerId: selectedCustomer.id,
         paymentProfileId,
+        paymentType,
         items: pendingChargeItems
       });
 
@@ -1256,7 +1271,7 @@ function AppContent() {
         />
       )}
 
-      {/* Payment Method Selector Modal */}
+      {/* Payment Method Selector Modal - selecting a method opens receipt preview first */}
       {selectedCustomer && (
         <PaymentMethodSelector
           isOpen={isPaymentMethodSelectorOpen}
@@ -1264,9 +1279,40 @@ function AppContent() {
             setIsPaymentMethodSelectorOpen(false);
             setPendingChargeItems([]);
           }}
-          onSelect={handlePaymentMethodSelected}
+          onSelect={handleOpenReceiptPreview}
           customerId={selectedCustomer.id}
           customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
+          loading={loadingOrders}
+          totalAmount={pendingChargeItems.length > 0 ? (pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) : undefined}
+        />
+      )}
+
+      {/* Invoice/Sales Order payment receipt preview - confirm before charging stored payment */}
+      {selectedCustomer && pendingStoredPaymentSelection && pendingChargeItems.length > 0 && (
+        <InvoicePaymentReceiptPreview
+          isOpen={isInvoicePaymentReceiptPreviewOpen}
+          onClose={() => {
+            setIsInvoicePaymentReceiptPreviewOpen(false);
+            setPendingStoredPaymentSelection(null);
+          }}
+          storeName={constants.STORE_NAME}
+          customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
+          items={pendingChargeItems.map((it: any) => ({
+            type: it.type === 'invoice' ? 'invoice' : 'sales_order',
+            id: String(it.id),
+            number: it.number || it.id,
+            amount: Number(it.amount) || 0,
+          }))}
+          paymentMethodLabel={pendingStoredPaymentSelection.profileType === 'ach' ? 'ACH / Bank Account' : 'Credit Card'}
+          subtotal={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0)}
+          ccSurcharge={pendingStoredPaymentSelection.profileType === 'credit_card' ? Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100 : 0}
+          totalWithFee={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) + (pendingStoredPaymentSelection.profileType === 'credit_card' ? Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100 : 0)}
+          onConfirmPay={async () => {
+            if (!pendingStoredPaymentSelection) return;
+            await handlePaymentMethodSelected(pendingStoredPaymentSelection.paymentProfileId, pendingStoredPaymentSelection.profileType);
+            setPendingStoredPaymentSelection(null);
+            setIsInvoicePaymentReceiptPreviewOpen(false);
+          }}
           loading={loadingOrders}
         />
       )}
