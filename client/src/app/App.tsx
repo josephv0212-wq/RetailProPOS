@@ -690,7 +690,7 @@ function AppContent() {
               price: Number(r.amount) || 0,
               taxPercentage: 0,
               taxAmount: 0,
-              lineTotal: (Number(r.amountCharged) ?? Number(r.amount)) || 0,
+              lineTotal: ((Number(r.amountCharged) ?? Number(r.amount)) || 0),
             })),
             customer: selectedCustomer,
             payment: {
