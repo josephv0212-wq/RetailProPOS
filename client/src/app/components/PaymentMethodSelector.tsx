@@ -81,7 +81,7 @@ export function PaymentMethodSelector({
   const handleSelect = () => {
     if (selectedProfileId && selectedProfile) {
       onSelect(selectedProfileId, selectedProfile.type);
-      onClose();
+      // Parent closes selector and opens receipt preview; do not call onClose() here so parent does not clear pendingChargeItems
     }
   };
 

@@ -1279,7 +1279,10 @@ function AppContent() {
             setIsPaymentMethodSelectorOpen(false);
             setPendingChargeItems([]);
           }}
-          onSelect={handleOpenReceiptPreview}
+          onSelect={(profileId, profileType) => {
+            handleOpenReceiptPreview(profileId, profileType);
+            setIsPaymentMethodSelectorOpen(false);
+          }}
           customerId={selectedCustomer.id}
           customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
           loading={loadingOrders}
@@ -1294,6 +1297,7 @@ function AppContent() {
           onClose={() => {
             setIsInvoicePaymentReceiptPreviewOpen(false);
             setPendingStoredPaymentSelection(null);
+            setPendingChargeItems([]);
           }}
           storeName={constants.STORE_NAME}
           customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
