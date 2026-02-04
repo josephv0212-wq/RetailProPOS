@@ -757,12 +757,14 @@ function AppContent() {
         const card_info_checked = priceListRes.data?.card_info_checked;
         const bank_account_last4 = priceListRes.data?.bank_account_last4;
         
-        // Update customer object with card info and bank account info
+        // Update customer object with card info, bank account info, and tax exemption from Zoho
+        const isTaxExemptFromZoho = taxPreference === 'SALES TAX EXCEPTION CERTIFICATE';
         const updatedCustomer: Customer = {
           ...customer,
           last_four_digits: last_four_digits || customer.last_four_digits,
           cardBrand: card_type || customer.cardBrand,
           bankAccountLast4: bank_account_last4 || customer.bankAccountLast4,
+          taxExempt: isTaxExemptFromZoho,
           paymentInfo: {
             ...customer.paymentInfo,
             cardBrand: card_type || customer.cardBrand,

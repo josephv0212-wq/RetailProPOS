@@ -45,8 +45,24 @@ export function SalesOrderInvoiceModal({
 
   if (!isOpen) return null;
 
+  // Zoho returns date as YYYY-MM-DD (date-only). Parsing with new Date(str) treats it as
+  // UTC midnight, which can show the previous day in timezones behind UTC. Parse as local date.
   const formatDate = (dateString: string) => {
+    if (!dateString) return dateString;
     try {
+      const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateString).trim());
+      if (match) {
+        const [, y, m, d] = match;
+        const year = parseInt(y!, 10);
+        const month = parseInt(m!, 10) - 1;
+        const day = parseInt(d!, 10);
+        const date = new Date(year, month, day);
+        return date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        });
+      }
       const date = new Date(dateString);
       return date.toLocaleDateString('en-US', {
         year: 'numeric',

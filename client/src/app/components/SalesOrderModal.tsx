@@ -27,8 +27,20 @@ export function SalesOrderModal({
 }: SalesOrderModalProps) {
   if (!isOpen) return null;
 
+  // Zoho date is YYYY-MM-DD; parse as local date to avoid timezone off-by-one
   const formatDate = (dateString: string) => {
+    if (!dateString) return dateString;
     try {
+      const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateString).trim());
+      if (match) {
+        const [, y, m, d] = match;
+        const date = new Date(parseInt(y!, 10), parseInt(m!, 10) - 1, parseInt(d!, 10));
+        return date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        });
+      }
       const date = new Date(dateString);
       return date.toLocaleDateString('en-US', {
         year: 'numeric',
