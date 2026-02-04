@@ -663,7 +663,7 @@ function AppContent() {
         // Show sales receipt page when at least one charge succeeded
         if (summary.successful > 0 && results.length > 0) {
           const subtotal = results.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
-          const totalCharged = results.reduce((sum: number, r: any) => sum + (Number(r.amountCharged) ?? Number(r.amount) || 0), 0);
+          const totalCharged = results.reduce((sum: number, r: any) => sum + ((Number(r.amountCharged) ?? Number(r.amount)) || 0), 0);
           const ccFeeTotal = results.reduce((sum: number, r: any) => sum + (Number(r.ccFee) || 0), 0);
           const receiptSale: Sale = {
             id: 0,
@@ -690,7 +690,7 @@ function AppContent() {
               price: Number(r.amount) || 0,
               taxPercentage: 0,
               taxAmount: 0,
-              lineTotal: Number(r.amountCharged) ?? Number(r.amount) || 0,
+              lineTotal: (Number(r.amountCharged) ?? Number(r.amount)) || 0,
             })),
             customer: selectedCustomer,
             payment: {
