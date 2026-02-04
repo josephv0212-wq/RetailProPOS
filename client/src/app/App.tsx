@@ -594,27 +594,29 @@ function AppContent() {
       if (response.success && response.data) {
         const { results, errors, summary } = response.data;
 
-        // Clear pending items
+        // Clear pending items and receipt preview state
         setPendingChargeItems([]);
+        setPendingStoredPaymentSelection(null);
+        setIsInvoicePaymentReceiptPreviewOpen(false);
 
         // Check for transactions under review
-        const underReviewItems = results.filter(r => r.underReview);
-        const approvedItems = results.filter(r => !r.underReview);
+        const underReviewItems = results.filter((r: any) => r.underReview);
+        const approvedItems = results.filter((r: any) => !r.underReview);
 
         // Show results
         if (summary.successful > 0) {
-          const totalAmount = results.reduce((sum, r) => sum + r.amount, 0);
+          const totalAmount = results.reduce((sum: number, r: any) => sum + r.amount, 0);
           
           if (underReviewItems.length > 0 && approvedItems.length === 0) {
             // All transactions are under review
-            const reviewNumbers = underReviewItems.map(r => `${r.type} ${r.number}`).join(', ');
+            const reviewNumbers = underReviewItems.map((r: any) => `${r.type} ${r.number}`).join(', ');
             showAlert({
               title: 'Transactions Under Review',
               message: `${underReviewItems.length} transaction(s) submitted but are under review by Authorize.net:\n\n${reviewNumbers}\n\nPlease check your Authorize.net merchant interface to approve or decline these transactions.`
             });
           } else if (underReviewItems.length > 0) {
             // Some approved, some under review
-            const reviewNumbers = underReviewItems.map(r => `${r.type} ${r.number}`).join(', ');
+            const reviewNumbers = underReviewItems.map((r: any) => `${r.type} ${r.number}`).join(', ');
             showToast(
               `Charged ${approvedItems.length} item(s) successfully. ${underReviewItems.length} transaction(s) under review: ${reviewNumbers}`,
               'warning',
@@ -631,7 +633,7 @@ function AppContent() {
         }
 
         if (summary.failed > 0) {
-          const errorMessages = errors.map(e => `${e.item.type} ${e.item.number}: ${e.error}`).join('\n');
+          const errorMessages = errors.map((e: any) => `${e.item.type} ${e.item.number}: ${e.error}`).join('\n');
           showAlert({
             title: 'Some charges failed',
             message: `Failed to charge ${summary.failed} item(s):\n\n${errorMessages}`
@@ -640,7 +642,7 @@ function AppContent() {
 
         // If all succeeded and none are under review, show detailed success message
         if (summary.failed === 0 && underReviewItems.length === 0) {
-          const transactionIds = results.map(r => r.transactionId).join(', ');
+          const transactionIds = results.map((r: any) => r.transactionId).join(', ');
           showToast(
             `All charges processed successfully. Transaction IDs: ${transactionIds}`,
             'success',
@@ -656,6 +658,53 @@ function AppContent() {
             ? `Payment was charged but could not be recorded in Zoho Books: ${zohoFailed[0].zohoPaymentError}`
             : `${zohoFailed.length} invoice(s): payment charged but not recorded in Zoho. Check server logs.`;
           showToast(msg, 'warning', 8000);
+        }
+
+        // Show sales receipt page when at least one charge succeeded
+        if (summary.successful > 0 && results.length > 0) {
+          const subtotal = results.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+          const totalCharged = results.reduce((sum: number, r: any) => sum + (Number(r.amountCharged) ?? Number(r.amount) || 0), 0);
+          const ccFeeTotal = results.reduce((sum: number, r: any) => sum + (Number(r.ccFee) || 0), 0);
+          const receiptSale: Sale = {
+            id: 0,
+            subtotal,
+            taxAmount: 0,
+            taxPercentage: 0,
+            ccFee: ccFeeTotal,
+            total: totalCharged,
+            paymentType: paymentType as Sale['paymentType'],
+            locationId: user?.locationId || '',
+            locationName: constants.STORE_NAME,
+            customerId: selectedCustomer.id,
+            userId: user?.id ?? 0,
+            transactionId: results[0]?.transactionId || `INV-${Date.now()}`,
+            syncedToZoho: (zohoFailed?.length ?? 0) === 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            items: results.map((r: any, idx: number) => ({
+              id: idx + 1,
+              saleId: 0,
+              itemId: 0,
+              itemName: `${r.type === 'invoice' ? 'Invoice' : 'Sales Order'} ${r.number}`,
+              quantity: 1,
+              price: Number(r.amount) || 0,
+              taxPercentage: 0,
+              taxAmount: 0,
+              lineTotal: Number(r.amountCharged) ?? Number(r.amount) || 0,
+            })),
+            customer: selectedCustomer,
+            payment: {
+              method: paymentType as PaymentDetails['method'],
+              amount: totalCharged,
+              confirmationNumber: results.map((r: any) => r.transactionId).filter(Boolean).join(', '),
+            },
+            timestamp: new Date(),
+            tax: 0,
+            cashier: constants.USER_NAME,
+            zohoSynced: (zohoFailed?.length ?? 0) === 0,
+          };
+          setCompletedSale(receiptSale);
+          setCurrentScreen('receipt');
         }
       } else {
         showToast(
