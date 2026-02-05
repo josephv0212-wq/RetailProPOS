@@ -295,7 +295,7 @@ export const createSalesReceipt = async (saleData) => {
   const paymentModeMap = {
     cash: 'cash',
     credit_card: 'creditcard',
-    debit_card: 'debit_card',
+    debit_card: 'creditcard', // merged with credit_card as card
     zelle: 'banktransfer',
     ach: 'banktransfer'
   };

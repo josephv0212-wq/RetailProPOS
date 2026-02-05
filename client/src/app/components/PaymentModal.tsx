@@ -673,9 +673,9 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           </div>
 
           {/* Payment Methods */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Payment Method</label>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="w-full">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 text-center">Payment Method</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full">
               <button
                 onClick={() => setSelectedMethod('cash')}
                 className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
@@ -701,23 +701,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                 }`}
               >
                 <CreditCard className="w-6 h-6" />
-                <span className="text-sm">CC</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setSelectedMethod('debit_card');
-                  setCardPaymentMethod('valor_api');
-                  setCardReaderStatus('ready');
-                }}
-                className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                  selectedMethod === 'debit_card'
-                    ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                    : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
-                }`}
-              >
-                <CreditCard className="w-6 h-6" />
-                <span className="text-sm">DC</span>
+                <span className="text-sm">Card</span>
               </button>
               
               {context !== 'zohoDocuments' && customerId && paymentProfiles.length > 0 && (

@@ -54,9 +54,8 @@ const fetchLegacyTransactionsForReports = async ({ locationId, startDate, endDat
 
     const normalizePaymentType = (v) => {
       const s = String(v || '').toLowerCase().trim();
-      if (s === 'cash' || s === 'credit_card' || s === 'debit_card' || s === 'zelle' || s === 'ach') return s;
-      if (s === 'credit' || s === 'cc' || s === 'card' || s === 'creditcard') return 'credit_card';
-      if (s === 'debit' || s === 'debitcard') return 'debit_card';
+      if (s === 'cash' || s === 'zelle' || s === 'ach') return s;
+      if (s === 'credit_card' || s === 'debit_card' || s === 'credit' || s === 'cc' || s === 'card' || s === 'creditcard' || s === 'debit' || s === 'debitcard') return 'credit_card';
       return 'cash';
     };
 
@@ -210,7 +209,9 @@ export const createSale = async (req, res) => {
       savePaymentMethod 
     } = req.body;
     let paymentType = requestPaymentType;
-    
+    // Merge debit_card into credit_card: store and process as single "card" type
+    if (paymentType === 'debit_card') paymentType = 'credit_card';
+
     // Support useStandaloneMode from root level OR from paymentDetails (for backward compatibility)
     const isStandaloneMode = useStandaloneMode === true || paymentDetails?.useStandaloneMode === true;
     const userId = req.user.id;
@@ -369,14 +370,14 @@ export const createSale = async (req, res) => {
           const paymentProfiles = extractPaymentProfiles(profileResult.profile);
           const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
           if (selectedProfile) {
-            actualPaymentType = selectedProfile.type === 'ach' ? 'ach' : 'credit_card';
+            actualPaymentType = selectedProfile.type === 'ach' ? 'ach' : 'credit_card'; // debit_card merged to credit_card
           }
         }
       }
     }
     
-    // 3% convenience fee applies to all card payments (credit and debit)
-    cardProcessingFee = (actualPaymentType === 'credit_card' || actualPaymentType === 'debit_card')
+    // 3% convenience fee for card (CC/DC merged as credit_card)
+    cardProcessingFee = actualPaymentType === 'credit_card'
       ? calculateCreditCardFee(subtotal, taxAmount)
       : 0;
 
@@ -388,7 +389,7 @@ export const createSale = async (req, res) => {
     // Standalone mode: Skip payment processing, just record the sale (works like cash payment)
     // This handles when cardReaderMode is 'standalone' - cashier processes payment manually on external card reader
     // IMPORTANT: This must be checked BEFORE any card payment processing logic
-    if (isStandaloneMode && (paymentType === 'credit_card' || paymentType === 'debit_card')) {
+    if (isStandaloneMode && paymentType === 'credit_card') {
       // No payment processing required - works exactly like cash payment
       // Cashier will manually process payment on external card reader after sale is recorded
       transactionId = `STANDALONE-${Date.now()}`;
@@ -397,7 +398,7 @@ export const createSale = async (req, res) => {
         message: 'Sale recorded. Payment to be processed manually on external card reader.',
         transactionId: transactionId
       };
-      // Keep payment type as credit_card or debit_card but mark it as manual card reader payment
+      // Keep payment type as credit_card; mark as manual card reader payment
       // The description will indicate "manual card reader payment" in the sale record
       // Do NOT process any card payment - skip all card processing logic below
     } else if (useStoredPayment && paymentProfileId && customer) {
@@ -503,7 +504,7 @@ export const createSale = async (req, res) => {
       transactionId = paymentResult.transactionId;
       // Update paymentType to actual type determined from profile
       paymentType = actualPaymentType;
-    } else if (paymentType === 'credit_card' || paymentType === 'debit_card') {
+    } else if (paymentType === 'credit_card') {
       // IMPORTANT: Double-check standalone mode - if enabled, skip all card processing
       if (isStandaloneMode) {
         // This should have been caught earlier, but add safety check here too
@@ -627,7 +628,7 @@ export const createSale = async (req, res) => {
     const shouldSavePaymentMethod =
       !!customer &&
       !!transactionId &&
-      (paymentType === 'credit_card' || paymentType === 'debit_card' || paymentType === 'ach') &&
+      (paymentType === 'credit_card' || paymentType === 'ach') &&
       !useValorApi &&
       !useStoredPayment &&
       !isStandaloneMode &&
@@ -655,7 +656,7 @@ export const createSale = async (req, res) => {
             paymentMethodType: paymentType
           };
 
-          if (paymentType === 'credit_card' || paymentType === 'debit_card') {
+          if (paymentType === 'credit_card') {
             if (last4) {
               updates.last_four_digits = last4;
             }
@@ -680,7 +681,7 @@ export const createSale = async (req, res) => {
 
     // Add note for standalone mode (manual card reader payment)
     let saleNotes = notes || '';
-    if (isStandaloneMode && (paymentType === 'credit_card' || paymentType === 'debit_card')) {
+    if (isStandaloneMode && paymentType === 'credit_card') {
       const manualPaymentNote = 'Manual card reader payment';
       saleNotes = saleNotes ? `${saleNotes}\n${manualPaymentNote}` : manualPaymentNote;
     }
@@ -1246,7 +1247,8 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
   try {
     const { customerId, items, paymentProfileId, paymentType: requestPaymentType } = req.body;
     const raw = requestPaymentType && String(requestPaymentType).toLowerCase();
-    const paymentType = raw === 'debit_card' ? 'debit_card' : raw === 'ach' ? 'ach' : 'credit_card';
+    // Merge CC/DC: treat any card as credit_card
+    const paymentType = raw === 'ach' ? 'ach' : 'credit_card';
 
     if (!customerId) {
       return sendValidationError(res, 'Customer ID is required');
@@ -1407,8 +1409,8 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
               zohoPaymentError = 'Customer has no Zoho ID. Sync customers from Zoho to record payment in Zoho Books.';
               console.warn(`⚠️ Zoho: skipping payment for invoice ${number}: ${zohoPaymentError}`);
             } else {
-              const zohoPaymentMode = paymentType === 'ach' ? 'banktransfer' : paymentType === 'debit_card' ? 'debitcard' : 'creditcard';
-              const paymentLabel = paymentType === 'ach' ? 'ACH' : paymentType === 'debit_card' ? 'Debit card' : 'Credit card';
+              const zohoPaymentMode = paymentType === 'ach' ? 'banktransfer' : 'creditcard';
+              const paymentLabel = paymentType === 'ach' ? 'ACH' : 'Card';
               const zohoPaymentResult = await createCustomerPayment({
                 customerId: zohoCustomerId,
                 invoiceId: String(id).trim(),
