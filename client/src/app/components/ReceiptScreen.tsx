@@ -61,8 +61,9 @@ export function ReceiptScreen({
   const parsedPct = rawPct != null ? parseFloat(String(rawPct)) : NaN;
   const taxRate = Number.isFinite(parsedPct) ? parsedPct : 0;
 
-  // Format payment method
+  // Format payment method (merge credit_card and debit_card to CARD)
   const formatPaymentMethod = (method: string) => {
+    if (method === 'credit_card' || method === 'debit_card') return 'CARD';
     return method.toUpperCase().replace(/_/g, ' ');
   };
 
@@ -165,7 +166,7 @@ export function ReceiptScreen({
                     Receipt #
                   </p>
                   <p className="text-[11px] font-bold text-gray-900 dark:text-white">
-                    POS-{sale.id}
+                    {sale.receiptNumber ?? sale.transactionId ?? `POS-${sale.id}`}
                   </p>
                 </div>
               </div>

@@ -73,10 +73,10 @@ export function PaymentMethodSelector({
   const selectedProfile = selectedProfileId
     ? paymentProfiles.find((p) => p.paymentProfileId === selectedProfileId)
     : null;
-  const isCreditCard = selectedProfile?.type === 'credit_card';
   const showTotals = totalAmount != null && totalAmount > 0;
-  const ccSurcharge = showTotals && isCreditCard ? Math.round(totalAmount * 0.03 * 100) / 100 : 0;
-  const totalWithFee = showTotals ? totalAmount + ccSurcharge : 0;
+  // Invoice/SO: 3% processing fee for all payment methods (card, ACH, etc.)
+  const processingFee = showTotals ? Math.round(totalAmount * 0.03 * 100) / 100 : 0;
+  const totalWithFee = showTotals ? totalAmount + processingFee : 0;
 
   const handleSelect = () => {
     if (selectedProfileId && selectedProfile) {
@@ -218,20 +218,18 @@ export function PaymentMethodSelector({
             </div>
           )}
 
-          {/* Totals (invoice/sales order): show subtotal + 3% CC surcharge when credit card selected */}
+          {/* Totals (invoice/sales order): always show subtotal + 3% processing fee for all payment methods */}
           {showTotals && hasProfiles && (
             <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-1">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
-                <span className="font-medium text-gray-900 dark:text-white">${totalAmount.toFixed(2)}</span>
+                <span className="font-medium text-gray-900 dark:text-white">${totalAmount!.toFixed(2)}</span>
               </div>
-              {isCreditCard && ccSurcharge > 0 && (
-                <>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Credit Card Surcharge 3%</span>
-                    <span className="font-medium text-gray-900 dark:text-white">${ccSurcharge.toFixed(2)}</span>
-                  </div>
-                </>
+              {processingFee > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">Processing fee 3%</span>
+                  <span className="font-medium text-gray-900 dark:text-white">${processingFee.toFixed(2)}</span>
+                </div>
               )}
               <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-600">
                 <span className="font-semibold text-gray-900 dark:text-white">Total</span>

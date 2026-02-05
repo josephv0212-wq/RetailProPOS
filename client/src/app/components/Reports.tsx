@@ -336,23 +336,21 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
                           <td className="px-6 py-4 whitespace-nowrap">
                             {(() => {
                               const type = transaction.paymentType;
+                              const isCard = type === 'credit_card' || type === 'debit_card';
                               const label =
                                 type === 'cash' ? 'CASH' :
-                                type === 'credit_card' ? 'CC' :
-                                type === 'debit_card' ? 'DC' :
+                                isCard ? 'Card' :
                                 type === 'zelle' ? 'ZELLE' :
                                 'ACH';
 
                               const cls =
                                 type === 'cash'
                                   ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-400'
-                                  : type === 'credit_card'
+                                  : isCard
                                     ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-400'
-                                    : type === 'debit_card'
-                                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400'
-                                      : type === 'zelle'
-                                        ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-400'
-                                        : 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400';
+                                    : type === 'zelle'
+                                      ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-400'
+                                      : 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400';
 
                               return (
                                 <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium uppercase tracking-wide ${cls}`}>

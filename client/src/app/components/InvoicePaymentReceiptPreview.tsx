@@ -123,7 +123,7 @@ export function InvoicePaymentReceiptPreview({
             </div>
             {ccSurcharge > 0 && (
               <div className="flex justify-between text-sm text-amber-700 dark:text-amber-400">
-                <span>Credit Card Surcharge 3%</span>
+                <span>Processing fee 3%</span>
                 <span className="font-medium">${ccSurcharge.toFixed(2)}</span>
               </div>
             )}

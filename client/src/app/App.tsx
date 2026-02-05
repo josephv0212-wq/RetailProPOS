@@ -548,6 +548,7 @@ function AppContent() {
   const handleConfirmZohoDocsPayment = async (paymentDetails: PaymentDetails): Promise<any> => {
     const count = pendingChargeItems.length;
     const amountCharged = Number(paymentDetails.amount) ?? (pendingChargeItems || []).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
+    const items = pendingChargeItems || [];
 
     showToast(
       `Payment completed for ${count} document${count !== 1 ? 's' : ''} ($${amountCharged.toFixed(2)}) via ${paymentDetails.method?.toUpperCase() ?? 'POS'}.`,
@@ -557,7 +558,52 @@ function AppContent() {
 
     setIsZohoDocsPaymentModalOpen(false);
     setIsZohoPaymentOptionsOpen(false);
+
+    // Build receipt sale and show receipt screen (same as stored-payment flow)
+    const subtotal = items.reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
+    const ccFee = amountCharged > subtotal ? Math.round((amountCharged - subtotal) * 100) / 100 : 0;
+    const receiptSale: Sale = {
+      id: 0,
+      subtotal,
+      taxAmount: 0,
+      taxPercentage: 0,
+      ccFee,
+      total: amountCharged,
+      paymentType: (paymentDetails.method || 'cash') as Sale['paymentType'],
+      locationId: user?.locationId || '',
+      locationName: constants.STORE_NAME,
+      customerId: selectedCustomer?.id ?? null,
+      userId: user?.id ?? 0,
+      transactionId: `ZOHO-POS-${Date.now()}`,
+      receiptNumber: `ZOHO-POS-${Date.now()}`,
+      syncedToZoho: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      items: items.map((it: any, idx: number) => ({
+        id: idx + 1,
+        saleId: 0,
+        itemId: 0,
+        itemName: `${it.type === 'invoice' ? 'Invoice' : 'Sales Order'} ${it.number}`,
+        quantity: 1,
+        price: Number(it.amount) || 0,
+        taxPercentage: 0,
+        taxAmount: 0,
+        lineTotal: Number(it.amount) || 0,
+      })),
+      customer: selectedCustomer ?? undefined,
+      payment: {
+        method: paymentDetails.method || 'cash',
+        amount: amountCharged,
+        confirmationNumber: undefined,
+      },
+      timestamp: new Date(),
+      tax: 0,
+      cashier: constants.USER_NAME,
+      zohoSynced: false,
+    };
+    setCompletedSale(receiptSale);
     setPendingChargeItems([]);
+    setCurrentScreen('receipt');
     return { success: true };
   };
 
@@ -1358,10 +1404,10 @@ function AppContent() {
             number: it.number || it.id,
             amount: Number(it.amount) || 0,
           }))}
-          paymentMethodLabel={pendingStoredPaymentSelection.profileType === 'ach' ? 'ACH / Bank Account' : 'Credit Card'}
+          paymentMethodLabel={pendingStoredPaymentSelection.profileType === 'ach' ? 'ACH / Bank Account' : 'Card'}
           subtotal={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0)}
-          ccSurcharge={pendingStoredPaymentSelection.profileType === 'credit_card' ? Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100 : 0}
-          totalWithFee={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) + (pendingStoredPaymentSelection.profileType === 'credit_card' ? Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100 : 0)}
+          ccSurcharge={Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100}
+          totalWithFee={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) + Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100}
           onConfirmPay={async () => {
             if (!pendingStoredPaymentSelection) return;
             await handlePaymentMethodSelected(pendingStoredPaymentSelection.paymentProfileId, pendingStoredPaymentSelection.profileType);

@@ -31,8 +31,7 @@ interface PaymentModalProps {
 
 const paymentMethods: PaymentMethod[] = [
   { type: 'cash', label: 'Cash' },
-  { type: 'credit_card', label: 'Credit Card' },
-  { type: 'debit_card', label: 'Debit Card' },
+  { type: 'credit_card', label: 'Card' },
   { type: 'stored_payment', label: 'Stored Payment Method' },
   { type: 'zelle', label: 'Zelle' },
   { type: 'ach', label: 'ACH' },
@@ -167,7 +166,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     setIsProcessing(true);
 
     // Standalone mode: Skip payment processing, just record the sale
-    if (cardReaderMode === 'standalone' && (selectedMethod === 'credit_card' || selectedMethod === 'debit_card')) {
+    if (cardReaderMode === 'standalone' && selectedMethod === 'credit_card') {
       const paymentDetails: PaymentDetails = {
         method: selectedMethod,
         amount: finalTotal,
@@ -194,7 +193,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     }
 
     // Validation
-    if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
+    if (selectedMethod === 'credit_card') {
       if (cardPaymentMethod === 'valor_api') {
         // Valor Connect API validation - EPI is required
         const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
@@ -251,7 +250,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
       savePaymentMethod: savePaymentMethod && !!customerId,
     };
 
-    if (selectedMethod === 'credit_card' || selectedMethod === 'debit_card') {
+    if (selectedMethod === 'credit_card') {
       if (cardPaymentMethod === 'valor_api') {
         // Valor Connect API mode - direct integration with Valor Connect API
         const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
@@ -776,7 +775,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           <div>
             {selectedMethod === 'cash' && null}
 
-            {(selectedMethod === 'credit_card' || selectedMethod === 'debit_card') && (
+            {selectedMethod === 'credit_card' && (
               <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
                 <div className="flex justify-center">
                   {cardPaymentMethod !== 'manual' ? (
@@ -939,7 +938,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                                   <Building2 className="w-5 h-5 text-green-600 dark:text-green-400" />
                                 )}
                                 <span className="font-semibold text-gray-900 dark:text-white">
-                                  {profile.type === 'credit_card' ? 'Credit Card' : 'Bank Account'}
+                                  {profile.type === 'credit_card' ? 'Card' : 'Bank Account'}
                                 </span>
                                 {(profile.isDefault || profile.isStored) && (
                                   <span className="text-xs text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2 py-0.5 rounded">

@@ -375,8 +375,8 @@ export const createSale = async (req, res) => {
       }
     }
     
-    // 3% convenience fee applies to CREDIT card payments only (no surcharge for debit)
-    cardProcessingFee = (actualPaymentType === 'credit_card')
+    // 3% convenience fee applies to all card payments (credit and debit)
+    cardProcessingFee = (actualPaymentType === 'credit_card' || actualPaymentType === 'debit_card')
       ? calculateCreditCardFee(subtotal, taxAmount)
       : 0;
 
@@ -1386,10 +1386,8 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
           : `Sales Order Payment: ${number}`;
 
         const originalAmount = parseFloat(amount);
-        const isCreditCard = paymentType === 'credit_card';
-        const chargeAmount = isCreditCard
-          ? Math.round(originalAmount * 1.03 * 100) / 100
-          : originalAmount;
+        // 3% processing fee for all invoice/SO payment methods (card, ACH, etc.)
+        const chargeAmount = Math.round(originalAmount * 1.03 * 100) / 100;
 
         const chargeResult = await chargeCustomerProfile({
           customerProfileId,
@@ -1434,7 +1432,7 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
             number,
             amount: originalAmount,
             amountCharged: chargeAmount,
-            ccFee: isCreditCard ? Math.round((chargeAmount - originalAmount) * 100) / 100 : 0,
+            ccFee: Math.round((chargeAmount - originalAmount) * 100) / 100,
             transactionId: chargeResult.transactionId,
             authCode: chargeResult.authCode,
             message: chargeResult.message,

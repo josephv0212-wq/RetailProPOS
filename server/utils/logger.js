@@ -1,9 +1,56 @@
 /**
  * Clean Console Logger Utility
- * Provides organized, readable console output with consistent formatting
+ * Provides organized, readable console output with consistent formatting.
+ * Also appends a timestamped line to a log file when LOG_FILE is set or default ./logs/server.log
  */
 
+import fs from 'fs';
+import path from 'path';
+
 const isDevelopment = process.env.NODE_ENV === 'development';
+
+const LOG_FILE = process.env.LOG_FILE || path.join(process.cwd(), 'logs', 'server.log');
+let logStream = null;
+
+function ensureLogDir() {
+  const dir = path.dirname(LOG_FILE);
+  if (!fs.existsSync(dir)) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (err) {
+      console.error('Logger: could not create log directory', dir, err.message);
+    }
+  }
+}
+
+function getStream() {
+  if (logStream) return logStream;
+  ensureLogDir();
+  try {
+    logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+    logStream.on('error', (err) => {
+      console.error('Logger: file write error', err.message);
+    });
+  } catch (err) {
+    console.error('Logger: could not open log file', LOG_FILE, err.message);
+  }
+  return logStream;
+}
+
+function writeToFile(level, message, data = null) {
+  const stream = getStream();
+  if (!stream) return;
+  const ts = new Date().toISOString();
+  let dataStr = '';
+  if (data != null) {
+    const raw = typeof data === 'string' ? data : JSON.stringify(data);
+    dataStr = ' ' + (raw.length > 500 ? raw.slice(0, 500) + '...' : raw);
+  }
+  const line = `${ts} [${level}] ${message}${dataStr}\n`;
+  try {
+    stream.write(line);
+  } catch (_) {}
+}
 
 /**
  * Format customer information for console display
@@ -100,7 +147,9 @@ export const formatCustomerInfo = (customer, zohoCustomer = null) => {
  * Log customer information in organized format
  */
 export const logCustomerInfo = (customer, zohoCustomer = null) => {
-  console.log('\n' + formatCustomerInfo(customer, zohoCustomer) + '\n');
+  const text = formatCustomerInfo(customer, zohoCustomer);
+  console.log('\n' + text + '\n');
+  writeToFile('INFO', 'Customer info', customer?.id ?? '');
 };
 
 /**
@@ -111,6 +160,7 @@ export const logSection = (title, emoji = '📌') => {
   console.log('═'.repeat(60));
   console.log(`${emoji} ${title}`);
   console.log('═'.repeat(60));
+  writeToFile('SECTION', title);
 };
 
 /**
@@ -120,6 +170,7 @@ export const logSubsection = (title) => {
   console.log('');
   console.log(`  ${title}`);
   console.log('  ' + '─'.repeat(56));
+  writeToFile('SUBSECTION', title);
 };
 
 /**
@@ -131,6 +182,7 @@ export const log = (message, data = null) => {
   } else {
     console.log(`  ${message}`);
   }
+  writeToFile('LOG', message, data);
 };
 
 /**
@@ -142,6 +194,7 @@ export const logSuccess = (message, data = null) => {
   } else {
     console.log(`  ✅ ${message}`);
   }
+  writeToFile('SUCCESS', message, data);
 };
 
 /**
@@ -153,6 +206,7 @@ export const logWarning = (message, data = null) => {
   } else {
     console.warn(`  ⚠️  ${message}`);
   }
+  writeToFile('WARN', message, data);
 };
 
 /**
@@ -166,8 +220,10 @@ export const logError = (message, error = null) => {
     } else {
       console.error('  Error:', error.message || error);
     }
+    writeToFile('ERROR', message, error?.message ?? String(error));
   } else {
     console.error(`  ❌ ${message}`);
+    writeToFile('ERROR', message);
   }
 };
 
@@ -180,6 +236,7 @@ export const logInfo = (message, data = null) => {
   } else {
     console.log(`  ℹ️  ${message}`);
   }
+  writeToFile('INFO', message, data);
 };
 
 /**
@@ -197,6 +254,7 @@ export const logServerStart = (port, env) => {
   console.log(`  🔧 Environment: ${env || 'development'}`);
   console.log(`  📅 Started at: ${new Date().toLocaleString()}`);
   console.log('');
+  writeToFile('SERVER_START', `port=${port} env=${env || 'development'}`);
 };
 
 /**
@@ -205,6 +263,7 @@ export const logServerStart = (port, env) => {
 export const logDatabase = (message, type = 'info') => {
   const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
   console.log(`  ${prefix} Database: ${message}`);
+  writeToFile('DATABASE', message);
 };
 
 /**
@@ -217,4 +276,5 @@ export const logApiRequest = (method, path, status = null) => {
   } else {
     console.log(`  📡 ${method} ${path}`);
   }
+  writeToFile('API', `${method} ${path}`, status != null ? String(status) : null);
 };
