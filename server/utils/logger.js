@@ -46,7 +46,7 @@ function writeToFile(level, message, data = null) {
     const raw = typeof data === 'string' ? data : JSON.stringify(data);
     dataStr = ' ' + (raw.length > 500 ? raw.slice(0, 500) + '...' : raw);
   }
-  const line = `${ts} [${level}] ${message}${dataStr}\n`;
+  const line = `[${ts}] [${level}] ${message}${dataStr}\n`;
   try {
     stream.write(line);
   } catch (_) {}
