@@ -1358,11 +1358,29 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       }
     }
 
+    // Get payment profile type to determine fee structure
+    let actualProfileType = paymentType; // Default to request paymentType
+    try {
+      const profileResult = await getCustomerProfileDetails({
+        customerProfileId: customerProfileId
+      });
+      if (profileResult.success && profileResult.profile) {
+        const paymentProfiles = extractPaymentProfiles(profileResult.profile);
+        const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+        if (selectedProfile) {
+          actualProfileType = selectedProfile.type === 'ach' ? 'ach' : 'credit_card';
+        }
+      }
+    } catch (profileErr) {
+      console.warn('Could not determine payment profile type, using request type:', profileErr.message);
+    }
+
     // Process each invoice/sales order
     const results = [];
     const errors = [];
 
-    for (const item of items) {
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
       const { type, id, number, amount } = item;
 
       if (!type || !id || !number || !amount) {
@@ -1382,13 +1400,16 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       }
 
       try {
-        const invoiceNumber = normalizeAuthorizeNetInvoiceNumber({ type, number, id });
+        // Add index to invoice number to ensure uniqueness when processing multiple invoices
+        const baseInvoiceNumber = normalizeAuthorizeNetInvoiceNumber({ type, number, id });
+        const invoiceNumber = `${baseInvoiceNumber}-${index}`;
         const description = type === 'invoice'
           ? `Invoice Payment: ${number}`
           : `Sales Order Payment: ${number}`;
 
         const originalAmount = parseFloat(amount);
         // 3% processing fee for all invoice/SO payment methods (card, ACH, etc.)
+        // Note: Authorize.Net may decline ACH transactions with fees - if issues persist, consider fee only for card
         const chargeAmount = Math.round(originalAmount * 1.03 * 100) / 100;
 
         const chargeResult = await chargeCustomerProfile({
@@ -1447,9 +1468,18 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
             zohoPaymentError: type === 'invoice' && zohoPaymentError ? zohoPaymentError : undefined
           });
         } else {
+          const errorMsg = chargeResult.error || 'Transaction declined';
+          console.error(`❌ Failed to charge ${type} ${number}:`, {
+            error: errorMsg,
+            errorCode: chargeResult.errorCode,
+            responseCode: chargeResult.responseCode,
+            amount: chargeAmount,
+            invoiceNumber,
+            profileType: actualProfileType
+          });
           errors.push({
             item: { type, id, number },
-            error: chargeResult.error,
+            error: errorMsg,
             errorCode: chargeResult.errorCode,
             responseCode: chargeResult.responseCode
           });
