@@ -1460,12 +1460,12 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
               const zohoPaymentResult = await createCustomerPayment({
                 customerId: zohoCustomerId,
                 invoiceId: String(id).trim(),
-                // Total received (including 3% fee); Zoho records this and shows any excess as unapplied.
-                amount: chargeAmount,
+                // Record only the invoice amount in Zoho; the 3% fee is registered separately via journal.
+                amount: originalAmount,
                 amountApplied: originalAmount,
                 paymentMode: zohoPaymentMode,
                 referenceNumber: chargeResult.transactionId || undefined,
-                description: `Invoice ${number} - POS payment (${paymentLabel}, 3% fee included)`
+                description: `Invoice ${number} - POS payment (${paymentLabel})`
               });
               if (zohoPaymentResult.success) {
                 zohoPaymentRecorded = true;

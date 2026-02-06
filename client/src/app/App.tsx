@@ -1210,7 +1210,14 @@ function AppContent() {
         onNavigateToSettings={navigationHandlers.toSettings}
         onNavigateToAdmin={navigationHandlers.toAdmin}
       >
-        <Reports transactions={[]} userLocationId={user?.locationId || ''} />
+        <Reports
+          transactions={[]}
+          userLocationId={user?.locationId || ''}
+          storeName={constants.STORE_NAME}
+          storeAddress={constants.STORE_ADDRESS}
+          storePhone={constants.STORE_PHONE}
+          userName={constants.USER_NAME}
+        />
       </PageWrapper>
     );
   }
