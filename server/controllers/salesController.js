@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
-import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment } from '../services/zohoService.js';
+import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
@@ -1469,6 +1469,17 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
               });
               if (zohoPaymentResult.success) {
                 zohoPaymentRecorded = true;
+                const feeAmount = Math.round((chargeAmount - originalAmount) * 100) / 100;
+                if (feeAmount > 0) {
+                  const journalResult = await createProcessingFeeJournal({
+                    feeAmount,
+                    referenceNumber: chargeResult.transactionId ? `Txn ${chargeResult.transactionId} Inv ${number}` : `Inv ${number}`,
+                    date: new Date().toISOString().split('T')[0]
+                  });
+                  if (!journalResult.success && journalResult.error !== 'Journal account IDs not configured') {
+                    console.warn(`⚠️ Zoho: processing fee journal not created for invoice ${number}: ${journalResult.error}`);
+                  }
+                }
               } else {
                 zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
                 console.error(`⚠️ Zoho: could not record payment for invoice ${number}: ${zohoPaymentError}`);

@@ -722,6 +722,61 @@ export const createCustomerPayment = async (params) => {
   }
 };
 
+/**
+ * Create a journal entry in Zoho Books for the 3% processing fee (unapplied portion of customer payment).
+ * Double-entry: Debit Customer Advance / Unapplied, Credit Processing Fee Income.
+ * Requires env: ZOHO_ACCOUNT_ID_CUSTOMER_ADVANCE, ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME (Chart of Accounts IDs).
+ * @param {Object} params
+ * @param {number} params.feeAmount - Fee amount (e.g. chargeAmount - originalAmount)
+ * @param {string} [params.referenceNumber] - Reference (e.g. transaction ID or invoice number)
+ * @param {string} [params.date] - Journal date (yyyy-mm-dd)
+ * @param {string} [params.locationId] - Zoho location ID
+ * @returns {Promise<{ success: boolean, journalId?: string, error?: string }>}
+ */
+export const createProcessingFeeJournal = async (params) => {
+  const { feeAmount, referenceNumber, date, locationId } = params;
+  const debitAccountId = process.env.ZOHO_ACCOUNT_ID_CUSTOMER_ADVANCE;
+  const creditAccountId = process.env.ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME;
+
+  if (!debitAccountId || !creditAccountId) {
+    console.warn('⚠️ Zoho processing fee journal skipped: set ZOHO_ACCOUNT_ID_CUSTOMER_ADVANCE and ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME to create fee journals.');
+    return { success: false, error: 'Journal account IDs not configured' };
+  }
+  const amount = parseFloat(feeAmount);
+  if (!amount || amount <= 0) {
+    return { success: true };
+  }
+
+  const journalDate = date || new Date().toISOString().split('T')[0];
+  const payload = {
+    journal_date: journalDate,
+    journal_type: 'both',
+    reference_number: referenceNumber ? String(referenceNumber).slice(0, 99) : `POS-FEE-${Date.now()}`,
+    notes: `POS invoice/SO 3% processing fee`,
+    line_items: [
+      { account_id: debitAccountId, amount: amount, debit_or_credit: 'debit', description: 'Processing fee (3%)' },
+      { account_id: creditAccountId, amount: amount, debit_or_credit: 'credit', description: 'Processing fee income' }
+    ]
+  };
+  if (locationId && String(locationId).trim() !== '') payload.location_id = String(locationId).trim();
+
+  try {
+    const response = await makeZohoRequest('/journals', 'POST', payload);
+    if (response.code === 0 && response.journal) {
+      const journalId = response.journal.journal_id;
+      console.log(`✅ Zoho: Processing fee journal created, journal_id: ${journalId}, amount: ${amount}`);
+      return { success: true, journalId };
+    }
+    const errMsg = response.message || 'Failed to create journal';
+    console.warn(`⚠️ Zoho createProcessingFeeJournal: ${errMsg}`);
+    return { success: false, error: errMsg };
+  } catch (error) {
+    const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+    console.error('❌ Zoho createProcessingFeeJournal error:', errorMsg);
+    return { success: false, error: errorMsg };
+  }
+};
+
 export const getOrganizationDetails = async () => {
   try {
     const response = await makeZohoRequest('/organizations');
