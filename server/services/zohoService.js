@@ -651,7 +651,8 @@ export const voidSalesReceipt = async (salesReceiptId) => {
  * @param {Object} params
  * @param {string} params.customerId - Zoho customer (contact) ID
  * @param {string} params.invoiceId - Zoho invoice ID
- * @param {number} params.amount - Amount paid
+ * @param {number} params.amount - Total amount received (payment total)
+ * @param {number} [params.amountApplied] - Amount to apply to this invoice; must not exceed invoice balance. If omitted, uses amount.
  * @param {string} params.paymentMode - Zoho payment_mode: 'cash' | 'creditcard' | 'debitcard' | 'banktransfer' | 'check' | 'bankremittance' | 'autotransaction' | 'others'
  * @param {string} [params.date] - Date of payment (yyyy-mm-dd)
  * @param {string} [params.referenceNumber] - Reference (e.g. transaction ID)
@@ -664,6 +665,7 @@ export const createCustomerPayment = async (params) => {
     customerId,
     invoiceId,
     amount,
+    amountApplied,
     paymentMode,
     date,
     referenceNumber,
@@ -678,13 +680,14 @@ export const createCustomerPayment = async (params) => {
     };
   }
 
+  const applied = amountApplied != null && amountApplied >= 0 ? parseFloat(amountApplied) : parseFloat(amount);
   const payload = {
     customer_id: customerId,
     payment_mode: paymentMode || 'creditcard',
     amount: parseFloat(amount),
     date: date || new Date().toISOString().split('T')[0],
     invoices: [
-      { invoice_id: invoiceId, amount_applied: parseFloat(amount) }
+      { invoice_id: invoiceId, amount_applied: applied }
     ]
   };
   if (referenceNumber) payload.reference_number = String(referenceNumber);
