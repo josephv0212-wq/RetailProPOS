@@ -1320,6 +1320,10 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       // Verify that the requested payment profile exists
       const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
       
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:profile verification',message:'profile verification',data:{requestedPaymentProfileId:paymentProfileId,foundProfile:!!requestedProfile,profileType:requestedProfile?.type,allProfileIds:paymentProfiles.map(p=>p.paymentProfileId),profileDetails:requestedProfile},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H12'})}).catch(()=>{});
+      // #endregion
+      
       if (!requestedProfile) {
         return sendError(
           res,
@@ -1375,6 +1379,10 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       console.warn('Could not determine payment profile type, using request type:', profileErr.message);
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:chargeInvoicesSalesOrders:entry',message:'chargeInvoices entry',data:{itemCount:items.length,customerId,paymentProfileIdSuffix:String(paymentProfileId).slice(-4),paymentType,actualProfileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
+
     // Process each invoice/sales order
     const results = [];
     const errors = [];
@@ -1400,18 +1408,32 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       }
 
       try {
-        // Add index to invoice number to ensure uniqueness when processing multiple invoices
+        // Add timestamp + index to invoice number to ensure uniqueness and avoid Authorize.Net duplicate detection
+        // Authorize.Net detects duplicates by profile + amount + time window, so we need unique invoice numbers
         const baseInvoiceNumber = normalizeAuthorizeNetInvoiceNumber({ type, number, id });
-        const invoiceNumber = `${baseInvoiceNumber}-${index}`;
+        // Use timestamp (last 6 digits of current time) + index to ensure uniqueness within 20 char limit
+        const timestampSuffix = Date.now().toString().slice(-6);
+        const uniqueSuffix = `${timestampSuffix}-${index}`;
+        // Ensure total length doesn't exceed 20 chars (Authorize.Net limit)
+        const maxBaseLen = 20 - uniqueSuffix.length - 1; // -1 for dash
+        const truncatedBase = baseInvoiceNumber.length > maxBaseLen ? baseInvoiceNumber.slice(0, maxBaseLen) : baseInvoiceNumber;
+        const invoiceNumber = `${truncatedBase}-${uniqueSuffix}`.slice(0, 20); // Final safety check
         const description = type === 'invoice'
           ? `Invoice Payment: ${number}`
           : `Sales Order Payment: ${number}`;
 
         const originalAmount = parseFloat(amount);
         // 3% processing fee for all invoice/SO payment methods (card, ACH, etc.)
-        // Note: Authorize.Net may decline ACH transactions with fees - if issues persist, consider fee only for card
         const chargeAmount = Math.round(originalAmount * 1.03 * 100) / 100;
 
+        // #region agent log
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:before charge',message:'before chargeCustomerProfile',data:{index,number,id,invoiceNumber,invoiceNumberLength:invoiceNumber.length,chargeAmount,originalAmount,actualProfileType,testNoFee:true},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H9'})}).catch(()=>{});
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:before charge',message:'profileType check',data:{actualProfileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
+
+        // #region agent log
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:chargeInvoices:before charge',message:'chargeInvoices before chargeCustomerProfile',data:{customerProfileId:String(customerProfileId),customerPaymentProfileId:String(customerPaymentProfileId),amount:chargeAmount,invoiceNumber,description,originalAmount},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H14'})}).catch(()=>{});
+        // #endregion
         const chargeResult = await chargeCustomerProfile({
           customerProfileId,
           customerPaymentProfileId,
@@ -1419,6 +1441,9 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
           invoiceNumber,
           description
         });
+        // #region agent log
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:chargeInvoices:after charge',message:'chargeInvoices after chargeCustomerProfile',data:{success:chargeResult.success,transactionId:chargeResult.transactionId,error:chargeResult.error,responseCode:chargeResult.responseCode,errorCode:chargeResult.errorCode,messages:chargeResult.messages},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H14'})}).catch(()=>{});
+        // #endregion
 
         if (chargeResult.success) {
           let zohoPaymentRecorded = false;
@@ -1469,6 +1494,9 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
           });
         } else {
           const errorMsg = chargeResult.error || 'Transaction declined';
+          // #region agent log
+          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:charge declined',message:'chargeResult declined',data:{index,number,invoiceNumber,invoiceNumberLength:invoiceNumber.length,error:errorMsg,errorCode:chargeResult.errorCode,responseCode:chargeResult.responseCode,chargeAmount,actualProfileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+          // #endregion
           console.error(`❌ Failed to charge ${type} ${number}:`, {
             error: errorMsg,
             errorCode: chargeResult.errorCode,

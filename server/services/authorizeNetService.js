@@ -764,6 +764,10 @@ export const getCustomerProfileDetails = async (searchCriteria) => {
 export const chargeCustomerProfile = async (paymentData) => {
   const { customerProfileId, customerPaymentProfileId, amount, invoiceNumber, description } = paymentData;
 
+  // #region agent log
+  fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authorizeNetService.js:chargeCustomerProfile:entry',message:'chargeCustomerProfile entry',data:{customerProfileId:String(customerProfileId),customerPaymentProfileId:String(customerPaymentProfileId),amount,amountType:typeof amount,invoiceNumber},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
+  // #endregion
+
   if (!customerProfileId || !customerPaymentProfileId) {
     return {
       success: false,
@@ -777,6 +781,11 @@ export const chargeCustomerProfile = async (paymentData) => {
       error: 'Valid amount is required'
     };
   }
+
+  const orderInvoiceNumber = invoiceNumber || `INV-${Date.now()}`;
+  // #region agent log
+  fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authorizeNetService.js:chargeCustomerProfile',message:'request order',data:{invoiceNumber:orderInvoiceNumber,invoiceNumberLength:orderInvoiceNumber.length,amount:parseFloat(amount).toFixed(2)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
 
   // Authorize.net transaction API uses JSON format
   const requestBody = {
@@ -795,12 +804,16 @@ export const chargeCustomerProfile = async (paymentData) => {
           }
         },
         order: {
-          invoiceNumber: invoiceNumber || `INV-${Date.now()}`,
+          invoiceNumber: orderInvoiceNumber,
           description: description || 'Invoice Payment'
         }
       }
     }
   };
+
+  // #region agent log
+  fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authorizeNetService.js:chargeCustomerProfile:requestBody',message:'full request body',data:{invoiceNumber:orderInvoiceNumber,amount:parseFloat(amount).toFixed(2),description,customerProfileId:String(customerProfileId),customerPaymentProfileId:String(customerPaymentProfileId),requestBody:JSON.stringify(requestBody).substring(0,1000)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H13'})}).catch(()=>{});
+  // #endregion
 
   try {
     const response = await axios.post(AUTHORIZE_NET_ENDPOINT, requestBody, {
@@ -809,7 +822,12 @@ export const chargeCustomerProfile = async (paymentData) => {
       }
     });
 
-    const result = response.data.transactionResponse;
+    const raw = response.data;
+    const result = raw.transactionResponse;
+    
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authorizeNetService.js:chargeCustomerProfile:response',message:'full API response',data:{hasTransactionResponse:!!raw?.transactionResponse,responseCode:result?.responseCode,hasErrors:!!result?.errors,errorsCount:result?.errors?.length,errors:result?.errors,hasMessages:!!result?.messages,messages:result?.messages,rawTopLevel:JSON.stringify(raw).substring(0,800)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})}).catch(()=>{});
+    // #endregion
     
     // Response codes: '1' = Approved, '2' = Declined, '3' = Error, '4' = Held for Review
     if (result && result.responseCode === '1') {
@@ -834,11 +852,24 @@ export const chargeCustomerProfile = async (paymentData) => {
       };
     } else {
       const errorMessage = result?.errors?.[0]?.errorText || result?.messages?.[0]?.description || 'Transaction failed';
+      const errorCode = result?.errors?.[0]?.errorCode;
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authorizeNetService.js:chargeCustomerProfile:declined',message:'API declined',data:{responseCode:result?.responseCode,errorCode,errorText:result?.errors?.[0]?.errorText,allErrors:result?.errors,messages:result?.messages,avsResultCode:result?.avsResultCode,cvvResultCode:result?.cvvResultCode,accountType:result?.accountType,accountNumber:result?.accountNumber},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H14'})}).catch(()=>{});
+      // #endregion
+      
+      // Provide more detailed error message for common decline reasons
+      let detailedError = errorMessage;
+      if (errorCode === '2') {
+        detailedError = `Transaction declined by card issuer. ${errorMessage}${result?.avsResultCode ? ` AVS: ${result.avsResultCode}` : ''}${result?.accountType ? ` Card type: ${result.accountType}` : ''}`;
+      }
+      
       return {
         success: false,
-        error: errorMessage,
-        errorCode: result?.errors?.[0]?.errorCode,
-        responseCode: result?.responseCode
+        error: detailedError,
+        errorCode: errorCode,
+        responseCode: result?.responseCode,
+        avsResultCode: result?.avsResultCode,
+        accountType: result?.accountType
       };
     }
   } catch (error) {

@@ -6,5 +6,6 @@
             "database": "${workspaceFolder:RetailProPOS}/server/database.sqlite",
             "name": "posdb"
         }
-    ]
+    ],
+    "ndjson.port": 1024
 }
