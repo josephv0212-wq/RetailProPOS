@@ -153,8 +153,19 @@ function buildReceipt(saleData, locationId) {
   
   // Payment method
   receipt += CMD.ALIGN_LEFT;
-  const paymentType = sale.paymentType.replace('_', ' ').toUpperCase();
-  receipt += `Payment: ${paymentType}\n`;
+  // Format payment type: merge credit_card and debit_card to "Card", others to title case
+  let paymentTypeDisplay;
+  if (sale.paymentType === 'credit_card' || sale.paymentType === 'debit_card') {
+    paymentTypeDisplay = 'Card';
+  } else {
+    // Convert other methods to title case (e.g., 'cash' -> 'Cash', 'zelle' -> 'Zelle', 'ach' -> 'ACH')
+    paymentTypeDisplay = sale.paymentType.split('_').map(word => {
+      // Keep ACH uppercase, others title case
+      if (word.toLowerCase() === 'ach') return 'ACH';
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }).join(' ');
+  }
+  receipt += `Payment: ${paymentTypeDisplay}\n`;
   
   if (sale.transactionId) {
     receipt += `Transaction ID: ${sale.transactionId}\n`;

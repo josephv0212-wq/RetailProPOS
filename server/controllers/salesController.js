@@ -1414,10 +1414,12 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
               const zohoPaymentResult = await createCustomerPayment({
                 customerId: zohoCustomerId,
                 invoiceId: String(id).trim(),
-                amount: parseFloat(amount),
+                // Record the full charged amount in Zoho so the payment
+                // matches what was actually processed (invoice + 3% fee).
+                amount: chargeAmount,
                 paymentMode: zohoPaymentMode,
                 referenceNumber: chargeResult.transactionId || undefined,
-                description: `Invoice ${number} - POS payment (${paymentLabel})`
+                description: `Invoice ${number} - POS payment (${paymentLabel}) including 3% processing fee`
               });
               if (zohoPaymentResult.success) {
                 zohoPaymentRecorded = true;

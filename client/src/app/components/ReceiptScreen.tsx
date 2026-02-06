@@ -61,10 +61,11 @@ export function ReceiptScreen({
   const parsedPct = rawPct != null ? parseFloat(String(rawPct)) : NaN;
   const taxRate = Number.isFinite(parsedPct) ? parsedPct : 0;
 
-  // Format payment method (merge credit_card and debit_card to CARD)
+  // Format payment method (merge credit_card and debit_card to Card)
   const formatPaymentMethod = (method: string) => {
-    if (method === 'credit_card' || method === 'debit_card') return 'CARD';
-    return method.toUpperCase().replace(/_/g, ' ');
+    if (method === 'credit_card' || method === 'debit_card') return 'Card';
+    // Convert other methods to title case (e.g., 'cash' -> 'Cash', 'zelle' -> 'Zelle')
+    return method.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
   };
 
   if (!sale) {

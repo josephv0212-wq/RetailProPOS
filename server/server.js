@@ -16,7 +16,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { Customer, User } from './models/index.js';
 import bcrypt from 'bcryptjs';
 import { syncCustomersToDatabase } from './controllers/zohoController.js';
-import { logServerStart, logDatabase, logSuccess, logWarning, logError, logInfo, log } from './utils/logger.js';
+import { logServerStart, logDatabase, logSuccess, logWarning, logError, logInfo, log, logApiRequest } from './utils/logger.js';
 
 dotenv.config();
 
@@ -94,6 +94,15 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 app.use(express.json({ limit: '10mb' }));
+
+// Request logging middleware - logs every request with method, path, and status
+app.use((req, res, next) => {
+  const path = req.originalUrl || req.url || '';
+  res.on('finish', () => {
+    logApiRequest(req.method, path, res.statusCode);
+  });
+  next();
+});
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
