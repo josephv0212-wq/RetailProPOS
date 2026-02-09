@@ -1,6 +1,6 @@
 import { Customer } from '../models/index.js';
 import { Op } from 'sequelize';
-import { getCustomerById as getZohoCustomerById, getCustomerCards, syncCustomersFromZoho } from '../services/zohoService.js';
+import { syncCustomersFromZoho } from '../services/zohoService.js';
 import { getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
 import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
@@ -256,172 +256,40 @@ export const getCustomerPriceList = async (req, res) => {
 
     // If customer has no Zoho ID, return with existing last_four_digits
     if (!customer.zohoId) {
-      return res.json({ 
-        success: true,
-        data: { 
-          pricebook_name: null,
-          tax_preference: null,
-          cards: [],
-          last_four_digits: customer.last_four_digits || null,
-          card_type: customer.cardBrand || null,
-          has_card_info: customer.last_four_digits ? true : false,
-          card_info_checked: false, // Can't check without Zoho ID
-          bank_account_last4: customer.bankAccountLast4 || null
-        }
-      });
-    }
-
-    // Check if last_four_digits already exists in database
-    const needsZohoFetch = !customer.last_four_digits;
-    
-    // Fetch customer details from Zoho to get pricebook_name and tax preference
-    let zohoCustomer = null;
-    let last_four_digits = customer.last_four_digits; // Use existing value if available
-    let cardBrand = customer.cardBrand;
-    let hasCardInfo = customer.last_four_digits ? true : false;
-    let cardInfoChecked = false;
-    
-    try {
-      zohoCustomer = await getZohoCustomerById(customer.zohoId);
-      
-      // Extract pricebook_name from Zoho customer data
-      // Check multiple possible field names
-      const pricebookName = zohoCustomer.pricebook_name || 
-                           zohoCustomer.price_list_name || 
-                           zohoCustomer.price_list?.name ||
-                           zohoCustomer.pricebook?.name ||
-                           null;
-      
-      // Extract tax preference from Zoho customer data
-      // Check multiple possible field names and locations
-      let taxPreference = null;
-      
-      // Check direct fields
-      if (zohoCustomer.tax_preference) {
-        taxPreference = zohoCustomer.tax_preference;
-      } else if (zohoCustomer.tax_exemption_code) {
-        taxPreference = zohoCustomer.tax_exemption_code;
-      } else if (zohoCustomer.tax_exemption_id) {
-        taxPreference = zohoCustomer.tax_exemption_id;
-      } else if (zohoCustomer.tax_treatment) {
-        taxPreference = zohoCustomer.tax_treatment;
-      }
-      
-      // Check custom fields for tax preference
-      if (!taxPreference && zohoCustomer.custom_fields && Array.isArray(zohoCustomer.custom_fields)) {
-        const taxPreferenceField = zohoCustomer.custom_fields.find(
-          field => field.label?.toLowerCase().includes('tax') && 
-                   (field.label?.toLowerCase().includes('preference') || 
-                    field.label?.toLowerCase().includes('exemption') ||
-                    field.label?.toLowerCase().includes('treatment'))
-        );
-        if (taxPreferenceField) {
-          taxPreference = taxPreferenceField.value;
-        }
-      }
-      
-      // Check tax exemptions array if available
-      if (!taxPreference && zohoCustomer.tax_exemptions && Array.isArray(zohoCustomer.tax_exemptions)) {
-        if (zohoCustomer.tax_exemptions.length > 0) {
-          taxPreference = zohoCustomer.tax_exemptions[0].tax_exemption_code || 
-                         zohoCustomer.tax_exemptions[0].tax_exemption_id ||
-                         'Tax Exempt';
-        }
-      }
-
-      // Check card info from Zoho
-      cardInfoChecked = true; // We've checked Zoho for card info
-      if (needsZohoFetch) {
-        // Need to fetch from Zoho - check if cards exist
-        if (zohoCustomer.cards && Array.isArray(zohoCustomer.cards) && zohoCustomer.cards.length > 0) {
-          // Get the first active card
-          const activeCard = zohoCustomer.cards.find(card => card.status === 'active') || zohoCustomer.cards[0];
-          if (activeCard && activeCard.last_four_digits) {
-            last_four_digits = activeCard.last_four_digits || null;
-            // Capitalize card_type (visa -> Visa, mastercard -> Mastercard, etc.)
-            const cardType = activeCard.card_type || null;
-            cardBrand = cardType ? cardType.charAt(0).toUpperCase() + cardType.slice(1).toLowerCase() : null;
-            hasCardInfo = true;
-          } else {
-            // Cards exist but no valid card with last_four_digits
-            hasCardInfo = false;
-          }
-        } else {
-          // No cards array or empty - customer has no card info
-          hasCardInfo = false;
-        }
-      } else {
-        // Already have card info in DB - use existing status
-        hasCardInfo = customer.last_four_digits ? true : false;
-        cardInfoChecked = true; // We know the status from DB
-      }
-
-      // Update customer record with last_four_digits and cardBrand if found and not already in DB
-      if (needsZohoFetch && last_four_digits) {
-        try {
-          await customer.update({
-            last_four_digits: last_four_digits,
-            cardBrand: cardBrand || customer.cardBrand,
-            hasPaymentMethod: true,
-            paymentMethodType: 'card'
-          });
-          logSuccess(`Updated customer record with card information: ${last_four_digits} (${cardBrand || 'Unknown'})`);
-        } catch (updateError) {
-          logError('Failed to update customer with card information', updateError);
-          // Continue even if update fails
-        }
-      }
-
-      // Fetch customer cards from Zoho Billing API
-      let customerCards = [];
-      try {
-        customerCards = await getCustomerCards(customer.zohoId);
-      } catch (cardError) {
-        // Silently handle card fetch errors
-      }
-
-      // Reload customer to get updated last_four_digits and cardBrand if it was just saved
-      if (needsZohoFetch && last_four_digits) {
-        await customer.reload();
-        last_four_digits = customer.last_four_digits;
-        cardBrand = customer.cardBrand;
-      }
-
-      // Use current customer cardBrand if we don't have one from Zoho
-      const finalCardBrand = cardBrand || customer.cardBrand || null;
-
-      // Reload customer to get updated bankAccountLast4 if it was just saved
-      await customer.reload();
-      
-      return sendSuccess(res, { 
-        pricebook_name: pricebookName,
-        tax_preference: taxPreference,
-        cards: customerCards,
-        last_four_digits: last_four_digits,
-        card_type: finalCardBrand,
-        has_card_info: hasCardInfo,
-        card_info_checked: cardInfoChecked,
-        bank_account_last4: customer.bankAccountLast4 || null
-      });
-    } catch (zohoError) {
-      logError('Failed to fetch customer details from Zoho', zohoError);
-      if (zohoError.response) {
-        log(`  HTTP Status: ${zohoError.response.status}`);
-        if (zohoError.response.data) {
-          log(`  Response:`, zohoError.response.data);
-        }
-      }
-      return sendSuccess(res, { 
+      return sendSuccess(res, {
         pricebook_name: null,
         tax_preference: null,
         cards: [],
         last_four_digits: customer.last_four_digits || null,
         card_type: customer.cardBrand || null,
         has_card_info: customer.last_four_digits ? true : false,
-        card_info_checked: false, // Error occurred, couldn't check
+        card_info_checked: false,
         bank_account_last4: customer.bankAccountLast4 || null
       });
     }
+
+    // getPriceList always returns from DB only (no condition, no Zoho calls)
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customerController:getPriceList from DB',message:'returning from DB (no Zoho)',data:{customerId:id,pricebook_name:customer.pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
+    let cards = [];
+    try {
+      if (customer.zohoCards && typeof customer.zohoCards === 'string') {
+        cards = JSON.parse(customer.zohoCards);
+      } else if (Array.isArray(customer.zohoCards)) {
+        cards = customer.zohoCards;
+      }
+    } catch (_) {}
+    return sendSuccess(res, {
+      pricebook_name: customer.pricebook_name || null,
+      tax_preference: customer.tax_preference || null,
+      cards,
+      last_four_digits: customer.last_four_digits || null,
+      card_type: customer.cardBrand || null,
+      has_card_info: !!customer.last_four_digits,
+      card_info_checked: true,
+      bank_account_last4: customer.bankAccountLast4 || null
+    });
   } catch (err) {
     logError('Get customer price list error', err);
     return sendError(res, 'Failed to fetch customer price list', 500, err);

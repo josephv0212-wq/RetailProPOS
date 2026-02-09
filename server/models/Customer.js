@@ -79,5 +79,25 @@ export const Customer = sequelize.define('Customer', {
   },
   lastSyncedAt: {
     type: DataTypes.DATE
+  },
+  pricebook_name: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Cached from Zoho for fast customer select'
+  },
+  tax_preference: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Cached from Zoho (e.g. tax exemption)'
+  },
+  zohoCards: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    comment: 'JSON array of cards from Zoho for stored payment methods'
+  },
+  zohoProfileSyncedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: 'When Zoho profile (pricebook, tax, cards) was last synced'
   }
 });

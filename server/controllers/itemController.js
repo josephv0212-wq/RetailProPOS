@@ -3,10 +3,11 @@ import { Op } from 'sequelize';
 import { getItemsFromPricebookByName, syncItemsFromZoho as syncItemsFromZohoService } from '../services/zohoService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
+import { zohoCache } from '../utils/cache.js';
 
 export const getItems = async (req, res) => {
   try {
-    const { search, isActive } = req.query;
+    const { search, isActive, includeImageData } = req.query;
     const where = {};
 
     if (search) {
@@ -20,11 +21,16 @@ export const getItems = async (req, res) => {
       where.isActive = isActive === 'true';
     }
 
+    // Exclude imageData by default to keep list response small and fast (~28s -> sub-second when 172 items)
+    const attributes = includeImageData === 'true' || includeImageData === '1'
+      ? undefined
+      : ['id', 'zohoId', 'name', 'sku', 'description', 'price', 'taxId', 'taxName', 'taxPercentage', 'unit', 'isActive', 'lastSyncedAt'];
+
     const items = await Item.findAll({
       where,
-      order: [['name', 'ASC']]
+      order: [['name', 'ASC']],
+      ...(attributes && { attributes })
     });
-
     return sendSuccess(res, { items });
   } catch (err) {
     console.error('Get items error:', err);
@@ -57,11 +63,24 @@ export const getItemsFromPricebook = async (req, res) => {
     }
 
     console.log(`Fetching items from pricebook: "${pricebookName}"`);
-
-    // Fetch items from Zoho pricebook
-    const zohoItems = await getItemsFromPricebookByName(pricebookName);
-    
-    console.log(`Retrieved ${zohoItems.length} items from Zoho pricebook "${pricebookName}"`);
+    // #region agent log
+    const t0Pricebook = Date.now();
+    // #endregion
+    const PRICEBOOK_ITEMS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+    const cacheKey = `pricebook_zoho_items_${pricebookName}`;
+    let zohoItems = zohoCache.get(cacheKey);
+    let fromCache = false;
+    if (!zohoItems || !Array.isArray(zohoItems)) {
+      zohoItems = await getItemsFromPricebookByName(pricebookName);
+      zohoCache.set(cacheKey, zohoItems, PRICEBOOK_ITEMS_CACHE_TTL_MS);
+      console.log(`Retrieved ${zohoItems.length} items from Zoho pricebook "${pricebookName}" (cached)`);
+    } else {
+      fromCache = true;
+      console.log(`Using cached pricebook items for "${pricebookName}" (${zohoItems.length} items)`);
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'itemController:getItemsFromPricebook',message:fromCache?'from cache':'from Zoho',data:{pricebookName,fromCache,zohoItemsCount:zohoItems?.length,durationMsSoFar:Date.now()-t0Pricebook},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
 
     // Get all active items from database
     const allDbItems = await Item.findAll({
@@ -149,7 +168,9 @@ export const getItemsFromPricebook = async (req, res) => {
     });
 
     console.log(`Returning ${mergedItems.length} merged items (${validPricebookItems.length} from pricebook)`);
-    
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'itemController:getItemsFromPricebook end',message:'merged items ready',data:{durationMs:Date.now()-t0Pricebook,mergedCount:mergedItems?.length},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     return sendSuccess(res, { 
       items: mergedItems,
       pricebookName,

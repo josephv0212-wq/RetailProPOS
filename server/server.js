@@ -404,6 +404,46 @@ const ensureCustomerStatusColumn = async () =>
     warnMessage: 'Could not ensure status column on Customers table'
   });
 
+// Ensure Zoho profile cache columns on Customers (pricebook, tax, cards) for fast customer select
+const ensureCustomerZohoCacheColumns = async () => {
+  await ensureColumn({
+    table: 'Customers',
+    column: 'pricebook_name',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added pricebook_name column to Customers table',
+    existsMessage: 'pricebook_name column already exists on Customers table',
+    warnMessage: 'Could not ensure pricebook_name column on Customers table'
+  });
+  await ensureColumn({
+    table: 'Customers',
+    column: 'tax_preference',
+    sqliteType: 'VARCHAR(255) NULL',
+    pgType: 'VARCHAR(255) NULL',
+    successMessage: 'Added tax_preference column to Customers table',
+    existsMessage: 'tax_preference column already exists on Customers table',
+    warnMessage: 'Could not ensure tax_preference column on Customers table'
+  });
+  await ensureColumn({
+    table: 'Customers',
+    column: 'zohoCards',
+    sqliteType: 'TEXT NULL',
+    pgType: 'TEXT NULL',
+    successMessage: 'Added zohoCards column to Customers table',
+    existsMessage: 'zohoCards column already exists on Customers table',
+    warnMessage: 'Could not ensure zohoCards column on Customers table'
+  });
+  await ensureColumn({
+    table: 'Customers',
+    column: 'zohoProfileSyncedAt',
+    sqliteType: 'DATETIME NULL',
+    pgType: 'TIMESTAMP NULL',
+    successMessage: 'Added zohoProfileSyncedAt column to Customers table',
+    existsMessage: 'zohoProfileSyncedAt column already exists on Customers table',
+    warnMessage: 'Could not ensure zohoProfileSyncedAt column on Customers table'
+  });
+};
+
 // Ensure terminalIP, terminalPort, and terminalNumber columns exist on Users table
 const ensureTerminalColumns = async () => {
   await ensureColumn({
@@ -802,6 +842,7 @@ const startServer = async () => {
           await ensureBankAccountColumn();
           await ensureCustomerProfileColumns();
           await ensureCustomerStatusColumn();
+          await ensureCustomerZohoCacheColumns();
           await ensureBasicUMColumn();
           await ensureTransactionsTable();
         } else {
@@ -814,8 +855,9 @@ const startServer = async () => {
           await ensureBankAccountColumn();
           await ensureCustomerProfileColumns();
           await ensureCustomerStatusColumn();
-  await ensureBasicUMColumn();
-  await ensureTransactionsTable();
+          await ensureCustomerZohoCacheColumns();
+          await ensureBasicUMColumn();
+          await ensureTransactionsTable();
         }
 
   // Migrate dry ice UMs to database
