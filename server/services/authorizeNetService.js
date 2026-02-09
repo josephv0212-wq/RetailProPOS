@@ -918,7 +918,7 @@ export const extractPaymentProfiles = (profile) => {
           
           result.push({
             paymentProfileId: paymentProfileId.toString(),
-            type: 'credit_card',
+            type: 'card',
             cardNumber: cardNumber || 'XXXX',
             expirationDate: expirationDate || '',
             isDefault: paymentProfile.billTo && Array.isArray(paymentProfile.billTo) && paymentProfile.billTo[0]?.defaultPaymentProfile === 'true'

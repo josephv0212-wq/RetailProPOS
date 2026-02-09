@@ -5,7 +5,7 @@ import { logger } from '../../utils/logger';
 
 interface PaymentProfile {
   paymentProfileId: string;
-  type: 'credit_card' | 'ach';
+  type: 'card' | 'ach';
   cardNumber?: string;
   expirationDate?: string;
   accountNumber?: string;
@@ -16,7 +16,7 @@ interface PaymentProfile {
 interface PaymentMethodSelectorProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (paymentProfileId: string, profileType?: 'credit_card' | 'ach') => void;
+  onSelect: (paymentProfileId: string, profileType?: 'card' | 'ach') => void;
   customerId: number;
   customerName: string;
   loading?: boolean;
@@ -184,13 +184,13 @@ export function PaymentMethodSelector({
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
-                          {(profile.type === 'credit_card' || profile.type === 'debit_card') ? (
+                          {(profile.type === 'card') ? (
                             <CreditCard className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                           ) : (
                             <Building2 className="w-5 h-5 text-green-600 dark:text-green-400" />
                           )}
                           <span className="font-semibold text-gray-900 dark:text-white">
-                            {(profile.type === 'credit_card' || profile.type === 'debit_card') ? 'Card' : 'Bank Account'}
+                            {(profile.type === 'card') ? 'Card' : 'Bank Account'}
                           </span>
                           {(profile.isDefault || profile.isStored) && (
                             <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 rounded">
@@ -199,7 +199,7 @@ export function PaymentMethodSelector({
                           )}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {(profile.type === 'credit_card' || profile.type === 'debit_card') ? (
+                          {(profile.type === 'card') ? (
                             <>
                               <div>Card: {formatCardNumber(profile.cardNumber || 'XXXX')}</div>
                               {profile.expirationDate && (

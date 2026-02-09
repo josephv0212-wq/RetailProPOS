@@ -80,7 +80,7 @@ export interface CartItem {
 }
 
 export interface PaymentMethod {
-  type: 'cash' | 'credit_card' | 'debit_card' | 'stored_payment' | 'zelle' | 'ach';
+  type: 'cash' | 'card' | 'stored_payment' | 'zelle' | 'ach';
   label: string;
 }
 
@@ -148,7 +148,7 @@ export interface Sale {
   taxPercentage: number;
   ccFee: number;
   total: number;
-  paymentType: 'cash' | 'credit_card' | 'debit_card' | 'zelle' | 'ach';
+  paymentType: 'cash' | 'card' | 'zelle' | 'ach';
   locationId: string;
   locationName: string;
   customerId?: number | null;

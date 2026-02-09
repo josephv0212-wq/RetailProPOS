@@ -9,7 +9,7 @@ interface Transaction {
   id: string;
   saleId?: number;
   date: Date;
-  paymentType: 'cash' | 'credit_card' | 'debit_card' | 'zelle' | 'ach';
+  paymentType: 'cash' | 'card' | 'zelle' | 'ach';
   subtotal: number;
   tax: number;
   fee: number;
@@ -537,7 +537,7 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                           <td className="px-6 py-4 whitespace-nowrap">
                             {(() => {
                               const type = transaction.paymentType;
-                              const isCard = type === 'credit_card' || type === 'debit_card';
+                              const isCard = type === 'card' || type === 'credit_card' || type === 'debit_card';
                               const label =
                                 type === 'cash' ? 'CASH' :
                                 isCard ? 'Card' :
@@ -916,7 +916,7 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                         <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg px-4 py-3">
                           <p className="text-[9px] text-gray-500 dark:text-gray-400 font-bold uppercase mb-1">Payment Method</p>
                           <p className="text-[11px] font-bold text-gray-900 dark:text-white">
-                            {receiptSale.payment?.method === 'credit_card' || receiptSale.payment?.method === 'debit_card' ? 'Card' : (receiptSale.payment?.method || receiptSale.paymentType || 'N/A').toString().split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                            {receiptSale.payment?.method === 'card' || receiptSale.payment?.method === 'credit_card' || receiptSale.payment?.method === 'debit_card' ? 'Card' : (receiptSale.payment?.method || receiptSale.paymentType || 'N/A').toString().split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                           </p>
                         </div>
                       </div>

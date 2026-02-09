@@ -270,6 +270,7 @@ export const createSalesReceipt = async (saleData) => {
     paymentType,
     notes,
     saleId,
+    transactionId, // Transaction ID from payment processing (Authorize.Net, Valor, etc.)
     // Optional Zoho fields/params
     zohoTaxId, // preferred tax_id to apply to taxable line items
     receipt_number,
@@ -294,8 +295,9 @@ export const createSalesReceipt = async (saleData) => {
 
   const paymentModeMap = {
     cash: 'cash',
-    credit_card: 'creditcard',
-    debit_card: 'creditcard', // merged with credit_card as card
+    card: 'creditcard', // unified card type (CC/DC merged)
+    credit_card: 'creditcard', // backward compatibility
+    debit_card: 'creditcard', // backward compatibility - merged with credit_card as card
     zelle: 'banktransfer',
     ach: 'banktransfer'
   };
@@ -463,7 +465,14 @@ export const createSalesReceipt = async (saleData) => {
       
       return lineItem;
     }),
-    notes: notes || `Sale from POS - Location: ${locationName || locationId || 'Unknown'}`
+    notes: (() => {
+      const baseNote = notes || `Sale from POS - Location: ${locationName || locationId || 'Unknown'}`;
+      // Add transaction ID to notes if available
+      if (transactionId && String(transactionId).trim() !== '') {
+        return `${baseNote}\nTransaction ID: ${transactionId}`;
+      }
+      return baseNote;
+    })()
   };
 
   // Zoho Books: associate the receipt with a specific location (if locations feature is enabled)

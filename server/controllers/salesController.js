@@ -55,7 +55,7 @@ const fetchLegacyTransactionsForReports = async ({ locationId, startDate, endDat
     const normalizePaymentType = (v) => {
       const s = String(v || '').toLowerCase().trim();
       if (s === 'cash' || s === 'zelle' || s === 'ach') return s;
-      if (s === 'credit_card' || s === 'debit_card' || s === 'credit' || s === 'cc' || s === 'card' || s === 'creditcard' || s === 'debit' || s === 'debitcard') return 'credit_card';
+      if (s === 'credit_card' || s === 'debit_card' || s === 'credit' || s === 'cc' || s === 'card' || s === 'creditcard' || s === 'debit' || s === 'debitcard') return 'card';
       return 'cash';
     };
 
@@ -209,8 +209,10 @@ export const createSale = async (req, res) => {
       savePaymentMethod 
     } = req.body;
     let paymentType = requestPaymentType;
-    // Merge debit_card into credit_card: store and process as single "card" type
-    if (paymentType === 'debit_card') paymentType = 'credit_card';
+    // Merge debit_card into card: store and process as single "card" type
+    if (paymentType === 'debit_card') paymentType = 'card';
+    // Backward compatibility: normalize credit_card to card
+    if (paymentType === 'credit_card') paymentType = 'card';
 
     // Support useStandaloneMode from root level OR from paymentDetails (for backward compatibility)
     const isStandaloneMode = useStandaloneMode === true || paymentDetails?.useStandaloneMode === true;
@@ -370,14 +372,14 @@ export const createSale = async (req, res) => {
           const paymentProfiles = extractPaymentProfiles(profileResult.profile);
           const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
           if (selectedProfile) {
-            actualPaymentType = selectedProfile.type === 'ach' ? 'ach' : 'credit_card'; // debit_card merged to credit_card
+            actualPaymentType = selectedProfile.type === 'ach' ? 'ach' : 'card'; // debit_card merged to card
           }
         }
       }
     }
     
-    // 3% convenience fee for card (CC/DC merged as credit_card)
-    cardProcessingFee = actualPaymentType === 'credit_card'
+    // 3% convenience fee for card (CC/DC merged as card)
+    cardProcessingFee = actualPaymentType === 'card'
       ? calculateCreditCardFee(subtotal, taxAmount)
       : 0;
 
@@ -389,7 +391,7 @@ export const createSale = async (req, res) => {
     // Standalone mode: Skip payment processing, just record the sale (works like cash payment)
     // This handles when cardReaderMode is 'standalone' - cashier processes payment manually on external card reader
     // IMPORTANT: This must be checked BEFORE any card payment processing logic
-    if (isStandaloneMode && paymentType === 'credit_card') {
+    if (isStandaloneMode && paymentType === 'card') {
       // No payment processing required - works exactly like cash payment
       // Cashier will manually process payment on external card reader after sale is recorded
       transactionId = `STANDALONE-${Date.now()}`;
@@ -398,7 +400,7 @@ export const createSale = async (req, res) => {
         message: 'Sale recorded. Payment to be processed manually on external card reader.',
         transactionId: transactionId
       };
-      // Keep payment type as credit_card; mark as manual card reader payment
+      // Keep payment type as card; mark as manual card reader payment
       // The description will indicate "manual card reader payment" in the sale record
       // Do NOT process any card payment - skip all card processing logic below
     } else if (useStoredPayment && paymentProfileId && customer) {
@@ -504,7 +506,7 @@ export const createSale = async (req, res) => {
       transactionId = paymentResult.transactionId;
       // Update paymentType to actual type determined from profile
       paymentType = actualPaymentType;
-    } else if (paymentType === 'credit_card') {
+    } else if (paymentType === 'card') {
       // IMPORTANT: Double-check standalone mode - if enabled, skip all card processing
       if (isStandaloneMode) {
         // This should have been caught earlier, but add safety check here too
@@ -628,7 +630,7 @@ export const createSale = async (req, res) => {
     const shouldSavePaymentMethod =
       !!customer &&
       !!transactionId &&
-      (paymentType === 'credit_card' || paymentType === 'ach') &&
+      (paymentType === 'card' || paymentType === 'ach') &&
       !useValorApi &&
       !useStoredPayment &&
       !isStandaloneMode &&
@@ -656,7 +658,7 @@ export const createSale = async (req, res) => {
             paymentMethodType: paymentType
           };
 
-          if (paymentType === 'credit_card') {
+          if (paymentType === 'card') {
             if (last4) {
               updates.last_four_digits = last4;
             }
@@ -681,7 +683,7 @@ export const createSale = async (req, res) => {
 
     // Add note for standalone mode (manual card reader payment)
     let saleNotes = notes || '';
-    if (isStandaloneMode && paymentType === 'credit_card') {
+    if (isStandaloneMode && paymentType === 'card') {
       const manualPaymentNote = 'Manual card reader payment';
       saleNotes = saleNotes ? `${saleNotes}\n${manualPaymentNote}` : manualPaymentNote;
     }
@@ -735,6 +737,7 @@ export const createSale = async (req, res) => {
           total: parseFloat(sale.total),
           paymentType: sale.paymentType,
           notes: sale.notes,
+          transactionId: sale.transactionId, // Transaction ID from payment processing
           // Provide user's/location Zoho tax_id so the Zoho service can enforce tax_id on all taxable line items.
           zohoTaxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null,
           saleId: sale.id
@@ -1045,7 +1048,7 @@ export const getInvoicePayments = async (req, res) => {
       amount: parseFloat(p.amount || 0),
       ccFee: parseFloat(p.ccFee || 0),
       amountCharged: parseFloat(p.amountCharged || 0),
-      paymentType: p.paymentType || 'credit_card',
+      paymentType: p.paymentType || 'card',
       transactionId: p.transactionId,
       zohoPaymentRecorded: Boolean(p.zohoPaymentRecorded)
     }));
@@ -1184,6 +1187,7 @@ export const retryZohoSync = async (req, res) => {
       total: parseFloat(sale.total),
       paymentType: sale.paymentType,
       notes: sale.notes,
+      transactionId: sale.transactionId, // Transaction ID from payment processing
       // Ensure Zoho line items always get tax_id when applicable (see mapping in zohoService)
       zohoTaxId: isTaxableSale ? (userZohoTaxId || null) : null,
       saleId: sale.id
@@ -1297,8 +1301,8 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
   try {
     const { customerId, items, paymentProfileId, paymentType: requestPaymentType } = req.body;
     const raw = requestPaymentType && String(requestPaymentType).toLowerCase();
-    // Merge CC/DC: treat any card as credit_card
-    const paymentType = raw === 'ach' ? 'ach' : 'credit_card';
+    // Merge CC/DC: treat any card as card
+    const paymentType = raw === 'ach' ? 'ach' : 'card';
 
     if (!customerId) {
       return sendValidationError(res, 'Customer ID is required');
@@ -1422,7 +1426,7 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
         const paymentProfiles = extractPaymentProfiles(profileResult.profile);
         const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
         if (selectedProfile) {
-          actualProfileType = selectedProfile.type === 'ach' ? 'ach' : 'credit_card';
+          actualProfileType = selectedProfile.type === 'ach' ? 'ach' : 'card';
         }
       }
     } catch (profileErr) {
@@ -1607,7 +1611,7 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
           amount: it.amount,
           amountCharged,
           ccFee,
-          paymentType: paymentType || 'credit_card',
+          paymentType: paymentType || 'card',
           transactionId,
           zohoPaymentRecorded: it.type === 'invoice' ? zohoPaymentRecorded : false,
           locationId: req.user?.locationId || null,

@@ -44,7 +44,7 @@ export const InvoicePayment = sequelize.define('InvoicePayment', {
   paymentType: {
     type: DataTypes.STRING,
     allowNull: false,
-    comment: 'credit_card or ach'
+    comment: 'card or ach (card replaces credit_card/debit_card)'
   },
   transactionId: {
     type: DataTypes.STRING,

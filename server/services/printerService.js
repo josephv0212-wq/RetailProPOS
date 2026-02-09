@@ -153,9 +153,9 @@ function buildReceipt(saleData, locationId) {
   
   // Payment method
   receipt += CMD.ALIGN_LEFT;
-  // Format payment type: merge credit_card and debit_card to "Card", others to title case
+  // Format payment type: merge card, credit_card and debit_card to "Card", others to title case
   let paymentTypeDisplay;
-  if (sale.paymentType === 'credit_card' || sale.paymentType === 'debit_card') {
+  if (sale.paymentType === 'card' || sale.paymentType === 'credit_card' || sale.paymentType === 'debit_card') {
     paymentTypeDisplay = 'Card';
   } else {
     // Convert other methods to title case (e.g., 'cash' -> 'Cash', 'zelle' -> 'Zelle', 'ach' -> 'ACH')

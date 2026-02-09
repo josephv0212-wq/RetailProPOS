@@ -328,7 +328,7 @@ export const customersAPI = {
       customerProfileId: string | null;
       paymentProfiles: Array<{
         paymentProfileId: string;
-        type: 'credit_card' | 'ach';
+        type: 'card' | 'ach';
         cardNumber?: string;
         expirationDate?: string;
         accountNumber?: string;
@@ -367,7 +367,7 @@ export const salesAPI = {
   create: async (data: {
     items: Array<{ itemId: number; quantity: number }>;
     customerId?: number;
-    paymentType: 'cash' | 'credit_card' | 'debit_card' | 'zelle' | 'ach';
+    paymentType: 'cash' | 'card' | 'zelle' | 'ach';
     paymentDetails: any;
     notes?: string;
     customerTaxPreference?: 'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE';
@@ -441,7 +441,7 @@ export const salesAPI = {
   chargeInvoicesSalesOrders: async (data: {
     customerId: number;
     paymentProfileId: string;
-    paymentType?: 'credit_card' | 'debit_card' | 'ach';
+    paymentType?: 'card' | 'ach';
     items: Array<{
       type: 'invoice' | 'salesorder';
       id: string;

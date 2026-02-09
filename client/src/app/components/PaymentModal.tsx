@@ -31,7 +31,7 @@ interface PaymentModalProps {
 
 const paymentMethods: PaymentMethod[] = [
   { type: 'cash', label: 'Cash' },
-  { type: 'credit_card', label: 'Card' },
+  { type: 'card', label: 'Card' },
   { type: 'stored_payment', label: 'Stored Payment Method' },
   { type: 'zelle', label: 'Zelle' },
   { type: 'ach', label: 'ACH' },
@@ -151,10 +151,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     return basePrice;
   };
 
-  // Calculate convenience fee for CREDIT card payments and stored CREDIT card profiles
-  const isCreditCardPayment = selectedMethod === 'credit_card' || 
+  // Calculate convenience fee for card payments and stored card profiles
+  const isCreditCardPayment = selectedMethod === 'card' || 
     (selectedMethod === 'stored_payment' && selectedPaymentProfileId && 
-     paymentProfiles.find((p: any) => p.paymentProfileId === selectedPaymentProfileId)?.type === 'credit_card');
+     paymentProfiles.find((p: any) => p.paymentProfileId === selectedPaymentProfileId)?.type === 'card');
   // Apply 3% surcharge for credit card on both normal POS sales and invoice/sales-order POS payments.
   const convenienceFee = (context === 'sale' || context === 'zohoDocuments') && isCreditCardPayment ? total * 0.03 : 0;
   const finalTotal = total + convenienceFee;
@@ -166,7 +166,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     setIsProcessing(true);
 
     // Standalone mode: Skip payment processing, just record the sale
-    if (cardReaderMode === 'standalone' && selectedMethod === 'credit_card') {
+    if (cardReaderMode === 'standalone' && selectedMethod === 'card') {
       const paymentDetails: PaymentDetails = {
         method: selectedMethod,
         amount: finalTotal,
@@ -193,7 +193,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     }
 
     // Validation
-    if (selectedMethod === 'credit_card') {
+    if (selectedMethod === 'card') {
       if (cardPaymentMethod === 'valor_api') {
         // Valor Connect API validation - EPI is required
         const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
@@ -241,7 +241,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     if (selectedMethod === 'stored_payment') {
       // Determine payment type from selected profile
       const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === selectedPaymentProfileId);
-      paymentMethod = selectedProfile?.type === 'ach' ? 'ach' : 'credit_card';
+      paymentMethod = selectedProfile?.type === 'ach' ? 'ach' : 'card';
     }
     
     const paymentDetails: PaymentDetails = {
@@ -250,7 +250,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
       savePaymentMethod: savePaymentMethod && !!customerId,
     };
 
-    if (selectedMethod === 'credit_card') {
+    if (selectedMethod === 'card') {
       if (cardPaymentMethod === 'valor_api') {
         // Valor Connect API mode - direct integration with Valor Connect API
         const terminalNumber = selectedTerminalNumber || userTerminalNumber || '';
@@ -690,12 +690,12 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               
               <button
                 onClick={() => {
-                  setSelectedMethod('credit_card');
+                  setSelectedMethod('card');
                   setCardPaymentMethod('valor_api');
                   setCardReaderStatus('ready');
                 }}
                 className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                  selectedMethod === 'credit_card'
+                  selectedMethod === 'card'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
                 }`}
@@ -759,7 +759,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           <div>
             {selectedMethod === 'cash' && null}
 
-            {selectedMethod === 'credit_card' && (
+            {selectedMethod === 'card' && (
               <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
                 <div className="flex justify-center">
                   {cardPaymentMethod !== 'manual' ? (
@@ -916,13 +916,13 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                             </div>
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-1">
-                                {profile.type === 'credit_card' ? (
+                                {profile.type === 'card' ? (
                                   <CreditCard className="w-5 h-5 text-green-600 dark:text-green-400" />
                                 ) : (
                                   <Building2 className="w-5 h-5 text-green-600 dark:text-green-400" />
                                 )}
                                 <span className="font-semibold text-gray-900 dark:text-white">
-                                  {profile.type === 'credit_card' ? 'Card' : 'Bank Account'}
+                                  {profile.type === 'card' ? 'Card' : 'Bank Account'}
                                 </span>
                                 {(profile.isDefault || profile.isStored) && (
                                   <span className="text-xs text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2 py-0.5 rounded">
@@ -931,7 +931,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                                 )}
                               </div>
                               <div className="text-sm text-gray-600 dark:text-gray-400">
-                                {profile.type === 'credit_card' ? (
+                                {profile.type === 'card' ? (
                                   <>
                                     <div>Card: {formatCardNumber(profile.cardNumber || 'XXXX')}</div>
                                     {profile.expirationDate && (

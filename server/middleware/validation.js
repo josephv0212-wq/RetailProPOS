@@ -23,14 +23,17 @@ export const validateSale = (req, res, next) => {
     });
   }
 
-  // Validate payment type
-  const validPaymentTypes = ['cash', 'credit_card', 'debit_card', 'zelle', 'ach'];
+  // Validate payment type (accept both 'card' and legacy 'credit_card'/'debit_card' for backward compatibility)
+  const validPaymentTypes = ['cash', 'card', 'credit_card', 'debit_card', 'zelle', 'ach'];
   if (!paymentType || !validPaymentTypes.includes(paymentType)) {
     errors.push(`Payment type must be one of: ${validPaymentTypes.join(', ')}`);
   }
 
+  // Normalize payment type: merge credit_card/debit_card to card
+  const normalizedPaymentType = (paymentType === 'credit_card' || paymentType === 'debit_card') ? 'card' : paymentType;
+
   // Validate payment details based on payment type
-  if (paymentType === 'credit_card' || paymentType === 'debit_card') {
+  if (normalizedPaymentType === 'card') {
     // Support useStandaloneMode from root level OR from paymentDetails (for backward compatibility)
     const useStandaloneMode = req.body.useStandaloneMode || req.body.paymentDetails?.useStandaloneMode;
     
@@ -83,7 +86,7 @@ export const validateSale = (req, res, next) => {
       }
     }
     }
-  } else if (paymentType === 'ach') {
+  } else if (normalizedPaymentType === 'ach') {
     if (!paymentDetails) {
       errors.push('Payment details required for ACH transactions');
     } else {

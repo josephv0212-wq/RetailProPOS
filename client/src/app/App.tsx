@@ -88,7 +88,7 @@ function AppContent() {
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [pendingChargeItems, setPendingChargeItems] = useState<any[]>([]);
   const [isInvoicePaymentReceiptPreviewOpen, setIsInvoicePaymentReceiptPreviewOpen] = useState(false);
-  const [pendingStoredPaymentSelection, setPendingStoredPaymentSelection] = useState<{ paymentProfileId: string; profileType: 'credit_card' | 'ach' } | null>(null);
+  const [pendingStoredPaymentSelection, setPendingStoredPaymentSelection] = useState<{ paymentProfileId: string; profileType: 'card' | 'ach' } | null>(null);
   const [isZohoPaymentOptionsOpen, setIsZohoPaymentOptionsOpen] = useState(false);
   const [isZohoDocsPaymentModalOpen, setIsZohoDocsPaymentModalOpen] = useState(false);
   const [zohoDocsCartItems, setZohoDocsCartItems] = useState<CartItem[]>([]);
@@ -608,17 +608,17 @@ function AppContent() {
   };
 
   // Open receipt preview when user selects a stored payment method (before charging)
-  const handleOpenReceiptPreview = (paymentProfileId: string, profileType?: 'credit_card' | 'ach') => {
+  const handleOpenReceiptPreview = (paymentProfileId: string, profileType?: 'card' | 'ach') => {
     setPendingStoredPaymentSelection({
       paymentProfileId,
-      profileType: profileType === 'ach' ? 'ach' : 'credit_card',
+      profileType: profileType === 'ach' ? 'ach' : 'card',
     });
     setIsPaymentMethodSelectorOpen(false);
     setIsInvoicePaymentReceiptPreviewOpen(true);
   };
 
   // Handle payment method selection and charge (called from receipt preview "Confirm & Pay")
-  const handlePaymentMethodSelected = async (paymentProfileId: string, profileType?: 'credit_card' | 'ach') => {
+  const handlePaymentMethodSelected = async (paymentProfileId: string, profileType?: 'card' | 'ach') => {
     if (!selectedCustomer || !selectedCustomer.id || pendingChargeItems.length === 0) {
       return;
     }
@@ -627,9 +627,9 @@ function AppContent() {
       setLoadingOrders(true);
       setIsPaymentMethodSelectorOpen(false);
 
-      const paymentType = profileType === 'ach' ? 'ach' : 'credit_card';
+      const paymentType = profileType === 'ach' ? 'ach' : 'card';
 
-      // Charge invoices/sales orders via Authorize.net CIM (backend adds 3% CC fee when paymentType is credit_card)
+      // Charge invoices/sales orders via Authorize.net CIM (backend adds 3% CC fee when paymentType is card)
       const response = await salesAPI.chargeInvoicesSalesOrders({
         customerId: selectedCustomer.id,
         paymentProfileId,
@@ -953,7 +953,7 @@ function AppContent() {
 
     if (paymentDetails.method === 'cash') {
       apiPaymentDetails.cashReceived = paymentDetails.cashReceived || total;
-    } else if (paymentDetails.method === 'credit_card' || paymentDetails.method === 'debit_card') {
+    } else if (paymentDetails.method === 'card' || paymentDetails.method === 'credit_card' || paymentDetails.method === 'debit_card') {
       if (paymentDetails.useStandaloneMode) {
         // Standalone mode - no payment processing, just record the sale
         apiPaymentDetails.useStandaloneMode = true;
@@ -986,7 +986,7 @@ function AppContent() {
       // Determine payment type from stored profile (will be determined on backend)
       // For now, set paymentType based on method
       const isAch = paymentDetails.method === 'ach';
-      paymentType = isAch ? 'ach' : 'credit_card';
+      paymentType = isAch ? 'ach' : 'card';
     } else if (paymentDetails.method === 'zelle') {
       apiPaymentDetails.zelleConfirmation = paymentDetails.zelleConfirmation;
     } else if (paymentDetails.method === 'ach') {
