@@ -26,6 +26,7 @@ import { isVendorContact } from './utils/contactType';
 import { useToast } from './contexts/ToastContext';
 import { logger } from '../utils/logger';
 import { isDryIceItem } from './components/ShoppingCart';
+import { Loader2 } from 'lucide-react';
 
 type AppScreen = 'signin' | 'signup' | 'pos' | 'customers' | 'reports' | 'settings' | 'admin' | 'receipt';
 
@@ -85,6 +86,7 @@ function AppContent() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [isOrderInvoiceModalOpen, setIsOrderInvoiceModalOpen] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [pendingChargeItems, setPendingChargeItems] = useState<any[]>([]);
   const [isInvoicePaymentReceiptPreviewOpen, setIsInvoicePaymentReceiptPreviewOpen] = useState(false);
@@ -304,6 +306,7 @@ function AppContent() {
     if (customer.zohoId) {
       try {
         setLoadingOrders(true);
+        setLoadingMessage('Checking orders & invoices…');
         // #region agent log
         const t0SO = Date.now();
         fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before SO invoices',message:'before getCustomerOpenSalesOrders getCustomerInvoices',data:{t0:t0SO},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
@@ -326,6 +329,7 @@ function AppContent() {
         if (salesOrders.length > 0 || invoiceList.length > 0) {
           setIsOrderInvoiceModalOpen(true);
           setLoadingOrders(false);
+          setLoadingMessage(null);
           return;
         }
       } catch (err: any) {
@@ -334,6 +338,7 @@ function AppContent() {
         setInvoices([]);
       } finally {
         setLoadingOrders(false);
+        setLoadingMessage(null);
       }
     } else {
       setOpenSalesOrders([]);
@@ -794,15 +799,17 @@ function AppContent() {
     const t0Continue = Date.now();
     fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:continueCustomerSelection entry',message:'start',data:{t0:t0Continue},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
     // #endregion
-    // Use items already in DB (synced via Nav "Sync Zoho" or background). Do not sync on every customer select to avoid 15+ s latency.
-    // Fetch price list first only (no parallel loadProducts) so server isn't handling two heavy requests; then get pricebook or loadProducts.
-    if (customer.id) {
-      try {
-        // #region agent log
-        const t0PriceList = Date.now();
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before getPriceList',message:'before getPriceList',data:{t0:t0PriceList},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-        // #endregion
-        const priceListRes = await customersAPI.getPriceList(customer.id);
+    setLoadingMessage('Loading price list…');
+    try {
+      // Use items already in DB (synced via Nav "Sync Zoho" or background). Do not sync on every customer select to avoid 15+ s latency.
+      // Fetch price list first only (no parallel loadProducts) so server isn't handling two heavy requests; then get pricebook or loadProducts.
+      if (customer.id) {
+        try {
+          // #region agent log
+          const t0PriceList = Date.now();
+          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before getPriceList',message:'before getPriceList',data:{t0:t0PriceList},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+          // #endregion
+          const priceListRes = await customersAPI.getPriceList(customer.id);
         // #region agent log
         fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after getPriceList',message:'after getPriceList',data:{durationMs:Date.now()-t0PriceList,pricebookName:priceListRes?.data?.pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
         // #endregion
@@ -839,6 +846,7 @@ function AppContent() {
         setCustomerCards(cards);
         
         if (pricebookName) {
+          setLoadingMessage('Loading items…');
           // Fetch items from the pricebook (includes both pricebook items and regular items)
           try {
             // #region agent log
@@ -888,12 +896,14 @@ function AppContent() {
               }
             } else {
               // If no items, fall back to regular items
+              setLoadingMessage('Loading products…');
               await loadProducts();
               showToast(`No items found in pricebook. Showing all items.`, 'info', 3000);
             }
           } catch (pricebookError: any) {
             const errorMsg = pricebookError.response?.data?.message || pricebookError.message || 'Unknown error';
             // Fall back to regular items if pricebook fetch fails
+            setLoadingMessage('Loading products…');
             await loadProducts();
             showToast(`Failed to load pricebook items: ${errorMsg}. Showing all items.`, 'warning', 5000);
           }
@@ -902,6 +912,7 @@ function AppContent() {
           if (!customer.zohoId) {
             showToast('Customer has no Zoho ID. Cannot fetch pricebook items.', 'info', 3000);
           }
+          setLoadingMessage('Loading products…');
           await loadProducts();
           // #region agent log
           fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:no pricebook loaded',message:'path no pricebook',data:{totalDurationMs:Date.now()-t0Continue},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
@@ -913,7 +924,7 @@ function AppContent() {
         setSelectedCustomer(customer);
         setCustomerTaxPreference(null);
         setCustomerCards([]);
-        // Fall back to regular items
+        setLoadingMessage('Loading products…');
         await loadProducts();
         showToast(`Failed to fetch customer details: ${errorMsg}. Showing all items.`, 'warning', 5000);
       }
@@ -922,7 +933,11 @@ function AppContent() {
       setSelectedCustomer(customer);
       setCustomerTaxPreference(null);
       setCustomerCards([]);
+      setLoadingMessage('Loading products…');
       await loadProducts();
+    }
+    } finally {
+      setLoadingMessage(null);
     }
   };
 
@@ -1294,7 +1309,17 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 relative">
+      {/* Loading overlay with icon and process text */}
+      {loadingMessage && (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-black/40 dark:bg-black/50 backdrop-blur-[2px]">
+          <Loader2 className="w-12 h-12 text-blue-600 dark:text-blue-400 animate-spin flex-shrink-0" aria-hidden />
+          <p className="text-gray-100 dark:text-gray-100 font-medium text-center text-lg tabular-nums">
+            {loadingMessage}
+          </p>
+        </div>
+      )}
+
       <TopNavigation
         storeName={constants.STORE_NAME}
         userName={constants.USER_NAME}
