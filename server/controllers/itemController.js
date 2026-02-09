@@ -1,9 +1,8 @@
-import { Item } from '../models/index.js';
+import { Item, PricebookCache } from '../models/index.js';
 import { Op } from 'sequelize';
 import { getItemsFromPricebookByName, syncItemsFromZoho as syncItemsFromZohoService } from '../services/zohoService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
-import { zohoCache } from '../utils/cache.js';
 
 export const getItems = async (req, res) => {
   try {
@@ -66,20 +65,41 @@ export const getItemsFromPricebook = async (req, res) => {
     // #region agent log
     const t0Pricebook = Date.now();
     // #endregion
-    const PRICEBOOK_ITEMS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-    const cacheKey = `pricebook_zoho_items_${pricebookName}`;
-    let zohoItems = zohoCache.get(cacheKey);
-    let fromCache = false;
-    if (!zohoItems || !Array.isArray(zohoItems)) {
+    // First: get from DB. Second: if not in DB, get from Zoho and save to DB.
+    const PRICEBOOK_DB_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+    let zohoItems = [];
+    let source = 'zoho';
+    const cached = await PricebookCache.findByPk(pricebookName);
+    if (cached?.itemsJson) {
+      try {
+        const parsed = JSON.parse(cached.itemsJson);
+        if (Array.isArray(parsed)) {
+          const age = Date.now() - new Date(cached.updatedAt).getTime();
+          if (age < PRICEBOOK_DB_TTL_MS) {
+            zohoItems = parsed;
+            source = 'db';
+            console.log(`Using pricebook items from DB for "${pricebookName}" (${zohoItems.length} items)`);
+          }
+        }
+      } catch (_) { /* invalid JSON, fall through to Zoho */ }
+    }
+    if (source !== 'db') {
       zohoItems = await getItemsFromPricebookByName(pricebookName);
-      zohoCache.set(cacheKey, zohoItems, PRICEBOOK_ITEMS_CACHE_TTL_MS);
-      console.log(`Retrieved ${zohoItems.length} items from Zoho pricebook "${pricebookName}" (cached)`);
-    } else {
-      fromCache = true;
-      console.log(`Using cached pricebook items for "${pricebookName}" (${zohoItems.length} items)`);
+      try {
+        const row = await PricebookCache.findByPk(pricebookName);
+        const payload = { itemsJson: JSON.stringify(zohoItems), updatedAt: new Date() };
+        if (row) {
+          await row.update(payload);
+        } else {
+          await PricebookCache.create({ pricebookName, ...payload });
+        }
+      } catch (saveErr) {
+        console.warn('Could not save pricebook cache to DB:', saveErr?.message);
+      }
+      console.log(`Retrieved ${zohoItems.length} items from Zoho pricebook "${pricebookName}" (saved to DB)`);
     }
     // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'itemController:getItemsFromPricebook',message:fromCache?'from cache':'from Zoho',data:{pricebookName,fromCache,zohoItemsCount:zohoItems?.length,durationMsSoFar:Date.now()-t0Pricebook},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'itemController:getItemsFromPricebook',message:source==='db'?'from DB':'from Zoho',data:{pricebookName,source,zohoItemsCount:zohoItems?.length,durationMsSoFar:Date.now()-t0Pricebook},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
     // #endregion
 
     // Get all active items from database

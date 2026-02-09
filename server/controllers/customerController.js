@@ -1,6 +1,6 @@
 import { Customer } from '../models/index.js';
 import { Op } from 'sequelize';
-import { syncCustomersFromZoho } from '../services/zohoService.js';
+import { syncCustomersFromZoho, getCustomerById as getZohoCustomerById, getCustomerCards } from '../services/zohoService.js';
 import { getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
 import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
@@ -268,9 +268,40 @@ export const getCustomerPriceList = async (req, res) => {
       });
     }
 
-    // getPriceList always returns from DB only (no condition, no Zoho calls)
+    // First: use data from DB. Second: if not in DB, get from Zoho and save to DB.
+    const profileInDb = customer.zohoProfileSyncedAt != null;
+    if (!profileInDb) {
+      try {
+        const [zohoContact, zohoCards] = await Promise.all([
+          getZohoCustomerById(customer.zohoId),
+          getCustomerCards(customer.zohoId)
+        ]);
+        const pricebook_name = zohoContact?.pricebook_name ?? zohoContact?.price_list_name ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
+          ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('pricebook') || (f.label || '').toLowerCase().includes('price_list'))?.value)
+          : undefined) ?? null;
+        const tax_preference = zohoContact?.tax_preference ?? zohoContact?.tax_exemption_code ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
+          ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('tax'))?.value)
+          : undefined) ?? null;
+        const cardsJson = Array.isArray(zohoCards) ? JSON.stringify(zohoCards) : '[]';
+        const firstCard = Array.isArray(zohoCards) && zohoCards.length > 0 ? zohoCards[0] : null;
+        const last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? customer.last_four_digits ?? null;
+        const cardBrand = firstCard?.card_type ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase()) : (customer.cardBrand ?? null);
+        await customer.update({
+          pricebook_name: pricebook_name || customer.pricebook_name,
+          tax_preference: tax_preference || customer.tax_preference,
+          zohoCards: cardsJson,
+          zohoProfileSyncedAt: new Date(),
+          ...(last_four_digits && { last_four_digits }),
+          ...(cardBrand && { cardBrand })
+        });
+        await customer.reload();
+      } catch (zohoErr) {
+        logError('Get customer price list: Zoho fallback failed', zohoErr);
+        // Continue and return whatever we have from DB (may be nulls)
+      }
+    }
     // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customerController:getPriceList from DB',message:'returning from DB (no Zoho)',data:{customerId:id,pricebook_name:customer.pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customerController:getPriceList',message:profileInDb?'from DB':'from DB after Zoho sync',data:{customerId:id,pricebook_name:customer.pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
     // #endregion
     let cards = [];
     try {

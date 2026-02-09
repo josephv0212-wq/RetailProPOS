@@ -735,6 +735,47 @@ const ensureTransactionsTable = async () => {
   }
 };
 
+// Ensure PricebookCaches table exists (DB-first cache for Zoho pricebook items)
+const ensurePricebookCacheTable = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      const [tables] = await sequelize.query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='PricebookCaches'"
+      );
+      if (tables && tables.length > 0) {
+        logInfo('PricebookCaches table already exists');
+        return;
+      }
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS PricebookCaches (
+          pricebookName VARCHAR(255) PRIMARY KEY,
+          itemsJson TEXT,
+          updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      logSuccess('Created PricebookCaches table');
+    } else {
+      const [tables] = await sequelize.query(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'PricebookCaches'"
+      );
+      if (tables && tables.length > 0) {
+        logInfo('PricebookCaches table already exists');
+        return;
+      }
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS "PricebookCaches" (
+          "pricebookName" VARCHAR(255) PRIMARY KEY,
+          "itemsJson" TEXT,
+          "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      logSuccess('Created PricebookCaches table');
+    }
+  } catch (err) {
+    logWarning(`Could not ensure PricebookCaches table: ${err.message}`);
+  }
+};
+
 // Migrate dry ice UMs to database
 const migrateDryIceUMs = async () => {
   try {
@@ -845,6 +886,7 @@ const startServer = async () => {
           await ensureCustomerZohoCacheColumns();
           await ensureBasicUMColumn();
           await ensureTransactionsTable();
+          await ensurePricebookCacheTable();
         } else {
           // For PostgreSQL, also ensure columns exist
           await ensureTerminalColumns();
@@ -858,6 +900,7 @@ const startServer = async () => {
           await ensureCustomerZohoCacheColumns();
           await ensureBasicUMColumn();
           await ensureTransactionsTable();
+          await ensurePricebookCacheTable();
         }
 
   // Migrate dry ice UMs to database
