@@ -779,24 +779,14 @@ function AppContent() {
   const continueCustomerSelection = async (customer: Customer | null) => {
     if (!customer) return;
 
-    // Sync items from Zoho when customer is selected
-    try {
-      logger.info('Syncing items from Zoho for customer...');
-      const syncResponse = await itemsAPI.syncFromZoho();
-      if (syncResponse.success) {
-        const stats = syncResponse.data?.syncStats;
-        logger.info(`Items synced: ${stats?.created || 0} created, ${stats?.updated || 0} updated`);
-      }
-    } catch (syncError: any) {
-      logger.error('Failed to sync items from Zoho', syncError);
-      // Continue with customer selection even if sync fails
-    }
-
-    // Fetch customer pricebook and items from pricebook
+    // Use items already in DB (synced via Nav "Sync Zoho" or background). Do not sync on every customer select to avoid 15+ s latency.
+    // Fetch customer price list and load products in parallel for faster UI
     if (customer.id) {
       try {
-        // Get customer's pricebook name, tax preference, cards, and last_four_digits
-        const priceListRes = await customersAPI.getPriceList(customer.id);
+        const [priceListRes] = await Promise.all([
+          customersAPI.getPriceList(customer.id),
+          loadProducts()
+        ]);
         const pricebookName = priceListRes.data?.pricebook_name;
         const taxPreference = priceListRes.data?.tax_preference;
         const cards = priceListRes.data?.cards || [];

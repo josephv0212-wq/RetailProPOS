@@ -988,9 +988,17 @@ export const getCustomerCards = async (customerId) => {
   }
 };
 
+const PRICEBOOKS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 export const getPricebooks = async () => {
   try {
+    const cacheKey = 'zoho_pricebooks_list';
+    const cached = zohoCache.get(cacheKey);
+    if (cached && Array.isArray(cached) && cached.length >= 0) {
+      return cached;
+    }
     const pricebooks = await fetchAllPages('/pricebooks', {}, 'pricebooks');
+    zohoCache.set(cacheKey, pricebooks, PRICEBOOKS_CACHE_TTL_MS);
     return pricebooks;
   } catch (error) {
     console.error('Failed to fetch pricebooks from Zoho:', error.message);

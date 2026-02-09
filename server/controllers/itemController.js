@@ -199,16 +199,20 @@ export const syncItemsFromZoho = async (req, res) => {
   try {
     console.log('🔄 Syncing items from Zoho...');
     const zohoItems = await syncItemsFromZohoService();
-    
-    let created = 0;
-    let updated = 0;
     const now = new Date();
+    const zohoIds = (zohoItems || []).map((z) => z.item_id).filter(Boolean);
 
-    // Sync items to database
-    for (const zohoItem of zohoItems) {
+    // Count existing items for stats (before bulk upsert)
+    const existingCount = zohoIds.length
+      ? await Item.count({ where: { zohoId: { [Op.in]: zohoIds } } })
+      : 0;
+    const created = zohoIds.length - existingCount;
+    const updated = existingCount;
+
+    // Build rows for bulk upsert
+    const rows = (zohoItems || []).map((zohoItem) => {
       const unit = extractUnitFromZohoItem(zohoItem);
-      
-      const [item, isNew] = await Item.upsert({
+      return {
         zohoId: zohoItem.item_id,
         name: zohoItem.name,
         sku: zohoItem.sku || null,
@@ -220,29 +224,28 @@ export const syncItemsFromZoho = async (req, res) => {
         unit: unit,
         isActive: zohoItem.status === 'active',
         lastSyncedAt: now
-      }, {
-        returning: true
+      };
+    });
+
+    if (rows.length > 0) {
+      await Item.bulkCreate(rows, {
+        updateOnDuplicate: ['name', 'sku', 'description', 'price', 'taxId', 'taxName', 'taxPercentage', 'unit', 'isActive', 'lastSyncedAt'],
+        conflictAttributes: ['zohoId']
       });
+    }
 
-      // Ensure we have the item with ID (upsert should return it, but verify)
-      const itemWithId = item.id ? item : await Item.findOne({ where: { zohoId: zohoItem.item_id } });
-      
-      if (!itemWithId || !itemWithId.id) {
-        console.error(`⚠️ Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
-        continue;
-      }
-
-      // Sync unit of measure if present
-      if (unit) {
-        await syncItemUnitOfMeasure(itemWithId, zohoItem);
-      }
-
-      if (isNew) {
-        created++;
-        console.log(`✅ Created item: ${zohoItem.name} (Zoho ID: ${zohoItem.item_id})`);
-      } else {
-        updated++;
-      }
+    // Sync unit of measure for items that have a unit (in parallel, batched)
+    const itemsWithUnit = (zohoItems || []).filter((z) => extractUnitFromZohoItem(z));
+    if (itemsWithUnit.length > 0) {
+      const dbItemsByZohoId = new Map(
+        (await Item.findAll({ where: { zohoId: { [Op.in]: itemsWithUnit.map((z) => z.item_id) } } })).map((i) => [i.zohoId, i])
+      );
+      await Promise.all(
+        itemsWithUnit.map((zohoItem) => {
+          const item = dbItemsByZohoId.get(zohoItem.item_id);
+          return item ? syncItemUnitOfMeasure(item, zohoItem) : Promise.resolve(false);
+        })
+      );
     }
 
     console.log(`✅ Item sync completed: ${created} created, ${updated} updated (${zohoItems.length} total)`);
@@ -256,7 +259,7 @@ export const syncItemsFromZoho = async (req, res) => {
     return sendSuccess(res, {
       items: allItems,
       syncStats: {
-        total: zohoItems.length,
+        total: (zohoItems || []).length,
         created,
         updated,
         active: allItems.length
