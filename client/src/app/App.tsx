@@ -679,18 +679,21 @@ function AppContent() {
         }
 
         if (summary.failed > 0) {
-          const errorMessages = errors.map((e: any) => `${e.item.type} ${e.item.number}: ${e.error}`).join('\n');
+          const errorMessages = errors.map((e: any) =>
+            e.item?.type === 'batch' ? e.error : `${e.item.type} ${e.item.number}: ${e.error}`
+          ).join('\n');
           showAlert({
-            title: 'Some charges failed',
+            title: summary.successful > 0 ? 'Some charges failed' : 'Charge declined',
             message: `Failed to charge ${summary.failed} item(s):\n\n${errorMessages}`
           });
         }
 
         // If all succeeded and none are under review, show detailed success message
         if (summary.failed === 0 && underReviewItems.length === 0) {
-          const transactionIds = results.map((r: any) => r.transactionId).join(', ');
+          const txnIds = [...new Set(results.map((r: any) => r.transactionId).filter(Boolean))];
+          const txnLabel = txnIds.length <= 1 ? `Transaction ID: ${txnIds[0] || '—'}` : `Transaction IDs: ${txnIds.join(', ')}`;
           showToast(
-            `All charges processed successfully. Transaction IDs: ${transactionIds}`,
+            `All charges processed successfully. ${txnLabel}`,
             'success',
             6000
           );

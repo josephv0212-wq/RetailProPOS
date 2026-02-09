@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Sale, SaleItem, Item, Customer } from '../models/index.js';
+import { Sale, SaleItem, Item, Customer, InvoicePayment } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
 import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal } from '../services/zohoService.js';
@@ -1007,6 +1007,56 @@ export const getTransactions = async (req, res) => {
   }
 };
 
+/**
+ * Get invoice/SO payment records
+ * GET /sales/invoice-payments?startDate=&endDate=
+ */
+export const getInvoicePayments = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const userLocationId = req.user?.locationId;
+
+    if (!userLocationId) {
+      return sendError(res, 'User location not found', 400);
+    }
+
+    const where = { locationId: userLocationId };
+    const dateRange = {};
+    if (startDate) dateRange[Op.gte] = new Date(startDate);
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateRange[Op.lte] = end;
+    }
+    if (Object.keys(dateRange).length) where.createdAt = dateRange;
+
+    const payments = await InvoicePayment.findAll({
+      where,
+      include: [{ model: Customer, as: 'customer', attributes: ['id', 'contactName'] }],
+      order: [['createdAt', 'DESC']]
+    });
+
+    const items = (payments || []).map((p) => ({
+      id: p.id,
+      date: p.createdAt,
+      customer: p.customer ? { id: p.customer.id, name: p.customer.contactName } : null,
+      type: p.type,
+      documentNumber: p.documentNumber,
+      amount: parseFloat(p.amount || 0),
+      ccFee: parseFloat(p.ccFee || 0),
+      amountCharged: parseFloat(p.amountCharged || 0),
+      paymentType: p.paymentType || 'credit_card',
+      transactionId: p.transactionId,
+      zohoPaymentRecorded: Boolean(p.zohoPaymentRecorded)
+    }));
+
+    return sendSuccess(res, { invoicePayments: items });
+  } catch (err) {
+    console.error('Get invoice payments error:', err);
+    return sendError(res, 'Failed to fetch invoice payments', 500, err);
+  }
+};
+
 export const getSaleById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1379,27 +1429,25 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       console.warn('Could not determine payment profile type, using request type:', profileErr.message);
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:chargeInvoicesSalesOrders:entry',message:'chargeInvoices entry',data:{itemCount:items.length,customerId,paymentProfileIdSuffix:String(paymentProfileId).slice(-4),paymentType,actualProfileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
-
-    // Process each invoice/sales order
+    // Validate all items first; collect validation errors
     const results = [];
     const errors = [];
+    const validatedItems = [];
 
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
       const { type, id, number, amount } = item;
 
-      if (!type || !id || !number || !amount) {
+      if (!type || !id || !number || amount == null) {
         errors.push({
-          item: { type, id, number },
+          item: { type: type || 'unknown', id: id || '', number: number || '' },
           error: 'Missing required fields: type, id, number, or amount'
         });
         continue;
       }
 
-      if (amount <= 0) {
+      const originalAmount = parseFloat(amount);
+      if (!(originalAmount > 0)) {
         errors.push({
           item: { type, id, number },
           error: 'Amount must be greater than 0'
@@ -1407,132 +1455,185 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
         continue;
       }
 
-      try {
-        // Add timestamp + index to invoice number to ensure uniqueness and avoid Authorize.Net duplicate detection
-        // Authorize.Net detects duplicates by profile + amount + time window, so we need unique invoice numbers
-        const baseInvoiceNumber = normalizeAuthorizeNetInvoiceNumber({ type, number, id });
-        // Use timestamp (last 6 digits of current time) + index to ensure uniqueness within 20 char limit
-        const timestampSuffix = Date.now().toString().slice(-6);
-        const uniqueSuffix = `${timestampSuffix}-${index}`;
-        // Ensure total length doesn't exceed 20 chars (Authorize.Net limit)
-        const maxBaseLen = 20 - uniqueSuffix.length - 1; // -1 for dash
-        const truncatedBase = baseInvoiceNumber.length > maxBaseLen ? baseInvoiceNumber.slice(0, maxBaseLen) : baseInvoiceNumber;
-        const invoiceNumber = `${truncatedBase}-${uniqueSuffix}`.slice(0, 20); // Final safety check
-        const description = type === 'invoice'
-          ? `Invoice Payment: ${number}`
-          : `Sales Order Payment: ${number}`;
+      validatedItems.push({
+        type,
+        id: String(id).trim(),
+        number: String(number).trim(),
+        amount: originalAmount
+      });
+    }
 
-        const originalAmount = parseFloat(amount);
-        // 3% processing fee for all invoice/SO payment methods (card, ACH, etc.)
-        const chargeAmount = Math.round(originalAmount * 1.03 * 100) / 100;
-
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:before charge',message:'before chargeCustomerProfile',data:{index,number,id,invoiceNumber,invoiceNumberLength:invoiceNumber.length,chargeAmount,originalAmount,actualProfileType,testNoFee:true},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H9'})}).catch(()=>{});
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:before charge',message:'profileType check',data:{actualProfileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-        // #endregion
-
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:chargeInvoices:before charge',message:'chargeInvoices before chargeCustomerProfile',data:{customerProfileId:String(customerProfileId),customerPaymentProfileId:String(customerPaymentProfileId),amount:chargeAmount,invoiceNumber,description,originalAmount},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H14'})}).catch(()=>{});
-        // #endregion
-        const chargeResult = await chargeCustomerProfile({
+    // If any validation failed, return without charging
+    if (errors.length > 0) {
+      return sendSuccess(res, {
+        customer: {
+          id: customer.id,
+          name: customer.contactName,
           customerProfileId,
-          customerPaymentProfileId,
-          amount: chargeAmount,
-          invoiceNumber,
-          description
+          customerPaymentProfileId
+        },
+        results: [],
+        errors,
+        summary: { total: items.length, successful: 0, failed: errors.length }
+      }, 'Validation failed; no charge was made');
+    }
+
+    if (validatedItems.length === 0) {
+      return sendValidationError(res, 'No valid items to charge');
+    }
+
+    // Single charge for the entire batch: total amount + 3% fee
+    const totalOriginal = validatedItems.reduce((sum, it) => sum + it.amount, 0);
+    const totalCharge = Math.round(totalOriginal * 1.03 * 100) / 100;
+    const totalFee = Math.round((totalCharge - totalOriginal) * 100) / 100;
+
+    const batchInvoiceNumber = `MULTI-${Date.now().toString().slice(-8)}`.slice(0, 20);
+    const description = validatedItems.length === 1
+      ? (validatedItems[0].type === 'invoice'
+          ? `Invoice Payment: ${validatedItems[0].number}`
+          : `Sales Order Payment: ${validatedItems[0].number}`)
+      : `Multi payment: ${validatedItems.map(it => `${it.type === 'invoice' ? 'INV' : 'SO'}-${it.number}`).join(', ')}`;
+
+    const chargeResult = await chargeCustomerProfile({
+      customerProfileId,
+      customerPaymentProfileId,
+      amount: totalCharge,
+      invoiceNumber: batchInvoiceNumber,
+      description
+    });
+
+    if (!chargeResult.success) {
+      const errorMsg = chargeResult.error || 'Transaction declined';
+      console.error('❌ Batch charge failed:', {
+        error: errorMsg,
+        errorCode: chargeResult.errorCode,
+        responseCode: chargeResult.responseCode,
+        totalCharge,
+        itemCount: validatedItems.length
+      });
+      return sendSuccess(res, {
+        customer: {
+          id: customer.id,
+          name: customer.contactName,
+          customerProfileId,
+          customerPaymentProfileId
+        },
+        results: [],
+        errors: [{
+          item: { type: 'batch', id: '', number: 'Multi payment' },
+          error: errorMsg,
+          errorCode: chargeResult.errorCode,
+          responseCode: chargeResult.responseCode
+        }],
+        summary: { total: validatedItems.length, successful: 0, failed: validatedItems.length }
+      }, 'Charge declined; no payment was made');
+    }
+
+    // One charge succeeded: record one Zoho customer payment for all invoices, then one InvoicePayment per document
+    let zohoPaymentRecorded = false;
+    let zohoPaymentError = null;
+    const invoiceItems = validatedItems.filter(it => it.type === 'invoice');
+
+    if (invoiceItems.length > 0) {
+      const zohoCustomerId = (customer.zohoId && String(customer.zohoId).trim()) || null;
+      if (!zohoCustomerId) {
+        zohoPaymentError = 'Customer has no Zoho ID. Sync customers from Zoho to record payment in Zoho Books.';
+        console.warn(`⚠️ Zoho: skipping multi-invoice payment: ${zohoPaymentError}`);
+      } else {
+        const zohoPaymentMode = paymentType === 'ach' ? 'banktransfer' : 'creditcard';
+        const paymentLabel = paymentType === 'ach' ? 'ACH' : 'Card';
+        const invoicesForZoho = invoiceItems.map(it => ({
+          invoice_id: it.id,
+          amount_applied: it.amount
+        }));
+        const invoiceTotal = invoiceItems.reduce((sum, it) => sum + it.amount, 0);
+        const zohoPaymentResult = await createCustomerPayment({
+          customerId: zohoCustomerId,
+          amount: invoiceTotal,
+          invoices: invoicesForZoho,
+          paymentMode: zohoPaymentMode,
+          referenceNumber: chargeResult.transactionId || undefined,
+          description: validatedItems.length === 1
+            ? `Invoice ${validatedItems[0].number} - POS payment (${paymentLabel})`
+            : `POS multi payment (${paymentLabel}): ${invoiceItems.map(it => it.number).join(', ')}`
         });
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:chargeInvoices:after charge',message:'chargeInvoices after chargeCustomerProfile',data:{success:chargeResult.success,transactionId:chargeResult.transactionId,error:chargeResult.error,responseCode:chargeResult.responseCode,errorCode:chargeResult.errorCode,messages:chargeResult.messages},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H14'})}).catch(()=>{});
-        // #endregion
-
-        if (chargeResult.success) {
-          let zohoPaymentRecorded = false;
-          let zohoPaymentError = null;
-
-          if (type === 'invoice') {
-            const zohoCustomerId = (customer.zohoId && String(customer.zohoId).trim()) || null;
-            if (!zohoCustomerId) {
-              zohoPaymentError = 'Customer has no Zoho ID. Sync customers from Zoho to record payment in Zoho Books.';
-              console.warn(`⚠️ Zoho: skipping payment for invoice ${number}: ${zohoPaymentError}`);
-            } else {
-              const zohoPaymentMode = paymentType === 'ach' ? 'banktransfer' : 'creditcard';
-              const paymentLabel = paymentType === 'ach' ? 'ACH' : 'Card';
-              const zohoPaymentResult = await createCustomerPayment({
-                customerId: zohoCustomerId,
-                invoiceId: String(id).trim(),
-                // Record only the invoice amount in Zoho; the 3% fee is registered separately via journal.
-                amount: originalAmount,
-                amountApplied: originalAmount,
-                paymentMode: zohoPaymentMode,
-                referenceNumber: chargeResult.transactionId || undefined,
-                description: `Invoice ${number} - POS payment (${paymentLabel})`
-              });
-              if (zohoPaymentResult.success) {
-                zohoPaymentRecorded = true;
-                const feeAmount = Math.round((chargeAmount - originalAmount) * 100) / 100;
-                if (feeAmount > 0) {
-                  const journalResult = await createProcessingFeeJournal({
-                    feeAmount,
-                    referenceNumber: chargeResult.transactionId ? `Txn ${chargeResult.transactionId} Inv ${number}` : `Inv ${number}`,
-                    date: new Date().toISOString().split('T')[0]
-                  });
-                  if (!journalResult.success && journalResult.error !== 'Journal account IDs not configured') {
-                    console.warn(`⚠️ Zoho: processing fee journal not created for invoice ${number}: ${journalResult.error}`);
-                  }
-                }
-              } else {
-                zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
-                console.error(`⚠️ Zoho: could not record payment for invoice ${number}: ${zohoPaymentError}`);
-              }
+        if (zohoPaymentResult.success) {
+          zohoPaymentRecorded = true;
+          if (totalFee > 0) {
+            const journalResult = await createProcessingFeeJournal({
+              feeAmount: totalFee,
+              referenceNumber: chargeResult.transactionId ? `Txn ${chargeResult.transactionId}` : `MULTI-${batchInvoiceNumber}`,
+              date: new Date().toISOString().split('T')[0]
+            });
+            if (!journalResult.success && journalResult.error !== 'Journal account IDs not configured') {
+              console.warn(`⚠️ Zoho: processing fee journal not created: ${journalResult.error}`);
             }
           }
-
-          results.push({
-            type,
-            id,
-            number,
-            amount: originalAmount,
-            amountCharged: chargeAmount,
-            ccFee: Math.round((chargeAmount - originalAmount) * 100) / 100,
-            transactionId: chargeResult.transactionId,
-            authCode: chargeResult.authCode,
-            message: chargeResult.message,
-            success: true,
-            underReview: chargeResult.underReview || false,
-            reviewStatus: chargeResult.reviewStatus || null,
-            zohoPaymentRecorded: type === 'invoice' ? zohoPaymentRecorded : undefined,
-            zohoPaymentError: type === 'invoice' && zohoPaymentError ? zohoPaymentError : undefined
-          });
         } else {
-          const errorMsg = chargeResult.error || 'Transaction declined';
-          // #region agent log
-          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:charge declined',message:'chargeResult declined',data:{index,number,invoiceNumber,invoiceNumberLength:invoiceNumber.length,error:errorMsg,errorCode:chargeResult.errorCode,responseCode:chargeResult.responseCode,chargeAmount,actualProfileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-          // #endregion
-          console.error(`❌ Failed to charge ${type} ${number}:`, {
-            error: errorMsg,
-            errorCode: chargeResult.errorCode,
-            responseCode: chargeResult.responseCode,
-            amount: chargeAmount,
-            invoiceNumber,
-            profileType: actualProfileType
-          });
-          errors.push({
-            item: { type, id, number },
-            error: errorMsg,
-            errorCode: chargeResult.errorCode,
-            responseCode: chargeResult.responseCode
-          });
+          zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
+          console.error(`⚠️ Zoho: could not record multi-invoice payment: ${zohoPaymentError}`);
         }
-      } catch (err) {
-        console.error(`Error charging ${type} ${number}:`, err);
-        errors.push({
-          item: { type, id, number },
-          error: err.message || 'Unknown error occurred'
-        });
       }
     }
 
-    // Return results
+    // Per-item amountCharged and ccFee (proportional so sum matches totalCharge and totalFee)
+    let chargedSum = 0;
+    let feeSum = 0;
+    const perItemCharged = validatedItems.map((it, idx) => {
+      const isLast = idx === validatedItems.length - 1;
+      if (isLast) {
+        const charge = Math.round((totalCharge - chargedSum) * 100) / 100;
+        const fee = Math.round((totalFee - feeSum) * 100) / 100;
+        return { amountCharged: charge, ccFee: fee };
+      }
+      const ratio = totalOriginal > 0 ? it.amount / totalOriginal : 0;
+      const charge = Math.round(totalCharge * ratio * 100) / 100;
+      const fee = Math.round(totalFee * ratio * 100) / 100;
+      chargedSum += charge;
+      feeSum += fee;
+      return { amountCharged: charge, ccFee: fee };
+    });
+
+    const transactionId = chargeResult.transactionId || null;
+    for (let i = 0; i < validatedItems.length; i++) {
+      const it = validatedItems[i];
+      const { amountCharged, ccFee } = perItemCharged[i];
+      try {
+        await InvoicePayment.create({
+          customerId: customer.id,
+          type: it.type,
+          documentNumber: it.number,
+          documentId: it.id,
+          amount: it.amount,
+          amountCharged,
+          ccFee,
+          paymentType: paymentType || 'credit_card',
+          transactionId,
+          zohoPaymentRecorded: it.type === 'invoice' ? zohoPaymentRecorded : false,
+          locationId: req.user?.locationId || null,
+          userId: req.user?.id || null
+        });
+      } catch (saveErr) {
+        console.warn(`⚠️ Could not save invoice payment record for ${it.type} ${it.number}:`, saveErr.message);
+      }
+      results.push({
+        type: it.type,
+        id: it.id,
+        number: it.number,
+        amount: it.amount,
+        amountCharged,
+        ccFee,
+        transactionId,
+        authCode: chargeResult.authCode,
+        message: chargeResult.message,
+        success: true,
+        underReview: chargeResult.underReview || false,
+        reviewStatus: chargeResult.reviewStatus || null,
+        zohoPaymentRecorded: it.type === 'invoice' ? zohoPaymentRecorded : undefined,
+        zohoPaymentError: it.type === 'invoice' && zohoPaymentError ? zohoPaymentError : undefined
+      });
+    }
+
     return sendSuccess(res, {
       customer: {
         id: customer.id,
@@ -1543,11 +1644,11 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       results,
       errors,
       summary: {
-        total: items.length,
+        total: validatedItems.length,
         successful: results.length,
         failed: errors.length
       }
-    }, `Processed ${results.length} of ${items.length} items successfully`);
+    }, `Charged ${results.length} item(s) in one transaction successfully`);
   } catch (err) {
     console.error('Charge invoices/sales orders error:', err);
     return sendError(res, 'Failed to charge invoices/sales orders', 500, err);

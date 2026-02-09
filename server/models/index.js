@@ -5,8 +5,10 @@ import { Sale } from './Sale.js';
 import { SaleItem } from './SaleItem.js';
 import { UnitOfMeasure } from './UnitOfMeasure.js';
 import { ItemUnitOfMeasure } from './ItemUnitOfMeasure.js';
+import { InvoicePayment } from './InvoicePayment.js';
 
 Sale.hasMany(SaleItem, { foreignKey: 'saleId', as: 'items' });
+InvoicePayment.belongsTo(Customer, { foreignKey: 'customerId', as: 'customer' });
 SaleItem.belongsTo(Sale, { foreignKey: 'saleId' });
 
 Sale.belongsTo(Customer, { foreignKey: 'customerId', as: 'customer' });
@@ -28,4 +30,4 @@ UnitOfMeasure.belongsToMany(Item, {
   as: 'items'
 });
 
-export { User, Customer, Item, Sale, SaleItem, UnitOfMeasure, ItemUnitOfMeasure };
+export { User, Customer, Item, Sale, SaleItem, UnitOfMeasure, ItemUnitOfMeasure, InvoicePayment };

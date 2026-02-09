@@ -645,14 +645,16 @@ export const voidSalesReceipt = async (salesReceiptId) => {
 };
 
 /**
- * Record a customer payment against an invoice in Zoho Books (POST /customerpayments).
+ * Record a customer payment in Zoho Books (POST /customerpayments).
  * Use this when the POS has already charged the card via Authorize.net and we need to
- * record the payment in Zoho so the invoice shows as paid.
+ * record the payment in Zoho so invoices show as paid.
+ * Supports a single invoice (invoiceId + amountApplied) OR multiple invoices (invoices array).
  * @param {Object} params
  * @param {string} params.customerId - Zoho customer (contact) ID
- * @param {string} params.invoiceId - Zoho invoice ID
+ * @param {string} [params.invoiceId] - Zoho invoice ID (use with single-invoice payment)
  * @param {number} params.amount - Total amount received (payment total)
- * @param {number} [params.amountApplied] - Amount to apply to this invoice; must not exceed invoice balance. If omitted, uses amount.
+ * @param {number} [params.amountApplied] - Amount to apply to single invoice; if omitted, uses amount
+ * @param {Array<{ invoice_id: string, amount_applied: number }>} [params.invoices] - For multi-invoice: array of { invoice_id, amount_applied }
  * @param {string} params.paymentMode - Zoho payment_mode: 'cash' | 'creditcard' | 'debitcard' | 'banktransfer' | 'check' | 'bankremittance' | 'autotransaction' | 'others'
  * @param {string} [params.date] - Date of payment (yyyy-mm-dd)
  * @param {string} [params.referenceNumber] - Reference (e.g. transaction ID)
@@ -666,6 +668,7 @@ export const createCustomerPayment = async (params) => {
     invoiceId,
     amount,
     amountApplied,
+    invoices: invoicesParam,
     paymentMode,
     date,
     referenceNumber,
@@ -673,34 +676,48 @@ export const createCustomerPayment = async (params) => {
     locationId
   } = params;
 
-  if (!customerId || !invoiceId || amount == null || amount <= 0) {
+  if (!customerId || amount == null || amount <= 0) {
     return {
       success: false,
-      error: 'customerId, invoiceId, and positive amount are required'
+      error: 'customerId and positive amount are required'
     };
   }
 
-  const applied = amountApplied != null && amountApplied >= 0 ? parseFloat(amountApplied) : parseFloat(amount);
+  let invoicesPayload;
+  if (invoicesParam && Array.isArray(invoicesParam) && invoicesParam.length > 0) {
+    invoicesPayload = invoicesParam.map((inv) => ({
+      invoice_id: String(inv.invoice_id).trim(),
+      amount_applied: parseFloat(inv.amount_applied)
+    }));
+  } else if (invoiceId) {
+    const applied = amountApplied != null && amountApplied >= 0 ? parseFloat(amountApplied) : parseFloat(amount);
+    invoicesPayload = [{ invoice_id: String(invoiceId).trim(), amount_applied: applied }];
+  } else {
+    return {
+      success: false,
+      error: 'Either invoiceId or invoices array is required'
+    };
+  }
+
   const payload = {
     customer_id: customerId,
     payment_mode: paymentMode || 'creditcard',
     amount: parseFloat(amount),
     date: date || new Date().toISOString().split('T')[0],
-    invoices: [
-      { invoice_id: invoiceId, amount_applied: applied }
-    ]
+    invoices: invoicesPayload
   };
   if (referenceNumber) payload.reference_number = String(referenceNumber);
   if (description) payload.description = String(description);
   if (locationId && String(locationId).trim() !== '') payload.location_id = String(locationId).trim();
 
   try {
-    console.log(`📤 Zoho: Creating customer payment for invoice ${invoiceId}, amount ${amount}, mode ${paymentMode}`);
+    const invoiceLabel = invoicesPayload.length === 1 ? `invoice ${invoicesPayload[0].invoice_id}` : `${invoicesPayload.length} invoices`;
+    console.log(`📤 Zoho: Creating customer payment for ${invoiceLabel}, amount ${amount}, mode ${paymentMode}`);
     const response = await makeZohoRequest('/customerpayments', 'POST', payload);
     const payment = response.payment || response.customer_payment;
     if (response.code === 0 && payment) {
       const paymentId = payment.payment_id;
-      console.log(`✅ Zoho: Customer payment created for invoice ${invoiceId}, payment_id: ${paymentId}`);
+      console.log(`✅ Zoho: Customer payment created for ${invoiceLabel}, payment_id: ${paymentId}`);
       return {
         success: true,
         paymentId: paymentId || null

@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Loader2, BarChart3, CheckCircle2, XCircle, RefreshCw, FileDown, X } from 'lucide-react';
+import { Loader2, BarChart3, CheckCircle2, XCircle, RefreshCw, FileDown, X, Receipt } from 'lucide-react';
 import { salesAPI } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { Sale } from '../types';
+import { logger } from '../../utils/logger';
 
 interface Transaction {
   id: string;
@@ -17,6 +18,20 @@ interface Transaction {
   syncedToZoho?: boolean;
   zohoSalesReceiptId?: string | null;
   cancelledInZoho?: boolean;
+}
+
+interface InvoicePaymentItem {
+  id: number;
+  date: string | Date;
+  customer: { id: number; name: string } | null;
+  type: 'invoice' | 'salesorder';
+  documentNumber: string;
+  amount: number;
+  ccFee: number;
+  amountCharged: number;
+  paymentType: string;
+  transactionId: string | null;
+  zohoPaymentRecorded: boolean;
 }
 
 interface ReportsProps {
@@ -48,6 +63,9 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
   const [loadingSyncStatus, setLoadingSyncStatus] = useState(false);
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
   const [loadingReceiptSaleId, setLoadingReceiptSaleId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'transactions' | 'invoice-payments'>('transactions');
+  const [invoicePayments, setInvoicePayments] = useState<InvoicePaymentItem[]>([]);
+  const [loadingInvoicePayments, setLoadingInvoicePayments] = useState(false);
 
   // Use logged-in user's location (no manual location filter)
   const locationId = userLocationId;
@@ -105,21 +123,58 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
     }
   }, []);
 
+  // Load invoice/SO payments
+  const loadInvoicePayments = useCallback(async (showRefreshing = false) => {
+    if (showRefreshing) {
+      setIsRefreshing(true);
+    } else {
+      setLoadingInvoicePayments(true);
+    }
+    try {
+      const response = await salesAPI.getInvoicePayments({ startDate, endDate });
+      if (response.success && response.data?.invoicePayments) {
+        setInvoicePayments(response.data.invoicePayments);
+      } else {
+        setInvoicePayments([]);
+      }
+    } catch (err) {
+      logger.error('Failed to load invoice payments', err);
+      showToast('Failed to load invoice payments', 'error', 3000);
+    } finally {
+      if (showRefreshing) {
+        setIsRefreshing(false);
+      } else {
+        setLoadingInvoicePayments(false);
+      }
+    }
+  }, [startDate, endDate, showToast]);
+
   // Load sales on mount and when filters change
   useEffect(() => {
     loadSales();
     loadSyncStatus();
   }, [loadSales, loadSyncStatus]);
 
-  // Auto-refresh transactions every 30 seconds
+  // Load invoice payments when tab is active
+  useEffect(() => {
+    if (activeTab === 'invoice-payments') {
+      loadInvoicePayments();
+    }
+  }, [activeTab, loadInvoicePayments]);
+
+  // Auto-refresh every 30 seconds (transactions + sync status, or invoice payments when that tab is active)
   useEffect(() => {
     const interval = setInterval(() => {
-      loadSales(true); // Silent refresh
-      loadSyncStatus(); // Also refresh sync status
-    }, 30000); // 30 seconds
+      if (activeTab === 'transactions') {
+        loadSales(true);
+        loadSyncStatus();
+      } else {
+        loadInvoicePayments(true);
+      }
+    }, 30000);
 
     return () => clearInterval(interval);
-  }, [loadSales, loadSyncStatus]);
+  }, [activeTab, loadSales, loadSyncStatus, loadInvoicePayments]);
 
   const handleCancelZohoTransaction = async (saleId: number) => {
     if (!window.confirm('Are you sure you want to cancel this transaction in Zoho? This action cannot be undone.')) {
@@ -146,8 +201,12 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
   };
 
   const handleRefresh = () => {
-    loadSales(false); // Show loading state
-    loadSyncStatus(); // Also refresh sync status
+    if (activeTab === 'transactions') {
+      loadSales(false);
+      loadSyncStatus();
+    } else {
+      loadInvoicePayments(false);
+    }
   };
 
   const cleanLocationName = (name: string) => {
@@ -365,7 +424,33 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
               </div>
             )}
 
+            {/* Tab navigation */}
+            <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
+              <button
+                onClick={() => setActiveTab('transactions')}
+                className={`px-4 py-3 font-medium text-sm transition-colors ${
+                  activeTab === 'transactions'
+                    ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                }`}
+              >
+                Transactions
+              </button>
+              <button
+                onClick={() => setActiveTab('invoice-payments')}
+                className={`px-4 py-3 font-medium text-sm transition-colors flex items-center gap-2 ${
+                  activeTab === 'invoice-payments'
+                    ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                }`}
+              >
+                <Receipt className="w-4 h-4" />
+                Invoice / SO Payments
+              </button>
+            </div>
+
             {/* Transactions Section */}
+            {activeTab === 'transactions' && (
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                 <h2 className="font-semibold text-gray-900 dark:text-white">
@@ -578,6 +663,141 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                 </div>
               )}
             </div>
+            )}
+
+            {/* Invoice / SO Payments Section */}
+            {activeTab === 'invoice-payments' && (
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-3">
+                <h2 className="font-semibold text-gray-900 dark:text-white">
+                  Invoice / Sales Order Payments
+                </h2>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-600 dark:text-gray-400">From</label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                    <label className="text-sm text-gray-600 dark:text-gray-400">To</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <button
+                    onClick={() => loadInvoicePayments(false)}
+                    disabled={loadingInvoicePayments || isRefreshing}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isRefreshing || loadingInvoicePayments ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              {loadingInvoicePayments ? (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">Loading invoice payments...</p>
+                </div>
+              ) : invoicePayments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <Receipt className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2">No invoice/SO payments found</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Payments made via POS for invoices and sales orders will appear here
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Date</th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Customer</th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Type</th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Document</th>
+                        <th className="px-6 py-3 text-right font-semibold text-gray-900 dark:text-white">Amount</th>
+                        <th className="px-6 py-3 text-right font-semibold text-gray-900 dark:text-white">Fee (3%)</th>
+                        <th className="px-6 py-3 text-right font-semibold text-gray-900 dark:text-white">Charged</th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Payment</th>
+                        <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">Txn ID</th>
+                        <th className="px-6 py-3 text-center font-semibold text-gray-900 dark:text-white">Zoho</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                      {invoicePayments.map((p) => (
+                        <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                            {new Date(p.date).toLocaleString('en-US', {
+                              month: 'short', day: 'numeric', year: 'numeric',
+                              hour: '2-digit', minute: '2-digit',
+                            })}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900 dark:text-white">
+                            {p.customer?.name ?? '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${
+                              p.type === 'invoice'
+                                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400'
+                                : 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-400'
+                            }`}>
+                              {p.type === 'invoice' ? 'Invoice' : 'SO'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-900 dark:text-white">
+                            {p.documentNumber}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-gray-900 dark:text-white">
+                            ${p.amount.toFixed(2)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-orange-600 dark:text-orange-400">
+                            ${p.ccFee.toFixed(2)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right font-bold text-blue-600 dark:text-blue-400">
+                            ${p.amountCharged.toFixed(2)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${
+                              p.paymentType === 'ach'
+                                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400'
+                                : 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-400'
+                            }`}>
+                              {p.paymentType === 'ach' ? 'ACH' : 'Card'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400 font-mono">
+                            {p.transactionId || '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center">
+                            {p.type === 'invoice' ? (
+                              p.zohoPaymentRecorded ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400">
+                                  <CheckCircle2 className="w-3 h-3" /> Recorded
+                                </span>
+                              ) : (
+                                <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400">
+                                  Not recorded
+                                </span>
+                              )
+                            ) : (
+                              <span className="text-gray-400 dark:text-gray-500 text-xs">N/A</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            )}
 
             {/* Receipt PDF Modal */}
             {receiptSale && (

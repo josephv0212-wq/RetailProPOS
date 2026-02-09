@@ -353,6 +353,17 @@ export const salesAPI = {
       method: 'GET',
     }, true);
   },
+
+  getInvoicePayments: async (params?: { startDate?: string; endDate?: string }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+    
+    const query = queryParams.toString();
+    return apiRequest<{ invoicePayments: any[] }>(`/sales/invoice-payments${query ? `?${query}` : ''}`, {
+      method: 'GET',
+    }, true);
+  },
   create: async (data: {
     items: Array<{ itemId: number; quantity: number }>;
     customerId?: number;
