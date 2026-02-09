@@ -208,6 +208,9 @@ export const createSale = async (req, res) => {
       // an Authorize.Net CIM profile for the customer using the successful transaction.
       savePaymentMethod 
     } = req.body;
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale entry',message:'createSale body',data:{hasUseStoredPayment:req.body.hasOwnProperty('useStoredPayment'),useStoredPayment:!!req.body.useStoredPayment,hasPaymentProfileId:req.body.hasOwnProperty('paymentProfileId'),paymentProfileIdType:typeof req.body.paymentProfileId,customerId:req.body.customerId,paymentType:requestPaymentType},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     let paymentType = requestPaymentType;
     // Merge debit_card into card: store and process as single "card" type
     if (paymentType === 'debit_card') paymentType = 'card';
@@ -378,10 +381,14 @@ export const createSale = async (req, res) => {
       }
     }
     
-    // 3% convenience fee for card (CC/DC merged as card)
-    cardProcessingFee = actualPaymentType === 'card'
-      ? calculateCreditCardFee(subtotal, taxAmount)
-      : 0;
+    // 3% convenience fee for card only (not for ACH, including stored ACH)
+    if (useStoredPayment && (paymentType === 'ach' || actualPaymentType === 'ach')) {
+      cardProcessingFee = 0;
+    } else {
+      cardProcessingFee = actualPaymentType === 'card'
+        ? calculateCreditCardFee(subtotal, taxAmount)
+        : 0;
+    }
 
     const total = baseTotal + cardProcessingFee;
 
@@ -404,6 +411,9 @@ export const createSale = async (req, res) => {
       // The description will indicate "manual card reader payment" in the sale record
       // Do NOT process any card payment - skip all card processing logic below
     } else if (useStoredPayment && paymentProfileId && customer) {
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:stored payment branch',message:'entering stored payment',data:{customerId:customer.id,paymentProfileId,paymentProfileIdType:typeof paymentProfileId},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
       // Stored payment method via Authorize.net CIM - use same logic as chargeInvoicesSalesOrders
       let customerProfileId = customer.customerProfileId;
       let customerPaymentProfileId = paymentProfileId;
@@ -442,7 +452,9 @@ export const createSale = async (req, res) => {
 
         // Extract payment profiles
         const paymentProfiles = extractPaymentProfiles(profile);
-        
+        // #region agent log
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:after extractPaymentProfiles',message:'profile ids',data:{requestedId:paymentProfileId,requestedType:typeof paymentProfileId,profileIds:paymentProfiles.map(p=>({id:p.paymentProfileId,type:typeof p.paymentProfileId})),match:paymentProfiles.some(p=>p.paymentProfileId==paymentProfileId)},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
         if (paymentProfiles.length === 0) {
           return sendError(
             res,
@@ -491,6 +503,9 @@ export const createSale = async (req, res) => {
       }
 
       // Charge using stored payment method
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:before chargeCustomerProfile',message:'charging',data:{customerProfileId,paymentProfileId,amount:total},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
+      // #endregion
       paymentResult = await chargeCustomerProfile({
         customerProfileId,
         customerPaymentProfileId: paymentProfileId,
@@ -498,7 +513,9 @@ export const createSale = async (req, res) => {
         invoiceNumber: `POS-${Date.now()}`,
         description: `POS Sale - ${locationName}`
       });
-
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:after chargeCustomerProfile',message:'charge result',data:{success:paymentResult.success,error:paymentResult.error,transactionId:paymentResult.transactionId},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
+      // #endregion
       if (!paymentResult.success) {
         return sendError(res, 'Stored payment processing failed', 400, paymentResult.error);
       }

@@ -36,6 +36,13 @@ export const validateSale = (req, res, next) => {
   if (normalizedPaymentType === 'card') {
     // Support useStandaloneMode from root level OR from paymentDetails (for backward compatibility)
     const useStandaloneMode = req.body.useStandaloneMode || req.body.paymentDetails?.useStandaloneMode;
+    const useStoredPayment = req.body.useStoredPayment === true;
+    const useValorApi = req.body.useValorApi;
+    const useOpaqueData = req.body.useOpaqueData;
+    const useBluetoothReader = req.body.useBluetoothReader;
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'validation.js:card branch',message:'card validation branch',data:{normalizedPaymentType,useStandaloneMode,useStoredPayment,useValorApi,useOpaqueData,useBluetoothReader},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     
     // Standalone mode: Skip payment processing validation - cashier will process manually
     if (useStandaloneMode) {
@@ -67,8 +74,14 @@ export const validateSale = (req, res, next) => {
       if (!payload || !payload.descriptor || !payload.value) {
         errors.push('Encrypted card payload (opaqueData) is required.');
       }
+    } else if (useStoredPayment) {
+      // Stored payment - no card details required
+      // Validation passes
     } else {
       // Manual Entry mode - validate card details
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'validation.js:manual entry branch',message:'requiring card details',data:{hasPaymentDetails:!!paymentDetails,hasCardNumber:!!(paymentDetails&&paymentDetails.cardNumber)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       if (!paymentDetails || !paymentDetails.cardNumber) {
         errors.push('Payment details required for card transactions');
       } else {
@@ -87,7 +100,10 @@ export const validateSale = (req, res, next) => {
     }
     }
   } else if (normalizedPaymentType === 'ach') {
-    if (!paymentDetails) {
+    const useStoredPaymentAch = req.body.useStoredPayment === true;
+    if (useStoredPaymentAch) {
+      // Stored ACH - no payment details required
+    } else if (!paymentDetails) {
       errors.push('Payment details required for ACH transactions');
     } else {
       if (!paymentDetails.nameOnAccount || paymentDetails.nameOnAccount.trim() === '') {

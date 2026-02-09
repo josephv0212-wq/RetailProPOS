@@ -704,7 +704,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                 <span className="text-sm">Card</span>
               </button>
               
-              {context !== 'zohoDocuments' && customerId && paymentProfiles.length > 0 && (
+              {context !== 'zohoDocuments' && customerId && (
                 <button
                   onClick={() => {
                     setSelectedMethod('stored_payment');
