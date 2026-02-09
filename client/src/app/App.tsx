@@ -1416,8 +1416,8 @@ function AppContent() {
           }))}
           paymentMethodLabel={pendingStoredPaymentSelection.profileType === 'ach' ? 'ACH / Bank Account' : 'Card'}
           subtotal={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0)}
-          ccSurcharge={Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100}
-          totalWithFee={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) + Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100}
+          ccSurcharge={pendingStoredPaymentSelection.profileType === 'card' ? Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100 : 0}
+          totalWithFee={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) + (pendingStoredPaymentSelection.profileType === 'card' ? Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100 : 0)}
           onConfirmPay={async () => {
             if (!pendingStoredPaymentSelection) return;
             await handlePaymentMethodSelected(pendingStoredPaymentSelection.paymentProfileId, pendingStoredPaymentSelection.profileType);

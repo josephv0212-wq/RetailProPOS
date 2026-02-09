@@ -74,8 +74,9 @@ export function PaymentMethodSelector({
     ? paymentProfiles.find((p) => p.paymentProfileId === selectedProfileId)
     : null;
   const showTotals = totalAmount != null && totalAmount > 0;
-  // Invoice/SO: 3% processing fee for all payment methods (card, ACH, etc.)
-  const processingFee = showTotals ? Math.round(totalAmount * 0.03 * 100) / 100 : 0;
+  // Invoice/SO: 3% processing fee for card only (not for ACH/bank account)
+  const isCardProfile = selectedProfile?.type === 'card';
+  const processingFee = showTotals && isCardProfile ? Math.round(totalAmount * 0.03 * 100) / 100 : 0;
   const totalWithFee = showTotals ? totalAmount + processingFee : 0;
 
   const handleSelect = () => {
@@ -218,7 +219,7 @@ export function PaymentMethodSelector({
             </div>
           )}
 
-          {/* Totals (invoice/sales order): always show subtotal + 3% processing fee for all payment methods */}
+          {/* Totals (invoice/sales order): 3% fee only when card is selected */}
           {showTotals && hasProfiles && (
             <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-1">
               <div className="flex justify-between text-sm">

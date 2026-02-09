@@ -1503,10 +1503,11 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       return sendValidationError(res, 'No valid items to charge');
     }
 
-    // Single charge for the entire batch: total amount + 3% fee
+    // Single charge: total amount + 3% fee only for card (not for ACH)
     const totalOriginal = validatedItems.reduce((sum, it) => sum + it.amount, 0);
-    const totalCharge = Math.round(totalOriginal * 1.03 * 100) / 100;
-    const totalFee = Math.round((totalCharge - totalOriginal) * 100) / 100;
+    const addCardFee = actualProfileType === 'card';
+    const totalCharge = addCardFee ? Math.round(totalOriginal * 1.03 * 100) / 100 : totalOriginal;
+    const totalFee = addCardFee ? Math.round((totalCharge - totalOriginal) * 100) / 100 : 0;
 
     const batchInvoiceNumber = `MULTI-${Date.now().toString().slice(-8)}`.slice(0, 20);
     const description = validatedItems.length === 1
