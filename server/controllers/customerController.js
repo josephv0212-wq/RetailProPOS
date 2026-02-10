@@ -268,56 +268,61 @@ export const getCustomerPriceList = async (req, res) => {
       });
     }
 
-    // First: use data from DB. Second: if not in DB, get from Zoho and save to DB.
-    const profileInDb = customer.zohoProfileSyncedAt != null;
-    if (!profileInDb) {
-      try {
-        const [zohoContact, zohoCards] = await Promise.all([
-          getZohoCustomerById(customer.zohoId),
-          getCustomerCards(customer.zohoId)
-        ]);
-        const pricebook_name = zohoContact?.pricebook_name ?? zohoContact?.price_list_name ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
-          ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('pricebook') || (f.label || '').toLowerCase().includes('price_list'))?.value)
-          : undefined) ?? null;
-        const tax_preference = zohoContact?.tax_preference ?? zohoContact?.tax_exemption_code ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
-          ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('tax'))?.value)
-          : undefined) ?? null;
-        const cardsJson = Array.isArray(zohoCards) ? JSON.stringify(zohoCards) : '[]';
-        const firstCard = Array.isArray(zohoCards) && zohoCards.length > 0 ? zohoCards[0] : null;
-        const last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? customer.last_four_digits ?? null;
-        const cardBrand = firstCard?.card_type ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase()) : (customer.cardBrand ?? null);
-        await customer.update({
-          pricebook_name: pricebook_name || customer.pricebook_name,
-          tax_preference: tax_preference || customer.tax_preference,
-          zohoCards: cardsJson,
-          zohoProfileSyncedAt: new Date(),
-          ...(last_four_digits && { last_four_digits }),
-          ...(cardBrand && { cardBrand })
-        });
-        await customer.reload();
-      } catch (zohoErr) {
-        logError('Get customer price list: Zoho fallback failed', zohoErr);
-        // Continue and return whatever we have from DB (may be nulls)
-      }
+    // Always fetch Zoho profile details live (do not use DB cache for Zoho data)
+    const [zohoContactResult, zohoCardsResult] = await Promise.allSettled([
+      getZohoCustomerById(customer.zohoId),
+      getCustomerCards(customer.zohoId)
+    ]);
+
+    if (zohoContactResult.status !== 'fulfilled' || !zohoContactResult.value) {
+      const err = zohoContactResult.status === 'rejected' ? zohoContactResult.reason : null;
+      logError('Get customer price list: failed to fetch Zoho customer', err);
+      return sendError(res, 'Failed to fetch customer profile from Zoho', 502, err);
     }
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customerController:getPriceList',message:profileInDb?'from DB':'from DB after Zoho sync',data:{customerId:id,pricebook_name:customer.pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
-    let cards = [];
+
+    const zohoContact = zohoContactResult.value;
+    const cards = zohoCardsResult.status === 'fulfilled' && Array.isArray(zohoCardsResult.value)
+      ? zohoCardsResult.value
+      : [];
+
+    const pricebook_name = zohoContact?.pricebook_name ?? zohoContact?.price_list_name ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
+      ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('pricebook') || (f.label || '').toLowerCase().includes('price_list'))?.value)
+      : undefined) ?? null;
+    const tax_preference = zohoContact?.tax_preference ?? zohoContact?.tax_exemption_code ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
+      ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('tax'))?.value)
+      : undefined) ?? null;
+
+    const firstCard = cards.length > 0 ? cards[0] : null;
+    const last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
+    const card_type = firstCard?.card_type
+      ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
+      : null;
+
+    // Best-effort DB update for observability/history; response always uses live Zoho values above.
     try {
-      if (customer.zohoCards && typeof customer.zohoCards === 'string') {
-        cards = JSON.parse(customer.zohoCards);
-      } else if (Array.isArray(customer.zohoCards)) {
-        cards = customer.zohoCards;
-      }
-    } catch (_) {}
+      await customer.update({
+        pricebook_name,
+        tax_preference,
+        zohoCards: JSON.stringify(cards),
+        zohoProfileSyncedAt: new Date(),
+        last_four_digits: last_four_digits || customer.last_four_digits || null,
+        cardBrand: card_type || customer.cardBrand || null
+      });
+    } catch (persistErr) {
+      logWarning('Get customer price list: could not persist Zoho profile snapshot');
+    }
+
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customerController:getPriceList',message:'from Zoho live',data:{customerId:id,pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
+
     return sendSuccess(res, {
-      pricebook_name: customer.pricebook_name || null,
-      tax_preference: customer.tax_preference || null,
+      pricebook_name: pricebook_name || null,
+      tax_preference: tax_preference || null,
       cards,
-      last_four_digits: customer.last_four_digits || null,
-      card_type: customer.cardBrand || null,
-      has_card_info: !!customer.last_four_digits,
+      last_four_digits: last_four_digits || null,
+      card_type: card_type || null,
+      has_card_info: !!last_four_digits || cards.length > 0,
       card_info_checked: true,
       bank_account_last4: customer.bankAccountLast4 || null
     });
