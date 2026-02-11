@@ -510,7 +510,7 @@ export const createSalesReceipt = async (saleData) => {
   // Keep Zoho total in sync with POS total (cc fee is an adjustment, not a line item)
   if (processingFee > 0) {
     salesReceiptData.adjustment = parseFloat(processingFee.toFixed(2));
-    salesReceiptData.adjustment_description = 'Credit Card Processing Fee';
+    salesReceiptData.adjustment_description = 'Card processing fee 3%';
   }
 
   // Emit a warning if our calculated Zoho total would drift from the POS total
