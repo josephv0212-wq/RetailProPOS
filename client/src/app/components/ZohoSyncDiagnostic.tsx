@@ -33,7 +33,7 @@ export function ZohoSyncDiagnostic() {
   const loadStatus = async () => {
     setLoading(true);
     try {
-      const response = await salesAPI.getSyncStatus(20);
+      const response = await salesAPI.getSyncStatus();
       if (response.success && response.data) {
         setStatus(response.data);
       } else {

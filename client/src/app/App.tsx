@@ -97,14 +97,18 @@ function AppContent() {
   const [zohoDocsTotals, setZohoDocsTotals] = useState<{ total: number; subtotal: number; tax: number }>({ total: 0, subtotal: 0, tax: 0 });
   const [allUnits, setAllUnits] = useState<UnitOfMeasureOption[]>([]); // All units including basic UMs for dry ice
 
-  // Memoized constants from user data
-  const constants = useMemo(() => ({
-    TAX_RATE: user?.taxPercentage ? user.taxPercentage / 100 : 0.0825,
+  // Memoized constants from user data - use logged-in user's tax percentage
+  const constants = useMemo(() => {
+    const pct = typeof user?.taxPercentage === 'number' ? user.taxPercentage : parseFloat(String(user?.taxPercentage ?? ''));
+    const taxRate = Number.isFinite(pct) ? pct / 100 : 0.075;
+    return {
+    TAX_RATE: taxRate,
     STORE_NAME: user?.locationName || 'Store',
     STORE_ADDRESS: '123 Main Street, Suite 100, City, ST 12345', // Could come from API
     STORE_PHONE: '(555) 123-4567', // Could come from API
     USER_NAME: user?.name || user?.useremail || 'User',
-  }), [user?.taxPercentage, user?.locationName, user?.name, user?.useremail]);
+  };
+  }, [user?.taxPercentage, user?.locationName, user?.name, user?.useremail]);
 
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true);
@@ -1196,6 +1200,7 @@ function AppContent() {
         userName={constants.USER_NAME}
         onNewSale={handleNewSale}
         onLogout={handleLogout}
+        onNavigateToReports={navigationHandlers.toReports}
       />
     );
   }
@@ -1260,6 +1265,7 @@ function AppContent() {
           storeAddress={constants.STORE_ADDRESS}
           storePhone={constants.STORE_PHONE}
           userName={constants.USER_NAME}
+          userRole={user?.role || 'cashier'}
         />
       </PageWrapper>
     );
@@ -1379,6 +1385,8 @@ function AppContent() {
         total={totalsForReceipt.total}
         subtotal={totalsForReceipt.subtotal}
         tax={totalsForReceipt.tax}
+        taxRate={constants.TAX_RATE}
+        isTaxExempt={customerTaxPreference === 'SALES TAX EXCEPTION CERTIFICATE' || selectedCustomer?.taxExempt || false}
         cartItems={cartItems}
         onConfirmPayment={handleConfirmPayment}
         context="sale"
@@ -1397,6 +1405,8 @@ function AppContent() {
         total={zohoDocsTotals.total}
         subtotal={zohoDocsTotals.subtotal}
         tax={zohoDocsTotals.tax}
+        taxRate={constants.TAX_RATE}
+        isTaxExempt={customerTaxPreference === 'SALES TAX EXCEPTION CERTIFICATE' || selectedCustomer?.taxExempt || false}
         cartItems={zohoDocsCartItems}
         onConfirmPayment={handleConfirmZohoDocsPayment}
         context="zohoDocuments"

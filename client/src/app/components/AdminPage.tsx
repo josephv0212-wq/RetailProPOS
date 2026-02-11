@@ -154,7 +154,6 @@ export function AdminPage({ currentUser }: AdminPageProps) {
 
         if (allUsersRes.success && allUsersRes.data?.users) {
           const allUsers: User[] = allUsersRes.data.users
-            .filter((u: any) => u.useremail !== currentUser.useremail)
             .map((u: any) => ({
               id: String(u.id),
               useremail: u.useremail,
@@ -866,7 +865,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                                     Delete
                                   </button>
                                 </>
-                              ) : (
+                              ) : user.useremail !== currentUser.useremail ? (
                                 <button
                                   type="button"
                                   onClick={() => handleDeactivateUser(user.id)}
@@ -874,7 +873,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
                                 >
                                   Deactivate
                                 </button>
-                              )}
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => handleEditLocation(user.id)}

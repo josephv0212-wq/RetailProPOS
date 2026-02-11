@@ -335,8 +335,8 @@ export const createSalesReceipt = async (saleData) => {
   const resolvedLocationId = location_id || locationId || null;
   const resolvedDepositToAccountId = deposit_to_account_id || depositToAccountId || null;
 
-  // Ensure Zoho line item "rate" uses the current Item.price from the database (item table).
-  // This avoids relying on client-provided or SaleItem-stored pricing.
+  // Use the actual sale price from line items (SaleItem.price) which reflects price levels/pricebooks.
+  // Fall back to Item.price from DB only when the line item has no valid price.
   const safeLineItems = Array.isArray(lineItems) ? lineItems : [];
   const rawItemIds = safeLineItems
     .map((li) => li?.itemId)
@@ -428,8 +428,9 @@ export const createSalesReceipt = async (saleData) => {
       const taxRate = Number(item.taxPercentage ?? 0);
       const isTaxable = !Number.isNaN(taxRate) && taxRate > 0;
       const effectiveTaxId = (item.taxId || zohoTaxId || null) ? String(item.taxId || zohoTaxId).trim() : null;
+      const lineItemPrice = parseFloat(item.rate ?? item.price);
       const dbRate = itemPriceById.get(Number(item?.itemId));
-      const resolvedRate = Number.isFinite(dbRate) ? dbRate : parseFloat(item.rate ?? item.price);
+      const resolvedRate = Number.isFinite(lineItemPrice) ? lineItemPrice : (Number.isFinite(dbRate) ? dbRate : 0);
       const unitKey = extractUnitKey(item);
       const unitPrecision = unitKey ? unitPrecisionByKey.get(unitKey) : null;
       const quantityMultiplier = Number.isFinite(unitPrecision) && unitPrecision > 0 ? unitPrecision : 1;
@@ -475,9 +476,18 @@ export const createSalesReceipt = async (saleData) => {
     })()
   };
 
-  // Zoho Books: associate the receipt with a specific location (if locations feature is enabled)
-  if (resolvedLocationId && String(resolvedLocationId).trim() !== '') {
+  // Add reference_number (transaction ID) for payment traceability in Zoho
+  if (transactionId && String(transactionId).trim() !== '') {
+    salesReceiptData.reference_number = String(transactionId).trim();
+  }
+
+  // Zoho Books: associate the receipt with a specific location (if locations feature is enabled).
+  // Skip location_id when we don't have zohoTaxId - Zoho uses the location's default tax (e.g. 7% for
+  // MIA Warehouse) which overrides our line item tax_percentage (7.5%), causing a mismatch.
+  if (resolvedLocationId && String(resolvedLocationId).trim() !== '' && zohoTaxId) {
     salesReceiptData.location_id = String(resolvedLocationId).trim();
+  } else if (resolvedLocationId && !zohoTaxId) {
+    console.log(`📍 Skipping location_id to avoid tax override (no zohoTaxId for 7.5%); receipt will use line item tax_percentage`);
   }
 
   // Zoho Books: deposit account for the received payment (optional)
@@ -489,12 +499,13 @@ export const createSalesReceipt = async (saleData) => {
     salesReceiptData.terms = String(terms);
   }
 
-  // Set place_of_contact to customer's location to enforce correct tax rate
-  // This ensures Zoho applies the tax rate associated with the customer's location
-  if (placeOfContact) {
-    salesReceiptData.place_of_contact = placeOfContact;
-    console.log(`📍 Using customer location for sales receipt: ${placeOfContact} (to enforce correct tax rate)`);
-  }
+  // Do NOT set place_of_contact for POS sales receipts.
+  // We always send tax_percentage (and optionally tax_id) on line items. Setting place_of_contact
+  // causes Zoho to override with the customer's location tax (e.g. 7% for MIA Warehouse) instead
+  // of our POS location tax (e.g. 7.5%), causing a mismatch. POS sales use the store's tax rate.
+  // #region agent log
+  try { fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'zohoService.js:createSalesReceipt',message:'tax config (place_of_contact disabled for POS)',data:{saleId,zohoTaxId:zohoTaxId||null,firstLineTaxPct:safeLineItems[0]?.taxPercentage},timestamp:Date.now(),hypothesisId:'H-ZOHO'})}).catch(()=>{}); } catch(e){}
+  // #endregion
 
   // Keep Zoho total in sync with POS total (cc fee is an adjustment, not a line item)
   if (processingFee > 0) {
@@ -509,8 +520,9 @@ export const createSalesReceipt = async (saleData) => {
       const unitPrecision = unitKey ? unitPrecisionByKey.get(unitKey) : null;
       const quantityMultiplier = Number.isFinite(unitPrecision) && unitPrecision > 0 ? unitPrecision : 1;
       const quantity = (parseFloat(item.quantity) || 0) * quantityMultiplier;
+      const lineItemPrice = parseFloat(item.rate ?? item.price);
       const dbRate = itemPriceById.get(Number(item?.itemId));
-      const price = Number.isFinite(dbRate) ? dbRate : (parseFloat(item.rate ?? item.price) || 0);
+      const price = Number.isFinite(lineItemPrice) ? lineItemPrice : (Number.isFinite(dbRate) ? dbRate : 0);
       const taxRate = Number(item.taxPercentage ?? 0);
       const hasTax = !Number.isNaN(taxRate) && taxRate > 0;
       const lineTotalFromItem = parseFloat(item.lineTotal);
@@ -1187,11 +1199,16 @@ export const getZohoTaxIdForPercentage = async (taxPercentage) => {
   const taxes = await getTaxRates();
   if (!Array.isArray(taxes) || taxes.length === 0) return null;
 
-  // Prefer active taxes that match by percentage (within a tiny tolerance)
-  const matches = taxes.filter(t => {
+  // Match by percentage: exact first, then within 0.01 (handles 7.5 vs 7.50 floating point)
+  const exactMatches = taxes.filter(t => {
     const tp = parseFloat(t?.taxPercentage);
     return Number.isFinite(tp) && Math.abs(tp - pct) < 0.0001;
   });
+  const looseMatches = taxes.filter(t => {
+    const tp = parseFloat(t?.taxPercentage);
+    return Number.isFinite(tp) && Math.abs(tp - pct) < 0.01;
+  });
+  const matches = exactMatches.length > 0 ? exactMatches : looseMatches;
 
   if (matches.length === 0) return null;
 

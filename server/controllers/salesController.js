@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Sale, SaleItem, Item, Customer, InvoicePayment } from '../models/index.js';
+import { Sale, SaleItem, Item, Customer, InvoicePayment, User } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
 import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal } from '../services/zohoService.js';
@@ -209,7 +209,7 @@ export const createSale = async (req, res) => {
       savePaymentMethod 
     } = req.body;
     // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale entry',message:'createSale body',data:{hasUseStoredPayment:req.body.hasOwnProperty('useStoredPayment'),useStoredPayment:!!req.body.useStoredPayment,hasPaymentProfileId:req.body.hasOwnProperty('paymentProfileId'),paymentProfileIdType:typeof req.body.paymentProfileId,customerId:req.body.customerId,paymentType:requestPaymentType},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale entry',message:'createSale request',data:{paymentType:requestPaymentType,itemsCount:(items||[]).length,customerId:customerId||null,useStoredPayment:!!useStoredPayment,useValorApi:!!useValorApi,useStandaloneMode:!!(useStandaloneMode||paymentDetails?.useStandaloneMode)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
     // #endregion
     let paymentType = requestPaymentType;
     // Merge debit_card into card: store and process as single "card" type
@@ -231,17 +231,19 @@ export const createSale = async (req, res) => {
     const userTaxPercentage = isTaxExempt ? 0 : resolveTaxPercentage(req.user);
     const taxRate = userTaxPercentage / 100;
 
-    // Prefer the user's saved Zoho tax_id; fallback to lookup-by-percentage.
-    // This ensures Zoho applies the correct tax rule for the user's location.
-    let userZohoTaxId = req.user?.zohoTaxId || null;
+    // Use user's zohoTaxId from DB for Zoho sales receipt tax_id (required for correct tax).
+    // Fetch fresh from DB in case user updated zohoTaxId in Settings after login.
+    let userZohoTaxId = null;
+    const currentUser = await User.findByPk(req.user.id, { attributes: ['zohoTaxId'] });
+    userZohoTaxId = currentUser?.zohoTaxId ? String(currentUser.zohoTaxId).trim() : null;
     if (!userZohoTaxId && !isTaxExempt && userTaxPercentage > 0) {
       try {
         userZohoTaxId = await getZohoTaxIdForPercentage(userTaxPercentage);
         if (!userZohoTaxId) {
-          console.warn(`⚠️ No Zoho tax_id found for user tax rate ${userTaxPercentage}%. Falling back to tax_percentage only.`);
+          console.warn(`⚠️ No Zoho tax_id. Set zohoTaxId in User/Settings (e.g. 460000000017094 for 7.5%) for correct tax in Zoho.`);
         }
       } catch (taxLookupErr) {
-        console.warn(`⚠️ Failed to lookup Zoho tax_id for user tax rate ${userTaxPercentage}%: ${taxLookupErr.message}`);
+        console.warn(`⚠️ Failed to lookup Zoho tax_id for ${userTaxPercentage}%: ${taxLookupErr.message}`);
       }
     }
     
@@ -410,6 +412,9 @@ export const createSale = async (req, res) => {
       // Keep payment type as card; mark as manual card reader payment
       // The description will indicate "manual card reader payment" in the sale record
       // Do NOT process any card payment - skip all card processing logic below
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_standalone',data:{paymentType:'card',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
     } else if (useStoredPayment && paymentProfileId && customer) {
       // #region agent log
       fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:stored payment branch',message:'entering stored payment',data:{customerId:customer.id,paymentProfileId,paymentProfileIdType:typeof paymentProfileId},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
@@ -523,6 +528,9 @@ export const createSale = async (req, res) => {
       transactionId = paymentResult.transactionId;
       // Update paymentType to actual type determined from profile
       paymentType = actualPaymentType;
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_stored',data:{paymentType,transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
     } else if (paymentType === 'card') {
       // IMPORTANT: Double-check standalone mode - if enabled, skip all card processing
       if (isStandaloneMode) {
@@ -559,6 +567,9 @@ export const createSale = async (req, res) => {
           }
 
           transactionId = paymentResult.transactionId;
+          // #region agent log
+          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_opaque',data:{paymentType:'card',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+          // #endregion
         } else if (useValorApi) {
         // Valor API mode - payment already processed in frontend via Valor API (NO Authorize.Net)
         // Flow: Frontend -> Valor API -> VP100 Terminal -> Valor API -> Frontend -> Backend (record sale)
@@ -578,6 +589,9 @@ export const createSale = async (req, res) => {
           transactionId: valorTransactionId,
           message: 'Payment processed successfully via Valor API'
         };
+        // #region agent log
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_valor',data:{paymentType:'card',transactionId:valorTransactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
       } else {
         // Card-not-present mode - process through API
         // Validation is now handled by middleware, but keep as backup
@@ -599,6 +613,9 @@ export const createSale = async (req, res) => {
         }
 
         transactionId = paymentResult.transactionId;
+        // #region agent log
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_manual',data:{paymentType:'card',transactionId:paymentResult.transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
         }
       }
     } else if (paymentType === 'ach') {
@@ -622,6 +639,9 @@ export const createSale = async (req, res) => {
       }
 
       transactionId = paymentResult.transactionId;
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=ach',data:{paymentType:'ach',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
     } else if (paymentType === 'cash') {
       // Cash payment - no processing needed
       transactionId = `CASH-${Date.now()}`;
@@ -630,6 +650,9 @@ export const createSale = async (req, res) => {
         message: 'Cash payment recorded',
         transactionId: transactionId
       };
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=cash',data:{paymentType:'cash',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
     } else if (paymentType === 'zelle') {
       // Zelle payment - record like cash (no processing needed)
       // If a confirmation number is provided (optional), include it in transactionId for traceability.
@@ -640,6 +663,9 @@ export const createSale = async (req, res) => {
         message: 'Zelle payment recorded',
         transactionId
       };
+      // #region agent log
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=zelle',data:{paymentType:'zelle',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
     }
 
     // Optionally save payment method in Authorize.Net CIM when a customer is present and
@@ -879,6 +905,9 @@ export const createSale = async (req, res) => {
 
     // Sale is complete - return success immediately
     // Printer runs in background and won't affect the response
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale success',message:'sale completed',data:{saleId:sale.id,transactionId:sale.transactionId,paymentType:sale.paymentType},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     return sendSuccess(res, {
       sale: completeSale,
       payment: paymentResult,
@@ -891,6 +920,9 @@ export const createSale = async (req, res) => {
 
   } catch (err) {
     console.error('Sale creation error:', err);
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale error',message:'sale creation failed',data:{error:err?.message||String(err),stack:(err?.stack||'').slice(0,300)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+    // #endregion
     return sendError(res, 'Sale creation failed. Please try again.', 500, err);
   }
 };
@@ -961,65 +993,185 @@ export const getSales = async (req, res) => {
 };
 
 // Get transactions from transactions table
+// Admin: all data. Non-admin: filtered by user's locationId.
 export const getTransactions = async (req, res) => {
   try {
-    const { startDate, endDate, syncedToZoho } = req.query;
-    const userLocationId = req.user?.locationId;
-
-    if (!userLocationId) {
-      return sendError(res, 'User location not found', 400);
-    }
+    const { startDate, endDate, syncedToZoho, userId: filterUserId } = req.query;
+    const userId = req.user?.id;
+    const isAdmin = req.user?.role === 'admin';
 
     const isSQLite = sequelize.getDialect() === 'sqlite';
-    const locationCol = isSQLite ? 'locationId' : '"locationId"';
     const createdAtCol = isSQLite ? 'createdAt' : '"createdAt"';
     const syncedCol = isSQLite ? 'syncedToZoho' : '"syncedToZoho"';
+    const userIdCol = isSQLite ? 'userId' : '"userId"';
 
-    let whereClause = `WHERE ${locationCol} = :locationId`;
-    const replacements = { locationId: userLocationId };
+    const whereParts = [];
+    const replacements = {};
 
+    if (isAdmin && filterUserId) {
+      whereParts.push(`${userIdCol} = :filterUserId`);
+      replacements.filterUserId = parseInt(filterUserId, 10);
+    } else if (!isAdmin && userId) {
+      whereParts.push(`${userIdCol} = :userId`);
+      replacements.userId = userId;
+    }
     if (startDate) {
-      whereClause += ` AND ${createdAtCol} >= :startDate`;
+      whereParts.push(`${createdAtCol} >= :startDate`);
       replacements.startDate = new Date(startDate).toISOString();
     }
-
     if (endDate) {
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-      whereClause += ` AND ${createdAtCol} <= :endDate`;
+      whereParts.push(`${createdAtCol} <= :endDate`);
       replacements.endDate = end.toISOString();
     }
-
     if (syncedToZoho !== undefined) {
-      whereClause += ` AND ${syncedCol} = :syncedToZoho`;
+      whereParts.push(`${syncedCol} = :syncedToZoho`);
       replacements.syncedToZoho = syncedToZoho === 'true' ? (isSQLite ? 1 : true) : (isSQLite ? 0 : false);
     }
 
-    // Query transactions table directly
-    const [transactions] = await sequelize.query(`
-      SELECT * FROM transactions 
-      ${whereClause}
-      ORDER BY ${createdAtCol} DESC
-    `, {
-      replacements
+    const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    let transactions = [];
+    try {
+      const [txnRows] = await sequelize.query(`
+        SELECT * FROM transactions 
+        ${whereClause}
+        ORDER BY ${createdAtCol} DESC
+      `, { replacements });
+      transactions = txnRows || [];
+    } catch (txnErr) {
+      console.warn(`⚠️ transactions table query failed (${txnErr.message}), falling back to Sale records`);
+    }
+
+    const initialFromTable = transactions.length;
+    let mergedCount = 0;
+    const txnIdsSet = new Set((transactions || []).map(t => String(t?.transactionId || '')).filter(Boolean));
+    const saleWhere = {};
+    if (isAdmin && filterUserId) saleWhere.userId = parseInt(filterUserId, 10);
+    else if (!isAdmin && userId) saleWhere.userId = userId;
+    if (startDate || endDate) {
+      saleWhere.createdAt = {};
+      if (startDate) saleWhere.createdAt[Op.gte] = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        saleWhere.createdAt[Op.lte] = end;
+      }
+    }
+    if (true) {
+      const salesForMerge = await Sale.findAll({
+        where: Object.keys(saleWhere).length > 0 ? saleWhere : {},
+        attributes: ['id', 'transactionId', 'createdAt', 'subtotal', 'taxAmount', 'taxPercentage', 'ccFee', 'total', 'paymentType', 'locationId', 'syncedToZoho', 'zohoSalesReceiptId', 'cancelledInZoho'],
+        order: [['createdAt', 'DESC']],
+        limit: 500
+      });
+      for (const s of salesForMerge || []) {
+        const tId = s.transactionId ? String(s.transactionId).trim() : null;
+        if (tId && !txnIdsSet.has(tId)) {
+          mergedCount++;
+          transactions.push({
+            transactionId: tId,
+            id: s.id,
+            createdAt: s.createdAt,
+            subtotal: s.subtotal,
+            taxAmount: s.taxAmount,
+            taxPercentage: s.taxPercentage,
+            ccFee: s.ccFee || 0,
+            total: s.total,
+            paymentType: s.paymentType,
+            locationId: s.locationId,
+            syncedToZoho: s.syncedToZoho,
+            zohoSalesReceiptId: s.zohoSalesReceiptId,
+            cancelledInZoho: s.cancelledInZoho || false
+          });
+          txnIdsSet.add(tId);
+        }
+      }
+      transactions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    // If we still have no transactions, use Sales directly as primary source
+    if (transactions.length === 0) {
+      const saleWhereFallback = {};
+      if (isAdmin && filterUserId) saleWhereFallback.userId = parseInt(filterUserId, 10);
+      else if (!isAdmin && userId) saleWhereFallback.userId = userId;
+      if (startDate || endDate) {
+        saleWhereFallback.createdAt = {};
+        if (startDate) saleWhereFallback.createdAt[Op.gte] = new Date(startDate);
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          saleWhereFallback.createdAt[Op.lte] = end;
+        }
+      }
+      const salesOnly = await Sale.findAll({
+        where: Object.keys(saleWhereFallback).length > 0 ? saleWhereFallback : {},
+        attributes: ['id', 'transactionId', 'createdAt', 'subtotal', 'taxAmount', 'taxPercentage', 'ccFee', 'total', 'paymentType', 'locationId', 'syncedToZoho', 'zohoSalesReceiptId', 'cancelledInZoho'],
+        order: [['createdAt', 'DESC']],
+        limit: 500
+      });
+      for (const s of salesOnly || []) {
+        const tId = s.transactionId ? String(s.transactionId).trim() : null;
+        if (tId) {
+          mergedCount++;
+          transactions.push({
+            transactionId: tId,
+            id: s.id,
+            createdAt: s.createdAt,
+            subtotal: s.subtotal,
+            taxAmount: s.taxAmount,
+            taxPercentage: s.taxPercentage,
+            ccFee: s.ccFee || 0,
+            total: s.total,
+            paymentType: s.paymentType,
+            locationId: s.locationId,
+            syncedToZoho: s.syncedToZoho,
+            zohoSalesReceiptId: s.zohoSalesReceiptId,
+            cancelledInZoho: s.cancelledInZoho || false
+          });
+        }
+      }
+    }
+
+    // Look up Sale ids by transactionId (transactions.id != sales.id - different tables with separate sequences)
+    const txnIds = [...new Set((transactions || []).map(t => t.transactionId).filter(Boolean))];
+    const salesByTxnId = new Map();
+    if (txnIds.length > 0) {
+      const saleLookupWhere = { transactionId: { [Op.in]: txnIds } };
+      if (!isAdmin && userId) saleLookupWhere.userId = userId;
+      const sales = await Sale.findAll({
+        where: saleLookupWhere,
+        attributes: ['id', 'transactionId']
+      });
+      for (const s of sales) {
+        if (s.transactionId) salesByTxnId.set(String(s.transactionId).trim(), s.id);
+      }
+    }
+
+    // Transform to match frontend Transaction interface; use actual Sale id for receipt lookup
+    const transformedTransactions = (transactions || []).map((txn) => {
+      const txnIdStr = txn.transactionId ? String(txn.transactionId).trim() : null;
+      const saleId = txnIdStr ? (salesByTxnId.get(txnIdStr) ?? txn.id) : txn.id;
+      return {
+        id: String(txn.transactionId || txn.id),
+        saleId: saleId ?? undefined,
+        date: new Date(txn.createdAt),
+        paymentType: txn.paymentType || 'cash',
+        subtotal: parseFloat(txn.subtotal || 0),
+        tax: parseFloat(txn.taxAmount || 0),
+        fee: parseFloat(txn.ccFee || 0),
+        total: parseFloat(txn.total || 0),
+        locationId: txn.locationId,
+        syncedToZoho: Boolean(txn.syncedToZoho),
+        zohoSalesReceiptId: txn.zohoSalesReceiptId || null,
+        cancelledInZoho: Boolean(txn.cancelledInZoho)
+      };
     });
 
-    // Transform to match frontend Transaction interface
-    const transformedTransactions = (transactions || []).map((txn) => ({
-      id: String(txn.transactionId || txn.id),
-      saleId: txn.id,
-      date: new Date(txn.createdAt),
-      paymentType: txn.paymentType || 'cash',
-      subtotal: parseFloat(txn.subtotal || 0),
-      tax: parseFloat(txn.taxAmount || 0),
-      fee: parseFloat(txn.ccFee || 0),
-      total: parseFloat(txn.total || 0),
-      locationId: txn.locationId,
-      syncedToZoho: Boolean(txn.syncedToZoho),
-      zohoSalesReceiptId: txn.zohoSalesReceiptId || null,
-      cancelledInZoho: Boolean(txn.cancelledInZoho)
-    }));
-
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:getTransactions',message:'transactions result',data:{fromTable:initialFromTable,mergedCount,total:transformedTransactions?.length||0,userId,isAdmin},timestamp:Date.now(),hypothesisId:'H-TXN'})}).catch(()=>{});
+    // #endregion
     return sendSuccess(res, { transactions: transformedTransactions });
   } catch (err) {
     console.error('Get transactions error:', err);
@@ -1033,14 +1185,16 @@ export const getTransactions = async (req, res) => {
  */
 export const getInvoicePayments = async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
-    const userLocationId = req.user?.locationId;
+    const { startDate, endDate, userId: filterUserId } = req.query;
+    const userId = req.user?.id;
+    const isAdmin = req.user?.role === 'admin';
 
-    if (!userLocationId) {
-      return sendError(res, 'User location not found', 400);
+    const where = {};
+    if (isAdmin && filterUserId) {
+      where.userId = parseInt(filterUserId, 10);
+    } else if (!isAdmin && userId) {
+      where.userId = userId;
     }
-
-    const where = { locationId: userLocationId };
     const dateRange = {};
     if (startDate) dateRange[Op.gte] = new Date(startDate);
     if (endDate) {
@@ -1080,7 +1234,7 @@ export const getInvoicePayments = async (req, res) => {
 export const getSaleById = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const sale = await Sale.findByPk(id, {
       include: [
         { association: 'items' },
@@ -1237,30 +1391,31 @@ export const retryZohoSync = async (req, res) => {
 
 export const getSyncStatus = async (req, res) => {
   try {
-    const { limit = 10 } = req.query;
-    const userLocationId = req.user.locationId;
-    const isSQLite = sequelize.getDialect() === 'sqlite';
-    const locationCol = isSQLite ? 'locationId' : '"locationId"';
-    const createdAtCol = isSQLite ? 'createdAt' : '"createdAt"';
-    
-    // Query transactions table directly
-    const [transactions] = await sequelize.query(`
-      SELECT * FROM transactions 
-      WHERE ${locationCol} = :locationId
-      ORDER BY ${createdAtCol} DESC
-      LIMIT :limit
-    `, {
-      replacements: {
-        locationId: userLocationId,
-        limit: parseInt(limit) || 10
-      }
-    });
+    const { userId: filterUserId } = req.query;
+    const userId = req.user?.id;
+    const isAdmin = req.user?.role === 'admin';
 
-    // Fetch customer details for transactions that have customerId
-    const customerIds = [...new Set((transactions || [])
-      .map(t => t.customerId)
-      .filter(Boolean))];
-    
+    const saleWhere = {};
+    if (isAdmin && filterUserId) saleWhere.userId = parseInt(filterUserId, 10);
+    else if (!isAdmin && userId) saleWhere.userId = userId;
+    const sales = await Sale.findAll({
+      where: Object.keys(saleWhere).length > 0 ? saleWhere : {},
+      attributes: ['id', 'transactionId', 'createdAt', 'total', 'customerId', 'zohoCustomerId', 'syncedToZoho', 'zohoSalesReceiptId', 'syncError'],
+      order: [['createdAt', 'DESC']]
+    });
+    const transactions = (sales || []).map(s => ({
+      id: s.id,
+      transactionId: s.transactionId,
+      createdAt: s.createdAt,
+      total: s.total,
+      customerId: s.customerId,
+      zohoCustomerId: s.zohoCustomerId,
+      syncedToZoho: s.syncedToZoho,
+      zohoSalesReceiptId: s.zohoSalesReceiptId,
+      syncError: s.syncError
+    }));
+
+    const customerIds = [...new Set((transactions || []).map(t => t.customerId).filter(Boolean))];
     const customersMap = new Map();
     if (customerIds.length > 0) {
       const customers = await Customer.findAll({
@@ -1293,7 +1448,30 @@ export const getSyncStatus = async (req, res) => {
       };
     });
 
-    return sendSuccess(res, { 
+    // Invoice/Sales Order payment sync stats - admin: all or by filterUserId, non-admin: filter by userId
+    let invoicePaymentSummary = { total: 0, invoices: { total: 0, recorded: 0, notRecorded: 0 }, salesOrders: { total: 0 } };
+    try {
+      const ipWhere = (isAdmin && filterUserId) ? { userId: parseInt(filterUserId, 10) } : (!isAdmin && userId) ? { userId } : {};
+      const invoicePayments = await InvoicePayment.findAll({
+        where: ipWhere,
+        attributes: ['type', 'zohoPaymentRecorded']
+      });
+      const invoices = (invoicePayments || []).filter(p => p.type === 'invoice');
+      const salesOrders = (invoicePayments || []).filter(p => p.type === 'salesorder');
+      invoicePaymentSummary = {
+        total: invoicePayments?.length || 0,
+        invoices: {
+          total: invoices.length,
+          recorded: invoices.filter(p => p.zohoPaymentRecorded).length,
+          notRecorded: invoices.filter(p => !p.zohoPaymentRecorded).length
+        },
+        salesOrders: { total: salesOrders.length }
+      };
+    } catch (ipErr) {
+      console.warn('getSyncStatus: invoice payments query failed:', ipErr.message);
+    }
+
+    return sendSuccess(res, {
       sales: status,
       summary: {
         total: status.length,
@@ -1301,7 +1479,8 @@ export const getSyncStatus = async (req, res) => {
         failed: status.filter(s => !s.syncedToZoho && s.syncError).length,
         noCustomer: status.filter(s => !s.customer).length,
         noZohoId: status.filter(s => s.customer && !s.customer.zohoId).length
-      }
+      },
+      invoicePayments: invoicePaymentSummary
     });
   } catch (err) {
     console.error('Get sync status error:', err);

@@ -18,6 +18,8 @@ interface PaymentModalProps {
   total: number;
   subtotal: number;
   tax: number;
+  taxRate?: number;
+  isTaxExempt?: boolean;
   cartItems: CartItem[];
   onConfirmPayment: (details: PaymentDetails) => Promise<any> | void;
   context?: 'sale' | 'zohoDocuments';
@@ -37,7 +39,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems, onConfirmPayment, context = 'sale', userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, isTaxExempt, cartItems, onConfirmPayment, context = 'sale', userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName }: PaymentModalProps) {
   const { showToast } = useToast();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
@@ -97,7 +99,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
     }
   }, [userTerminalNumber, userTerminalIP, userTerminalPort]);
 
-  // Load payment profiles when customer is available
+  // Load payment profiles when customer is available (sale context; zohoDocuments uses separate flow)
   useEffect(() => {
     if (context === 'sale' && isOpen && customerId) {
       loadPaymentProfiles();
@@ -645,7 +647,9 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
             </div>
             
             <div className="flex items-center justify-between">
-              <span className="text-gray-700 dark:text-gray-300">Sales Tax:</span>
+              <span className="text-gray-700 dark:text-gray-300">
+                Sales Tax{isTaxExempt ? ' (Exempt)' : taxRate != null ? ` (${(taxRate * 100).toFixed(1)}%)` : ''}:
+              </span>
               <span className="font-medium text-gray-900 dark:text-white">${tax.toFixed(2)}</span>
             </div>
             
@@ -675,10 +679,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
           {/* Payment Methods */}
           <div className="w-full">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 text-center">Payment Method</label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full">
+            <div className="flex flex-nowrap gap-3 w-full">
               <button
                 onClick={() => setSelectedMethod('cash')}
-                className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                className={`flex-1 min-w-0 px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
                   selectedMethod === 'cash'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
@@ -694,7 +698,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   setCardPaymentMethod('valor_api');
                   setCardReaderStatus('ready');
                 }}
-                className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                className={`flex-1 min-w-0 px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
                   selectedMethod === 'card'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
@@ -707,6 +711,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
               {context !== 'zohoDocuments' && customerId && (
                 <button
                   onClick={() => {
+                    if (paymentProfiles.length === 0) return;
                     setSelectedMethod('stored_payment');
                     if (!selectedPaymentProfileId && paymentProfiles.length > 0) {
                       const defaultProfile = paymentProfiles.find((p: any) => p.isDefault || p.isStored) || paymentProfiles[0];
@@ -715,20 +720,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                       }
                     }
                   }}
-                  className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                    selectedMethod === 'stored_payment'
+                  disabled={loadingPaymentProfiles || paymentProfiles.length === 0}
+                  className={`flex-1 min-w-0 px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                    selectedMethod === 'stored_payment' && paymentProfiles.length > 0
                       ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                      : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
+                      : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed'
                   }`}
                 >
-                  <Wallet className="w-6 h-6" />
+                  {loadingPaymentProfiles ? (
+                    <Loader className="w-6 h-6 animate-spin text-gray-500 dark:text-gray-400" />
+                  ) : (
+                    <Wallet className="w-6 h-6" />
+                  )}
                   <span className="text-sm">Stored</span>
                 </button>
               )}
               
               <button
                 onClick={() => setSelectedMethod('zelle')}
-                className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                className={`flex-1 min-w-0 px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
                   selectedMethod === 'zelle'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
@@ -743,7 +753,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, cartItems,
                   setSelectedMethod('ach');
                   setAchEntryMode('hidden');
                 }}
-                className={`px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                className={`flex-1 min-w-0 px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
                   selectedMethod === 'ach'
                     ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'

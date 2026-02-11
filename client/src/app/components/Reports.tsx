@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Loader2, BarChart3, CheckCircle2, XCircle, RefreshCw, FileDown, X, Receipt } from 'lucide-react';
-import { salesAPI } from '../../services/api';
+import { salesAPI, authAPI } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { Sale } from '../types';
 import { logger } from '../../utils/logger';
@@ -44,7 +44,7 @@ interface ReportsProps {
   userName?: string;
 }
 
-export function Reports({ transactions: initialTransactions, isLoading: initialLoading, userLocationId, storeName = 'Store', storeAddress = '', storePhone = '', userName = '' }: ReportsProps) {
+export function Reports({ transactions: initialTransactions, isLoading: initialLoading, userLocationId, storeName = 'Store', storeAddress = '', storePhone = '', userName = '', userRole = 'cashier' }: ReportsProps) {
   const { showToast } = useToast();
   // Calculate default dates (30 days ago to today)
   const defaultEndDate = new Date();
@@ -57,7 +57,8 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 15;
+  const [pageSize, setPageSize] = useState(100);
+  const pageSizeOptions = [25, 50, 100, 500, 10000]; // 10000 = "Show all"
   const [cancellingSaleId, setCancellingSaleId] = useState<number | null>(null);
   const [syncStatus, setSyncStatus] = useState<any>(null);
   const [loadingSyncStatus, setLoadingSyncStatus] = useState(false);
@@ -66,6 +67,9 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
   const [activeTab, setActiveTab] = useState<'transactions' | 'invoice-payments'>('transactions');
   const [invoicePayments, setInvoicePayments] = useState<InvoicePaymentItem[]>([]);
   const [loadingInvoicePayments, setLoadingInvoicePayments] = useState(false);
+  const [users, setUsers] = useState<{ id: number; useremail: string }[]>([]);
+  const [filterUserId, setFilterUserId] = useState<string>('');
+  const isAdmin = userRole === 'admin';
 
   // Use logged-in user's location (no manual location filter)
   const locationId = userLocationId;
@@ -86,8 +90,9 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
       setIsLoading(true);
     }
     try {
-      // Fetch from transactions table directly without date filters
-      const response = await salesAPI.getTransactions();
+      const params: { startDate: string; endDate: string; userId?: string } = { startDate, endDate };
+      if (isAdmin && filterUserId) params.userId = filterUserId;
+      const response = await salesAPI.getTransactions(params);
 
       if (response.success && response.data?.transactions) {
         // Transactions are already in the correct format from the backend
@@ -106,13 +111,14 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
         setIsLoading(false);
       }
     }
-  }, [showToast]);
+  }, [startDate, endDate, filterUserId, isAdmin, showToast]);
 
-  // Load sync status
+  // Load sync status (honors user filter for admin)
   const loadSyncStatus = useCallback(async () => {
     setLoadingSyncStatus(true);
     try {
-      const response = await salesAPI.getSyncStatus(20);
+      const params = isAdmin && filterUserId ? { userId: filterUserId } : undefined;
+      const response = await salesAPI.getSyncStatus(params);
       if (response.success && response.data) {
         setSyncStatus(response.data);
       }
@@ -121,7 +127,7 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
     } finally {
       setLoadingSyncStatus(false);
     }
-  }, []);
+  }, [isAdmin, filterUserId]);
 
   // Load invoice/SO payments
   const loadInvoicePayments = useCallback(async (showRefreshing = false) => {
@@ -131,7 +137,9 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
       setLoadingInvoicePayments(true);
     }
     try {
-      const response = await salesAPI.getInvoicePayments({ startDate, endDate });
+      const params: { startDate: string; endDate: string; userId?: string } = { startDate, endDate };
+      if (isAdmin && filterUserId) params.userId = filterUserId;
+      const response = await salesAPI.getInvoicePayments(params);
       if (response.success && response.data?.invoicePayments) {
         setInvoicePayments(response.data.invoicePayments);
       } else {
@@ -147,18 +155,29 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
         setLoadingInvoicePayments(false);
       }
     }
-  }, [startDate, endDate, showToast]);
+  }, [startDate, endDate, filterUserId, isAdmin, showToast]);
 
-  // Load sales on mount and when filters change
+  // Load users for admin filter dropdown
   useEffect(() => {
-    loadSales();
+    if (isAdmin) {
+      authAPI.getAllUsers().then((res) => {
+        if (res.success && res.data?.users) {
+          setUsers(res.data.users.map((u: any) => ({ id: u.id, useremail: u.useremail || u.email || String(u.id) })));
+        }
+      }).catch(() => {});
+    }
+  }, [isAdmin]);
+
+  // Load sales on mount and when filters change (use refreshing mode so page layout stays visible)
+  useEffect(() => {
+    loadSales(true);
     loadSyncStatus();
   }, [loadSales, loadSyncStatus]);
 
-  // Load invoice payments when tab is active
+  // Load invoice payments when tab is active (use refreshing mode so page layout stays visible)
   useEffect(() => {
     if (activeTab === 'invoice-payments') {
-      loadInvoicePayments();
+      loadInvoicePayments(true);
     }
   }, [activeTab, loadInvoicePayments]);
 
@@ -247,9 +266,6 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
           timestamp: s.createdAt,
           createdAt: s.createdAt,
         };
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Reports.tsx:receiptOpened',message:'Receipt modal opened',data:{saleId:s.id,itemsCount:(s.items||[]).length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-        // #endregion
         setReceiptSale(sale);
       } else {
         showToast('Failed to load sale for receipt', 'error', 3000);
@@ -302,9 +318,6 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
 
   const handleDownloadReceiptPDF = () => {
     if (!receiptSale) return;
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Reports.tsx:handleDownloadReceiptPDF',message:'Print via new window',data:{hasReceiptSale:true,saleId:receiptSale.id},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'H9'})}).catch(()=>{});
-    // #endregion
     const html = buildReceiptPrintHtml(receiptSale);
     const win = window.open('', '_blank');
     if (win) {
@@ -392,37 +405,86 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
             </div>
 
             {/* Zoho Sync Status Summary */}
-            {syncStatus && syncStatus.summary && (
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm p-6">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Zoho Sync Status</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {syncStatus.summary.total}
-                    </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">Total Sales</div>
-                  </div>
-                  <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                      {syncStatus.summary.synced}
-                    </div>
-                    <div className="text-sm text-green-700 dark:text-green-300">Synced</div>
-                  </div>
-                  <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">
-                      {syncStatus.summary.failed}
-                    </div>
-                    <div className="text-sm text-red-700 dark:text-red-300">Failed</div>
-                  </div>
-                  <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                    <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                      {syncStatus.summary.noZohoId}
-                    </div>
-                    <div className="text-sm text-yellow-700 dark:text-yellow-300">No Zoho ID</div>
-                  </div>
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Zoho Sync Status</h2>
+              {loadingSyncStatus ? (
+                <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Loading sync status...
                 </div>
-              </div>
-            )}
+              ) : syncStatus?.summary ? (
+                <>
+                  {/* Sales Receipts (POS Transactions) */}
+                  <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Sales Receipts</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                      <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                        {syncStatus.summary.total}
+                      </div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Total</div>
+                    </div>
+                    <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                        {syncStatus.summary.synced}
+                      </div>
+                      <div className="text-sm text-green-700 dark:text-green-300">Synced</div>
+                    </div>
+                    <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                      <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+                        {syncStatus.summary.failed}
+                      </div>
+                      <div className="text-sm text-red-700 dark:text-red-300">Failed</div>
+                    </div>
+                    <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                      <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                        {syncStatus.summary.noZohoId}
+                      </div>
+                      <div className="text-sm text-yellow-700 dark:text-yellow-300">No Zoho ID</div>
+                    </div>
+                  </div>
+                  {/* Invoice / Sales Order Payments */}
+                  {syncStatus.invoicePayments && (
+                    <>
+                      <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Invoice / Sales Order Payments</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                            {syncStatus.invoicePayments.total}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">Total Payments</div>
+                        </div>
+                        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                            {syncStatus.invoicePayments.invoices?.total ?? 0}
+                          </div>
+                          <div className="text-sm text-blue-700 dark:text-blue-300">Invoices</div>
+                        </div>
+                        <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                            {syncStatus.invoicePayments.invoices?.recorded ?? 0}
+                          </div>
+                          <div className="text-sm text-green-700 dark:text-green-300">Invoice Recorded</div>
+                        </div>
+                        <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+                            {syncStatus.invoicePayments.invoices?.notRecorded ?? 0}
+                          </div>
+                          <div className="text-sm text-amber-700 dark:text-amber-300">Invoice Not Recorded</div>
+                        </div>
+                        <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                            {syncStatus.invoicePayments.salesOrders?.total ?? 0}
+                          </div>
+                          <div className="text-sm text-purple-700 dark:text-purple-300">Sales Orders</div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <div className="text-sm text-gray-500 dark:text-gray-400">No sync data available</div>
+              )}
+            </div>
 
             {/* Tab navigation */}
             <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
@@ -452,19 +514,52 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
             {/* Transactions Section */}
             {activeTab === 'transactions' && (
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-3">
                 <h2 className="font-semibold text-gray-900 dark:text-white">
                   Transactions
                 </h2>
-                <button
-                  onClick={handleRefresh}
-                  disabled={isLoading || isRefreshing || loadingSyncStatus}
-                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  title="Refresh transactions"
-                >
-                  <RefreshCw className={`w-4 h-4 ${isRefreshing || loadingSyncStatus ? 'animate-spin' : ''}`} />
-                  {isRefreshing || loadingSyncStatus ? 'Refreshing...' : 'Refresh'}
-                </button>
+                <div className="flex items-center gap-3">
+                  {isAdmin && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600 dark:text-gray-400">User</label>
+                      <select
+                        value={filterUserId}
+                        onChange={(e) => setFilterUserId(e.target.value)}
+                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        <option value="">All users</option>
+                        {users.map((u) => (
+                          <option key={u.id} value={String(u.id)}>{u.useremail}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-600 dark:text-gray-400">From</label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                    <label className="text-sm text-gray-600 dark:text-gray-400">To</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <button
+                    onClick={handleRefresh}
+                    disabled={isLoading || isRefreshing || loadingSyncStatus}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title="Refresh transactions"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isRefreshing || loadingSyncStatus ? 'animate-spin' : ''}`} />
+                    {isRefreshing || loadingSyncStatus ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
               </div>
 
               {filteredTransactions.length === 0 ? (
@@ -475,7 +570,7 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                     No transactions found
                   </h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Adjust your filters to see transactions
+                    Transactions will appear here when sales are made
                   </p>
                 </div>
               ) : (
@@ -488,7 +583,7 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                           No
                         </th>
                         <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">
-                          ID
+                          Reference ID
                         </th>
                         <th className="px-6 py-3 text-left font-semibold text-gray-900 dark:text-white">
                           Date
@@ -635,10 +730,23 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                   </table>
 
                   {/* Pagination */}
-                  <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
-                      Showing {filteredTransactions.length === 0 ? 0 : startIndex + 1}–
-                      {Math.min(startIndex + pageSize, filteredTransactions.length)} of {filteredTransactions.length}
+                  <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        Showing {filteredTransactions.length === 0 ? 0 : startIndex + 1}–
+                        {Math.min(startIndex + pageSize, filteredTransactions.length)} of {filteredTransactions.length}
+                      </span>
+                      <select
+                        value={pageSize}
+                        onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                        className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
+                      >
+                        {pageSizeOptions.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt >= 10000 ? 'Show all' : `${opt} per page`}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -673,6 +781,21 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                   Invoice / Sales Order Payments
                 </h2>
                 <div className="flex items-center gap-3">
+                  {isAdmin && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600 dark:text-gray-400">User</label>
+                      <select
+                        value={filterUserId}
+                        onChange={(e) => setFilterUserId(e.target.value)}
+                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        <option value="">All users</option>
+                        {users.map((u) => (
+                          <option key={u.id} value={String(u.id)}>{u.useremail}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <label className="text-sm text-gray-600 dark:text-gray-400">From</label>
                     <input

@@ -342,11 +342,12 @@ export const customersAPI = {
 
 // Sales API
 export const salesAPI = {
-  getTransactions: async (params?: { startDate?: string; endDate?: string; syncedToZoho?: string }) => {
+  getTransactions: async (params?: { startDate?: string; endDate?: string; syncedToZoho?: string; userId?: string }) => {
     const queryParams = new URLSearchParams();
     if (params?.startDate) queryParams.append('startDate', params.startDate);
     if (params?.endDate) queryParams.append('endDate', params.endDate);
     if (params?.syncedToZoho !== undefined) queryParams.append('syncedToZoho', params.syncedToZoho);
+    if (params?.userId) queryParams.append('userId', params.userId);
     
     const query = queryParams.toString();
     return apiRequest<{ transactions: any[] }>(`/sales/transactions${query ? `?${query}` : ''}`, {
@@ -354,10 +355,11 @@ export const salesAPI = {
     }, true);
   },
 
-  getInvoicePayments: async (params?: { startDate?: string; endDate?: string }) => {
+  getInvoicePayments: async (params?: { startDate?: string; endDate?: string; userId?: string }) => {
     const queryParams = new URLSearchParams();
     if (params?.startDate) queryParams.append('startDate', params.startDate);
     if (params?.endDate) queryParams.append('endDate', params.endDate);
+    if (params?.userId) queryParams.append('userId', params.userId);
     
     const query = queryParams.toString();
     return apiRequest<{ invoicePayments: any[] }>(`/sales/invoice-payments${query ? `?${query}` : ''}`, {
@@ -403,7 +405,10 @@ export const salesAPI = {
     return apiRequest<{ sale: any }>(`/sales/${id}`);
   },
 
-  getSyncStatus: async (limit: number = 10) => {
+  getSyncStatus: async (params?: { userId?: string }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.userId) queryParams.append('userId', params.userId);
+    const query = queryParams.toString();
     return apiRequest<{
       sales: any[];
       summary: {
@@ -413,7 +418,8 @@ export const salesAPI = {
         noCustomer: number;
         noZohoId: number;
       };
-    }>(`/sales/sync/status?limit=${limit}`);
+      invoicePayments?: any;
+    }>(`/sales/sync/status${query ? `?${query}` : ''}`, { method: 'GET' }, true);
   },
 
   retryZohoSync: async (saleId: number) => {

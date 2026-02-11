@@ -35,6 +35,8 @@ export const authenticate = async (req, res, next) => {
 };
 
 export const requireLocation = (req, res, next) => {
+  // Admin can proceed without location (e.g. to view all report data)
+  if (req.user.role === 'admin') return next();
   if (!req.user.locationId) {
     return res.status(403).json({ 
       success: false,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sale } from '../types';
-import { Printer, FileDown, ShoppingCart, CheckCircle, AlertCircle } from 'lucide-react';
+import { Printer, FileDown, ShoppingCart, CheckCircle, AlertCircle, BarChart3 } from 'lucide-react';
 
 interface ReceiptScreenProps {
   sale: Sale;
@@ -10,6 +10,7 @@ interface ReceiptScreenProps {
   userName: string;
   onNewSale: () => void;
   onLogout: () => void;
+  onNavigateToReports?: () => void;
 }
 
 export function ReceiptScreen({
@@ -20,6 +21,7 @@ export function ReceiptScreen({
   userName,
   onNewSale,
   onLogout,
+  onNavigateToReports,
 }: ReceiptScreenProps) {
   const [isPrinting, setIsPrinting] = useState(false);
   const [printerStatus, setPrinterStatus] = useState<'checking' | 'online' | 'offline'>('checking');
@@ -366,6 +368,17 @@ export function ReceiptScreen({
               <FileDown className="w-5 h-5" />
               <span>Download PDF</span>
             </button>
+
+            {/* Transactions (Reports) */}
+            {onNavigateToReports && (
+              <button
+                onClick={onNavigateToReports}
+                className="flex-1 min-w-[200px] flex items-center justify-center gap-2 px-6 py-3 border-2 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <BarChart3 className="w-5 h-5" />
+                <span>Transactions</span>
+              </button>
+            )}
 
             {/* New Sale */}
             <button
