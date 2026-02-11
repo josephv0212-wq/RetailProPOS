@@ -761,6 +761,76 @@ export const createCustomerPayment = async (params) => {
 };
 
 /**
+ * Create a Zoho Books invoice for the 3% card processing fee.
+ * The fee invoice is then applied together with other invoices in a single customer payment.
+ * Requires env: ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME (income account ID). Optionally ZOHO_ITEM_ID_PROCESSING_FEE (item ID).
+ * @param {Object} params
+ * @param {string} params.customerId - Zoho customer ID (contact_id)
+ * @param {number} params.feeAmount - Fee amount (e.g. totalCharge - invoiceTotal)
+ * @param {string} [params.date] - Invoice date (yyyy-mm-dd)
+ * @param {string} [params.referenceNumber] - Reference (e.g. transaction ID)
+ * @param {string} [params.locationId] - Zoho location ID
+ * @returns {Promise<{ success: boolean, invoiceId?: string, error?: string }>}
+ */
+export const createProcessingFeeInvoice = async (params) => {
+  const { customerId, feeAmount, date, referenceNumber, locationId } = params;
+  const accountId = process.env.ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME;
+  const itemId = process.env.ZOHO_ITEM_ID_PROCESSING_FEE;
+
+  if (!accountId && !itemId) {
+    console.warn('⚠️ Zoho processing fee invoice skipped: set ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME or ZOHO_ITEM_ID_PROCESSING_FEE to create fee invoices.');
+    return { success: false, error: 'Processing fee account or item not configured' };
+  }
+  const amount = parseFloat(feeAmount);
+  if (!amount || amount <= 0) {
+    return { success: true, invoiceId: null };
+  }
+
+  const invoiceDate = date || new Date().toISOString().split('T')[0];
+
+  const lineItem = {
+    name: 'Card Processing Fee (3%)',
+    rate: amount,
+    quantity: 1,
+    description: 'POS card processing fee'
+  };
+  if (itemId && String(itemId).trim() !== '') {
+    lineItem.item_id = String(itemId).trim();
+    delete lineItem.name;
+  } else {
+    lineItem.account_id = String(accountId).trim();
+  }
+
+  const payload = {
+    customer_id: customerId,
+    date: invoiceDate,
+    line_items: [lineItem]
+  };
+  if (referenceNumber && String(referenceNumber).trim() !== '') {
+    payload.reference_number = String(referenceNumber).slice(0, 99);
+  }
+  if (locationId && String(locationId).trim() !== '') {
+    payload.location_id = String(locationId).trim();
+  }
+
+  try {
+    const response = await makeZohoRequest('/invoices', 'POST', payload);
+    if (response.code === 0 && response.invoice) {
+      const invoiceId = response.invoice.invoice_id;
+      console.log(`✅ Zoho: Processing fee invoice created, invoice_id: ${invoiceId}, amount: ${amount}`);
+      return { success: true, invoiceId };
+    }
+    const errMsg = response.message || 'Failed to create processing fee invoice';
+    console.warn(`⚠️ Zoho createProcessingFeeInvoice: ${errMsg}`);
+    return { success: false, error: errMsg };
+  } catch (error) {
+    const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+    console.error('❌ Zoho createProcessingFeeInvoice error:', errorMsg);
+    return { success: false, error: errorMsg };
+  }
+};
+
+/**
  * Create a journal entry in Zoho Books for the 3% processing fee (unapplied portion of customer payment).
  * Double-entry: Debit Customer Advance / Unapplied, Credit Processing Fee Income.
  * Requires env: ZOHO_ACCOUNT_ID_CUSTOMER_ADVANCE, ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME (Chart of Accounts IDs).

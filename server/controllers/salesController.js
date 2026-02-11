@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer, InvoicePayment, User } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
-import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal } from '../services/zohoService.js';
+import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeInvoice } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
@@ -1743,14 +1743,35 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       } else {
         const zohoPaymentMode = paymentType === 'ach' ? 'banktransfer' : 'creditcard';
         const paymentLabel = paymentType === 'ach' ? 'ACH' : 'Card';
-        const invoicesForZoho = invoiceItems.map(it => ({
+        let invoicesForZoho = invoiceItems.map(it => ({
           invoice_id: it.id,
           amount_applied: it.amount
         }));
         const invoiceTotal = invoiceItems.reduce((sum, it) => sum + it.amount, 0);
+        let zohoPaymentAmount = invoiceTotal;
+
+        if (totalFee > 0) {
+          const feeInvoiceResult = await createProcessingFeeInvoice({
+            customerId: zohoCustomerId,
+            feeAmount: totalFee,
+            date: new Date().toISOString().split('T')[0],
+            referenceNumber: chargeResult.transactionId ? `Txn ${chargeResult.transactionId}` : `MULTI-${batchInvoiceNumber}`,
+            locationId: req.user?.locationId || null
+          });
+          if (feeInvoiceResult.success && feeInvoiceResult.invoiceId) {
+            invoicesForZoho = [
+              ...invoicesForZoho,
+              { invoice_id: feeInvoiceResult.invoiceId, amount_applied: totalFee }
+            ];
+            zohoPaymentAmount = totalCharge;
+          } else if (feeInvoiceResult.error && feeInvoiceResult.error !== 'Processing fee account or item not configured') {
+            console.warn(`⚠️ Zoho: processing fee invoice not created: ${feeInvoiceResult.error}`);
+          }
+        }
+
         const zohoPaymentResult = await createCustomerPayment({
           customerId: zohoCustomerId,
-          amount: invoiceTotal,
+          amount: zohoPaymentAmount,
           invoices: invoicesForZoho,
           paymentMode: zohoPaymentMode,
           referenceNumber: chargeResult.transactionId || undefined,
@@ -1760,16 +1781,6 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
         });
         if (zohoPaymentResult.success) {
           zohoPaymentRecorded = true;
-          if (totalFee > 0) {
-            const journalResult = await createProcessingFeeJournal({
-              feeAmount: totalFee,
-              referenceNumber: chargeResult.transactionId ? `Txn ${chargeResult.transactionId}` : `MULTI-${batchInvoiceNumber}`,
-              date: new Date().toISOString().split('T')[0]
-            });
-            if (!journalResult.success && journalResult.error !== 'Journal account IDs not configured') {
-              console.warn(`⚠️ Zoho: processing fee journal not created: ${journalResult.error}`);
-            }
-          }
         } else {
           zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
           console.error(`⚠️ Zoho: could not record multi-invoice payment: ${zohoPaymentError}`);
