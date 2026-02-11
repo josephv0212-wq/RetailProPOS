@@ -311,9 +311,11 @@ function AppContent() {
       try {
         setLoadingOrders(true);
         setLoadingMessage('Checking orders & invoices…');
-        // #region agent log
         const invoiceResponse = await zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid').catch(() => ({ success: false, data: { invoices: [] } }));
         const invoiceList = invoiceResponse.success && invoiceResponse.data?.invoices ? invoiceResponse.data.invoices : [];
+        // #region agent log
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:invoices fetched',message:'invoice payment flow',data:{invoicesCount:invoiceList.length,customerZohoId:customer.zohoId},timestamp:Date.now(),hypothesisId:'INV1'})}).catch(()=>{});
+        // #endregion
 
         setOpenSalesOrders([]);
         setInvoices(invoiceList);
@@ -521,6 +523,9 @@ function AppContent() {
       return;
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:charge items prepared',message:'sending to charge API',data:{count:chargeItems.length,items:chargeItems.map(i=>({type:i.type,number:i.number,amount:i.amount}))},timestamp:Date.now(),hypothesisId:'INV2'})}).catch(()=>{});
+    // #endregion
     // Store items and show payment options
     setPendingChargeItems(chargeItems);
     setIsOrderInvoiceModalOpen(false);

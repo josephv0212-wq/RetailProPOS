@@ -1695,9 +1695,13 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
     const totalFee = addCardFee ? Math.round((totalCharge - totalOriginal) * 100) / 100 : 0;
 
     const batchInvoiceNumber = `MULTI-${Date.now().toString().slice(-8)}`.slice(0, 20);
-    const description = validatedItems.length === 1
+    const DESC_MAX = 255;
+    let description = validatedItems.length === 1
       ? `Invoice Payment: ${validatedItems[0].number}`
       : `Multi payment: ${validatedItems.map(it => `INV-${it.number}`).join(', ')}`;
+    if (description.length > DESC_MAX) {
+      description = description.substring(0, DESC_MAX - 3) + '...';
+    }
 
     const chargeResult = await chargeCustomerProfile({
       customerProfileId,
@@ -1738,6 +1742,9 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
     let zohoPaymentRecorded = false;
     let zohoPaymentError = null;
     const invoiceItems = validatedItems.filter(it => it.type === 'invoice');
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController:chargeInvoices Zoho entry',message:'invoice payment Zoho flow',data:{invoiceCount:invoiceItems.length,totalFee,totalOriginal,paymentType,zohoCustomerId:!!(customer.zohoId)},timestamp:Date.now(),hypothesisId:'INV3'})}).catch(()=>{});
+    // #endregion
 
     if (invoiceItems.length > 0) {
       const zohoCustomerId = (customer.zohoId && String(customer.zohoId).trim()) || null;
@@ -1782,6 +1789,9 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
         });
         if (zohoPaymentResult.success) {
           zohoPaymentRecorded = true;
+          // #region agent log
+          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController:createCustomerPayment success',message:'Zoho payment recorded',data:{zohoPaymentRecorded:true,useFeeInvoice},timestamp:Date.now(),hypothesisId:'INV5'})}).catch(()=>{});
+          // #endregion
           if (totalFee > 0 && !useFeeInvoice) {
             const journalResult = await createProcessingFeeJournal({
               feeAmount: totalFee,
@@ -1794,6 +1804,9 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
           }
         } else {
           zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
+          // #region agent log
+          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController:createCustomerPayment failed',message:'Zoho payment failed',data:{error:zohoPaymentError},timestamp:Date.now(),hypothesisId:'INV6'})}).catch(()=>{});
+          // #endregion
           console.error(`⚠️ Zoho: could not record invoice payment: ${zohoPaymentError}`);
         }
       }
