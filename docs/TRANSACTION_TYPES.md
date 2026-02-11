@@ -29,7 +29,7 @@ This document lists all transaction types users can create in the application.
 
 ---
 
-## 2. Invoice / Sales Order Charge
+## 2. Invoice Charge
 
 **Endpoint:** `POST /sales/charge-invoices`  
 **Controller:** `chargeInvoicesSalesOrders`  
@@ -39,8 +39,6 @@ This document lists all transaction types users can create in the application.
 |---|---------------|--------------|-------------|
 | 2a | **Invoice** | Card (stored profile) | Zoho Documents tab → Select invoices → Charge with Card |
 | 2b | **Invoice** | ACH (stored profile) | Zoho Documents tab → Select invoices → Charge with ACH |
-| 2c | **Sales Order** | Card (stored profile) | Zoho Documents tab → Select sales orders → Charge with Card |
-| 2d | **Sales Order** | ACH (stored profile) | Zoho Documents tab → Select sales orders → Charge with ACH |
 
 **Requirements:** Customer must have stored payment profile (card or ACH).
 
@@ -74,7 +72,7 @@ This document lists all transaction types users can create in the application.
 2. **1b–1f** – POS Card variants
 3. **1g** – POS Zelle
 4. **1h–1i** – POS ACH
-5. **2a–2d** – Invoice/Sales Order charges
+5. **2a–2b** – Invoice charges
 6. **3** – Cancel in Zoho
 
 ---

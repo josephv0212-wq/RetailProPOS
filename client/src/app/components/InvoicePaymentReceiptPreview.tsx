@@ -106,7 +106,7 @@ export function InvoicePaymentReceiptPreview({
                   } ${index < items.length - 1 ? 'border-b border-gray-200 dark:border-gray-600' : ''}`}
                 >
                   <span className="text-sm font-medium text-gray-900 dark:text-white">
-                    {item.type === 'invoice' ? 'Invoice' : 'Sales Order'} {item.number}
+                    Invoice {item.number}
                   </span>
                   <span className="text-sm font-semibold text-gray-900 dark:text-white">
                     ${(Number(item.amount) || 0).toFixed(2)}

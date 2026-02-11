@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer, InvoicePayment, User } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
-import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeInvoice } from '../services/zohoService.js';
+import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
@@ -1180,7 +1180,7 @@ export const getTransactions = async (req, res) => {
 };
 
 /**
- * Get invoice/SO payment records
+ * Get invoice payment records
  * GET /sales/invoice-payments?startDate=&endDate=
  */
 export const getInvoicePayments = async (req, res) => {
@@ -1448,24 +1448,22 @@ export const getSyncStatus = async (req, res) => {
       };
     });
 
-    // Invoice/Sales Order payment sync stats - admin: all or by filterUserId, non-admin: filter by userId
-    let invoicePaymentSummary = { total: 0, invoices: { total: 0, recorded: 0, notRecorded: 0 }, salesOrders: { total: 0 } };
+    // Invoice payment sync stats - admin: all or by filterUserId, non-admin: filter by userId
+    let invoicePaymentSummary = { total: 0, invoices: { total: 0, recorded: 0, notRecorded: 0 } };
     try {
       const ipWhere = (isAdmin && filterUserId) ? { userId: parseInt(filterUserId, 10) } : (!isAdmin && userId) ? { userId } : {};
       const invoicePayments = await InvoicePayment.findAll({
-        where: ipWhere,
+        where: { ...ipWhere, type: 'invoice' },
         attributes: ['type', 'zohoPaymentRecorded']
       });
-      const invoices = (invoicePayments || []).filter(p => p.type === 'invoice');
-      const salesOrders = (invoicePayments || []).filter(p => p.type === 'salesorder');
+      const invoices = invoicePayments || [];
       invoicePaymentSummary = {
-        total: invoicePayments?.length || 0,
+        total: invoices.length,
         invoices: {
           total: invoices.length,
           recorded: invoices.filter(p => p.zohoPaymentRecorded).length,
           notRecorded: invoices.filter(p => !p.zohoPaymentRecorded).length
-        },
-        salesOrders: { total: salesOrders.length }
+        }
       };
     } catch (ipErr) {
       console.warn('getSyncStatus: invoice payments query failed:', ipErr.message);
@@ -1491,7 +1489,7 @@ export const getSyncStatus = async (req, res) => {
 /**
  * Charge customer for selected invoices and/or sales orders using Authorize.net CIM
  * POST /sales/charge-invoices
- * Body: { customerId, items: [{ type: 'invoice'|'salesorder', id: string, number: string, amount: number }] }
+ * Body: { customerId, items: [{ type: 'invoice', id: string, number: string, amount: number }] }
  */
 export const chargeInvoicesSalesOrders = async (req, res) => {
   try {
@@ -1646,6 +1644,14 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
         continue;
       }
 
+      if (type !== 'invoice') {
+        errors.push({
+          item: { type, id, number },
+          error: 'Only invoices are supported. Sales orders are not accepted.'
+        });
+        continue;
+      }
+
       const originalAmount = parseFloat(amount);
       if (!(originalAmount > 0)) {
         errors.push({
@@ -1690,10 +1696,8 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
 
     const batchInvoiceNumber = `MULTI-${Date.now().toString().slice(-8)}`.slice(0, 20);
     const description = validatedItems.length === 1
-      ? (validatedItems[0].type === 'invoice'
-          ? `Invoice Payment: ${validatedItems[0].number}`
-          : `Sales Order Payment: ${validatedItems[0].number}`)
-      : `Multi payment: ${validatedItems.map(it => `${it.type === 'invoice' ? 'INV' : 'SO'}-${it.number}`).join(', ')}`;
+      ? `Invoice Payment: ${validatedItems[0].number}`
+      : `Multi payment: ${validatedItems.map(it => `INV-${it.number}`).join(', ')}`;
 
     const chargeResult = await chargeCustomerProfile({
       customerProfileId,
@@ -1739,7 +1743,7 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       const zohoCustomerId = (customer.zohoId && String(customer.zohoId).trim()) || null;
       if (!zohoCustomerId) {
         zohoPaymentError = 'Customer has no Zoho ID. Sync customers from Zoho to record payment in Zoho Books.';
-        console.warn(`⚠️ Zoho: skipping multi-invoice payment: ${zohoPaymentError}`);
+        console.warn(`⚠️ Zoho: skipping invoice payment recording: ${zohoPaymentError}`);
       } else {
         const zohoPaymentMode = paymentType === 'ach' ? 'banktransfer' : 'creditcard';
         const paymentLabel = paymentType === 'ach' ? 'ACH' : 'Card';
@@ -1747,31 +1751,28 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
           invoice_id: it.id,
           amount_applied: it.amount
         }));
-        const invoiceTotal = invoiceItems.reduce((sum, it) => sum + it.amount, 0);
-        let zohoPaymentAmount = invoiceTotal;
+        let paymentAmount = invoiceItems.reduce((sum, it) => sum + it.amount, 0);
+        let useFeeInvoice = false;
 
         if (totalFee > 0) {
-          const feeInvoiceResult = await createProcessingFeeInvoice({
+          const feeInvoiceResult = await createInvoice({
             customerId: zohoCustomerId,
             feeAmount: totalFee,
-            date: new Date().toISOString().split('T')[0],
-            referenceNumber: chargeResult.transactionId ? `Txn ${chargeResult.transactionId}` : `MULTI-${batchInvoiceNumber}`,
-            locationId: req.user?.locationId || null
+            referenceNumber: chargeResult.transactionId || `MULTI-${batchInvoiceNumber}`,
+            date: new Date().toISOString().split('T')[0]
           });
           if (feeInvoiceResult.success && feeInvoiceResult.invoiceId) {
-            invoicesForZoho = [
-              ...invoicesForZoho,
-              { invoice_id: feeInvoiceResult.invoiceId, amount_applied: totalFee }
-            ];
-            zohoPaymentAmount = totalCharge;
-          } else if (feeInvoiceResult.error && feeInvoiceResult.error !== 'Processing fee account or item not configured') {
-            console.warn(`⚠️ Zoho: processing fee invoice not created: ${feeInvoiceResult.error}`);
+            invoicesForZoho.push({ invoice_id: feeInvoiceResult.invoiceId, amount_applied: totalFee });
+            paymentAmount += totalFee;
+            useFeeInvoice = true;
+          } else {
+            console.warn(`⚠️ Zoho: fee invoice failed, falling back to journal: ${feeInvoiceResult.error || 'unknown'}`);
           }
         }
 
         const zohoPaymentResult = await createCustomerPayment({
           customerId: zohoCustomerId,
-          amount: zohoPaymentAmount,
+          amount: paymentAmount,
           invoices: invoicesForZoho,
           paymentMode: zohoPaymentMode,
           referenceNumber: chargeResult.transactionId || undefined,
@@ -1781,9 +1782,19 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
         });
         if (zohoPaymentResult.success) {
           zohoPaymentRecorded = true;
+          if (totalFee > 0 && !useFeeInvoice) {
+            const journalResult = await createProcessingFeeJournal({
+              feeAmount: totalFee,
+              referenceNumber: chargeResult.transactionId ? `Txn ${chargeResult.transactionId}` : `MULTI-${batchInvoiceNumber}`,
+              date: new Date().toISOString().split('T')[0]
+            });
+            if (!journalResult.success && journalResult.error !== 'Journal account IDs not configured') {
+              console.warn(`⚠️ Zoho: processing fee journal not created: ${journalResult.error}`);
+            }
+          }
         } else {
           zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
-          console.error(`⚠️ Zoho: could not record multi-invoice payment: ${zohoPaymentError}`);
+          console.error(`⚠️ Zoho: could not record invoice payment: ${zohoPaymentError}`);
         }
       }
     }

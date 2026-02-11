@@ -1,15 +1,6 @@
 import React, { useState } from 'react';
 import { X, FileText, Calendar, DollarSign, Check } from 'lucide-react';
 
-interface SalesOrder {
-  salesorder_id: string;
-  salesorder_number: string;
-  date: string;
-  total: number;
-  reference_number?: string;
-  type: 'salesorder';
-}
-
 interface Invoice {
   invoice_id: string;
   invoice_number: string;
@@ -22,14 +13,12 @@ interface Invoice {
   type: 'invoice';
 }
 
-type OrderItem = SalesOrder | Invoice;
-
 interface SalesOrderInvoiceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  salesOrders: SalesOrder[];
+  salesOrders: never[];
   invoices: Invoice[];
-  onSelectItems: (items: OrderItem[]) => void;
+  onSelectItems: (items: Invoice[]) => void;
   customerName: string;
 }
 
@@ -90,26 +79,20 @@ export function SalesOrderInvoiceModal({
     }
   };
 
-  const allItems: OrderItem[] = [
-    ...salesOrders.map(so => ({ ...so, type: 'salesorder' as const })),
-    ...invoices.map(inv => ({ ...inv, type: 'invoice' as const })),
-  ];
+  const allItems: Invoice[] = invoices.map(inv => ({ ...inv, type: 'invoice' as const }));
 
-  const toggleItem = (itemId: string) => {
+  const toggleItem = (invoiceId: string) => {
     const newSelected = new Set(selectedItems);
-    if (newSelected.has(itemId)) {
-      newSelected.delete(itemId);
+    if (newSelected.has(invoiceId)) {
+      newSelected.delete(invoiceId);
     } else {
-      newSelected.add(itemId);
+      newSelected.add(invoiceId);
     }
     setSelectedItems(newSelected);
   };
 
   const handleSelect = () => {
-    const selected = allItems.filter(item => {
-      const id = item.type === 'salesorder' ? item.salesorder_id : item.invoice_id;
-      return selectedItems.has(id);
-    });
+    const selected = allItems.filter(item => selectedItems.has(item.invoice_id));
     
     if (selected.length > 0) {
       onSelectItems(selected);
@@ -130,7 +113,7 @@ export function SalesOrderInvoiceModal({
             <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             <div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                Sales Orders & Invoices
+                Invoices
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                 {customerName}
@@ -151,73 +134,14 @@ export function SalesOrderInvoiceModal({
             <div className="text-center py-12">
               <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
               <p className="text-gray-500 dark:text-gray-400">
-                No sales orders or invoices found for this customer.
+                No invoices found for this customer.
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Sales Orders Section */}
-              {salesOrders.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Sales Orders ({salesOrders.length})
-                  </h3>
-                  {salesOrders.map((so) => {
-                    const isSelected = selectedItems.has(so.salesorder_id);
-                    return (
-                      <button
-                        key={so.salesorder_id}
-                        onClick={() => toggleItem(so.salesorder_id)}
-                        className={`w-full p-4 border rounded-lg transition-all text-left mb-2 ${
-                          isSelected
-                            ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                            : 'border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className={`mt-1 flex-shrink-0 w-5 h-5 border-2 rounded flex items-center justify-center ${
-                            isSelected
-                              ? 'bg-blue-600 dark:bg-blue-500 border-blue-600 dark:border-blue-500'
-                              : 'border-gray-300 dark:border-gray-600'
-                          }`}>
-                            {isSelected && <Check className="w-3 h-3 text-white" />}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                              <span className="font-semibold text-gray-900 dark:text-white">
-                                {so.salesorder_number}
-                              </span>
-                              {so.reference_number && (
-                                <span className="text-sm text-gray-500 dark:text-gray-400">
-                                  ({so.reference_number})
-                                </span>
-                              )}
-                              <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 rounded">
-                                SO
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
-                              <div className="flex items-center gap-1">
-                                <Calendar className="w-4 h-4" />
-                                <span>{formatDate(so.date)}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <DollarSign className="w-4 h-4" />
-                                <span>{so.total.toFixed(2)}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
               {/* Invoices Section */}
               {invoices.length > 0 && (
-                <div className={salesOrders.length > 0 ? 'mt-6' : ''}>
+                <div>
                   <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     Invoices ({invoices.length})
                   </h3>

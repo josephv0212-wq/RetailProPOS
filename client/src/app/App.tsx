@@ -312,32 +312,21 @@ function AppContent() {
         setLoadingOrders(true);
         setLoadingMessage('Checking orders & invoices…');
         // #region agent log
-        const t0SO = Date.now();
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before SO invoices',message:'before getCustomerOpenSalesOrders getCustomerInvoices',data:{t0:t0SO},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
-        // Check both sales orders and invoices in parallel
-        const [soResponse, invoiceResponse] = await Promise.all([
-          zohoAPI.getCustomerOpenSalesOrders(customer.zohoId).catch(() => ({ success: false, data: { salesOrders: [] } })),
-          zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid').catch(() => ({ success: false, data: { invoices: [] } }))
-        ]);
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after SO invoices',message:'after SO invoices',data:{durationMs:Date.now()-t0SO,salesOrdersCount:soResponse?.data?.salesOrders?.length??0,invoicesCount:invoiceResponse?.data?.invoices?.length??0},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
-        const salesOrders = soResponse.success && soResponse.data?.salesOrders ? soResponse.data.salesOrders : [];
+        const invoiceResponse = await zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid').catch(() => ({ success: false, data: { invoices: [] } }));
         const invoiceList = invoiceResponse.success && invoiceResponse.data?.invoices ? invoiceResponse.data.invoices : [];
 
-        setOpenSalesOrders(salesOrders);
+        setOpenSalesOrders([]);
         setInvoices(invoiceList);
 
-        // Show modal if we have any sales orders or invoices
-        if (salesOrders.length > 0 || invoiceList.length > 0) {
+        // Show modal if we have any invoices
+        if (invoiceList.length > 0) {
           setIsOrderInvoiceModalOpen(true);
           setLoadingOrders(false);
           setLoadingMessage(null);
           return;
         }
       } catch (err: any) {
-        logger.error('Failed to check for sales orders/invoices', err);
+        logger.error('Failed to check for invoices', err);
         setOpenSalesOrders([]);
         setInvoices([]);
       } finally {
@@ -503,7 +492,7 @@ function AppContent() {
     if (items.length === 0) return;
 
     if (!selectedCustomer || !selectedCustomer.id) {
-      showToast('Customer must be selected to charge invoices/sales orders', 'error', 4000);
+      showToast('Customer must be selected to charge invoices', 'error', 4000);
       return;
     }
 
@@ -518,18 +507,10 @@ function AppContent() {
           number: item.invoice_number,
           amount: parseFloat(amount)
         };
-      } else if (item.type === 'salesorder') {
-        // For sales orders, use total
-        return {
-          type: 'salesorder' as const,
-          id: item.salesorder_id,
-          number: item.salesorder_number,
-          amount: parseFloat(item.total)
-        };
       }
       return null;
     }).filter(Boolean) as Array<{
-      type: 'invoice' | 'salesorder';
+      type: 'invoice';
       id: string;
       number: string;
       amount: number;
@@ -553,7 +534,7 @@ function AppContent() {
     const fakeCartItems: CartItem[] = (pendingChargeItems || []).map((it: any) => ({
       product: {
         id: `${it.type}-${it.id}`,
-        name: `${it.type === 'invoice' ? 'Invoice' : 'Sales Order'} ${it.number}`,
+        name: `Invoice ${it.number}`,
         price: Number(it.amount) || 0,
       } as any,
       quantity: 1,
@@ -604,7 +585,7 @@ function AppContent() {
         id: idx + 1,
         saleId: 0,
         itemId: 0,
-        itemName: `${it.type === 'invoice' ? 'Invoice' : 'Sales Order'} ${it.number}`,
+        itemName: `Invoice ${it.number}`,
         quantity: 1,
         price: Number(it.amount) || 0,
         taxPercentage: 0,
@@ -755,7 +736,7 @@ function AppContent() {
               id: idx + 1,
               saleId: 0,
               itemId: 0,
-              itemName: `${r.type === 'invoice' ? 'Invoice' : 'Sales Order'} ${r.number}`,
+              itemName: `Invoice ${r.number}`,
               quantity: 1,
               price: Number(r.amount) || 0,
               taxPercentage: 0,
@@ -1418,7 +1399,7 @@ function AppContent() {
         customerName={selectedCustomer?.name || selectedCustomer?.contactName || null}
       />
 
-      {/* Unified Sales Order & Invoice Modal */}
+      {/* Invoice Modal */}
       {selectedCustomer && (
         <SalesOrderInvoiceModal
           isOpen={isOrderInvoiceModalOpen}
@@ -1457,7 +1438,7 @@ function AppContent() {
         />
       )}
 
-      {/* Invoice/Sales Order payment receipt preview - confirm before charging stored payment */}
+      {/* Invoice payment receipt preview - confirm before charging stored payment */}
       {selectedCustomer && pendingStoredPaymentSelection && pendingChargeItems.length > 0 && (
         <InvoicePaymentReceiptPreview
           isOpen={isInvoicePaymentReceiptPreviewOpen}

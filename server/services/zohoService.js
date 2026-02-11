@@ -510,7 +510,7 @@ export const createSalesReceipt = async (saleData) => {
   // Keep Zoho total in sync with POS total (cc fee is an adjustment, not a line item)
   if (processingFee > 0) {
     salesReceiptData.adjustment = parseFloat(processingFee.toFixed(2));
-    salesReceiptData.adjustment_description = 'Card processing fee 3%';
+    salesReceiptData.adjustment_description = 'Credit Card Processing Fee';
   }
 
   // Emit a warning if our calculated Zoho total would drift from the POS total
@@ -666,6 +666,84 @@ export const voidSalesReceipt = async (salesReceiptId) => {
 };
 
 /**
+ * Create an invoice in Zoho Books (POST /invoices).
+ * Used for the card processing fee so it can be included in a customer payment.
+ * @param {Object} params
+ * @param {string} params.customerId - Zoho customer (contact) ID
+ * @param {number} params.feeAmount - Fee amount for the single line item
+ * @param {string} [params.referenceNumber] - Reference (e.g. transaction ID)
+ * @param {string} [params.date] - Invoice date (yyyy-mm-dd)
+ * @param {string} [params.locationId] - Zoho location ID
+ * @param {string} [params.notes] - Notes for the invoice
+ * @returns {Promise<{ success: boolean, invoiceId?: string, invoiceNumber?: string, error?: string }>}
+ */
+export const createInvoice = async (params) => {
+  const { customerId, feeAmount, referenceNumber, date, locationId, notes } = params;
+
+  if (!customerId || feeAmount == null || feeAmount <= 0) {
+    return {
+      success: false,
+      error: 'customerId and positive feeAmount are required'
+    };
+  }
+
+  const amount = parseFloat(feeAmount);
+  const invoiceDate = date || new Date().toISOString().split('T')[0];
+
+  const payload = {
+    customer_id: String(customerId).trim(),
+    date: invoiceDate,
+    line_items: [
+      {
+        name: 'Card Processing Fee (3%)',
+        description: 'POS invoice payment processing fee',
+        rate: Math.round(amount * 100) / 100,
+        quantity: 1,
+        is_taxable: false
+      }
+    ]
+  };
+  if (referenceNumber && String(referenceNumber).trim() !== '') {
+    payload.reference_number = String(referenceNumber).trim();
+  }
+  if (notes && String(notes).trim() !== '') {
+    payload.notes = String(notes).trim();
+  }
+  if (locationId && String(locationId).trim() !== '') {
+    payload.location_id = String(locationId).trim();
+  }
+
+  try {
+    console.log(`📤 Zoho: Creating fee invoice for customer ${customerId}, amount ${amount}`);
+    const response = await makeZohoRequest('/invoices', 'POST', payload);
+    const invoice = response.invoice;
+    if (response.code === 0 && invoice) {
+      const invoiceId = invoice.invoice_id;
+      const invoiceNumber = invoice.invoice_number;
+      console.log(`✅ Zoho: Fee invoice created, invoice_id: ${invoiceId}, invoice_number: ${invoiceNumber}`);
+      return {
+        success: true,
+        invoiceId: invoiceId || null,
+        invoiceNumber: invoiceNumber || null
+      };
+    }
+    const errMsg = response.message || 'Failed to create invoice in Zoho';
+    console.warn(`⚠️ Zoho createInvoice non-OK: ${errMsg}`);
+    return {
+      success: false,
+      error: errMsg
+    };
+  } catch (error) {
+    const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+    console.error('❌ Zoho createInvoice error:', errorMsg);
+    return {
+      success: false,
+      error: errorMsg
+    };
+  }
+};
+
+/**
  * Record a customer payment in Zoho Books (POST /customerpayments).
  * Use this when the POS has already charged the card via Authorize.net and we need to
  * record the payment in Zoho so invoices show as paid.
@@ -761,76 +839,6 @@ export const createCustomerPayment = async (params) => {
 };
 
 /**
- * Create a Zoho Books invoice for the 3% card processing fee.
- * The fee invoice is then applied together with other invoices in a single customer payment.
- * Requires env: ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME (income account ID). Optionally ZOHO_ITEM_ID_PROCESSING_FEE (item ID).
- * @param {Object} params
- * @param {string} params.customerId - Zoho customer ID (contact_id)
- * @param {number} params.feeAmount - Fee amount (e.g. totalCharge - invoiceTotal)
- * @param {string} [params.date] - Invoice date (yyyy-mm-dd)
- * @param {string} [params.referenceNumber] - Reference (e.g. transaction ID)
- * @param {string} [params.locationId] - Zoho location ID
- * @returns {Promise<{ success: boolean, invoiceId?: string, error?: string }>}
- */
-export const createProcessingFeeInvoice = async (params) => {
-  const { customerId, feeAmount, date, referenceNumber, locationId } = params;
-  const accountId = process.env.ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME;
-  const itemId = process.env.ZOHO_ITEM_ID_PROCESSING_FEE;
-
-  if (!accountId && !itemId) {
-    console.warn('⚠️ Zoho processing fee invoice skipped: set ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME or ZOHO_ITEM_ID_PROCESSING_FEE to create fee invoices.');
-    return { success: false, error: 'Processing fee account or item not configured' };
-  }
-  const amount = parseFloat(feeAmount);
-  if (!amount || amount <= 0) {
-    return { success: true, invoiceId: null };
-  }
-
-  const invoiceDate = date || new Date().toISOString().split('T')[0];
-
-  const lineItem = {
-    name: 'Card Processing Fee (3%)',
-    rate: amount,
-    quantity: 1,
-    description: 'POS card processing fee'
-  };
-  if (itemId && String(itemId).trim() !== '') {
-    lineItem.item_id = String(itemId).trim();
-    delete lineItem.name;
-  } else {
-    lineItem.account_id = String(accountId).trim();
-  }
-
-  const payload = {
-    customer_id: customerId,
-    date: invoiceDate,
-    line_items: [lineItem]
-  };
-  if (referenceNumber && String(referenceNumber).trim() !== '') {
-    payload.reference_number = String(referenceNumber).slice(0, 99);
-  }
-  if (locationId && String(locationId).trim() !== '') {
-    payload.location_id = String(locationId).trim();
-  }
-
-  try {
-    const response = await makeZohoRequest('/invoices', 'POST', payload);
-    if (response.code === 0 && response.invoice) {
-      const invoiceId = response.invoice.invoice_id;
-      console.log(`✅ Zoho: Processing fee invoice created, invoice_id: ${invoiceId}, amount: ${amount}`);
-      return { success: true, invoiceId };
-    }
-    const errMsg = response.message || 'Failed to create processing fee invoice';
-    console.warn(`⚠️ Zoho createProcessingFeeInvoice: ${errMsg}`);
-    return { success: false, error: errMsg };
-  } catch (error) {
-    const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
-    console.error('❌ Zoho createProcessingFeeInvoice error:', errorMsg);
-    return { success: false, error: errorMsg };
-  }
-};
-
-/**
  * Create a journal entry in Zoho Books for the 3% processing fee (unapplied portion of customer payment).
  * Double-entry: Debit Customer Advance / Unapplied, Credit Processing Fee Income.
  * Requires env: ZOHO_ACCOUNT_ID_CUSTOMER_ADVANCE, ZOHO_ACCOUNT_ID_PROCESSING_FEE_INCOME (Chart of Accounts IDs).
@@ -860,7 +868,7 @@ export const createProcessingFeeJournal = async (params) => {
     journal_date: journalDate,
     journal_type: 'both',
     reference_number: referenceNumber ? String(referenceNumber).slice(0, 99) : `POS-FEE-${Date.now()}`,
-    notes: `POS invoice/SO 3% processing fee`,
+    notes: `POS invoice 3% processing fee`,
     line_items: [
       { account_id: debitAccountId, amount: amount, debit_or_credit: 'debit', description: 'Processing fee (3%)' },
       { account_id: creditAccountId, amount: amount, debit_or_credit: 'credit', description: 'Processing fee income' }

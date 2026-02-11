@@ -662,7 +662,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
               <>
                 <div className="pt-2 border-t border-gray-200 dark:border-gray-600"></div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-400">Card processing fee 3%</span>
+                  <span className="text-gray-600 dark:text-gray-400">Credit Card Surcharge 3%</span>
                   <span className="text-gray-900 dark:text-white">${convenienceFee.toFixed(2)}</span>
                 </div>
               </>

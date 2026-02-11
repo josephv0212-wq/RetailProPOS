@@ -449,7 +449,7 @@ export const salesAPI = {
     paymentProfileId: string;
     paymentType?: 'card' | 'ach';
     items: Array<{
-      type: 'invoice' | 'salesorder';
+      type: 'invoice';
       id: string;
       number: string;
       amount: number;

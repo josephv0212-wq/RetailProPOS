@@ -24,7 +24,7 @@ interface InvoicePaymentItem {
   id: number;
   date: string | Date;
   customer: { id: number; name: string } | null;
-  type: 'invoice' | 'salesorder';
+  type: 'invoice';
   documentNumber: string;
   amount: number;
   ccFee: number;
@@ -442,10 +442,10 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                       <div className="text-sm text-yellow-700 dark:text-yellow-300">No Zoho ID</div>
                     </div>
                   </div>
-                  {/* Invoice / Sales Order Payments */}
+                  {/* Invoice Payments */}
                   {syncStatus.invoicePayments && (
                     <>
-                      <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Invoice / Sales Order Payments</h3>
+                      <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Invoice Payments</h3>
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                         <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
                           <div className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -778,7 +778,7 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-3">
                 <h2 className="font-semibold text-gray-900 dark:text-white">
-                  Invoice / Sales Order Payments
+                  Invoice Payments
                 </h2>
                 <div className="flex items-center gap-3">
                   {isAdmin && (
