@@ -96,14 +96,18 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
 
       if (response.success && response.data?.transactions) {
         // Transactions are already in the correct format from the backend
-        setTransactions(response.data.transactions);
+        const txnList = response.data.transactions;
+        setTransactions(txnList);
+        return txnList;
       } else {
         // If no transactions returned, set empty array
         setTransactions([]);
+        return [];
       }
     } catch (err) {
       logger.error('Failed to load transactions', err);
       showToast('Failed to load transactions from database', 'error', 3000);
+      return [];
     } finally {
       if (showRefreshing) {
         setIsRefreshing(false);
@@ -203,7 +207,7 @@ export function Reports({ transactions: initialTransactions, isLoading: initialL
     setCancellingSaleId(saleId);
     try {
       const response = await salesAPI.cancelZohoTransaction(saleId);
-      
+
       if (response.success) {
         showToast('Transaction cancelled successfully in Zoho', 'success', 4000);
         // Reload sales to update the UI using the loadSales function
@@ -613,7 +617,11 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                     </thead>
                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                       {pagedTransactions.map((transaction, idx) => (
-                        <tr key={transaction.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                        <tr
+                          key={transaction.id}
+                          className={`transition-colors ${transaction.cancelledInZoho ? 'bg-red-50/50 dark:bg-red-900/10 opacity-90' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                          title={transaction.cancelledInZoho ? 'This transaction was voided/cancelled in Zoho' : undefined}
+                        >
                           <td className="px-6 py-4 whitespace-nowrap text-gray-600 dark:text-gray-400">
                             {startIndex + idx + 1}
                           </td>
@@ -674,9 +682,9 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                                 Synced
                               </span>
                             ) : transaction.cancelledInZoho ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400">
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400" title="This transaction was voided/cancelled in Zoho">
                                 <XCircle className="w-3 h-3" />
-                                Cancelled
+                                Voided in Zoho
                               </span>
                             ) : (
                               <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
@@ -706,10 +714,10 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                                   )}
                                 </button>
                               )}
-                              {transaction.syncedToZoho && !transaction.cancelledInZoho && transaction.saleId ? (
+                              {transaction.syncedToZoho && transaction.saleId ? (
                                 <button
-                                  onClick={() => handleCancelZohoTransaction(transaction.saleId!)}
-                                  disabled={cancellingSaleId === transaction.saleId}
+                                  onClick={transaction.cancelledInZoho ? undefined : () => handleCancelZohoTransaction(transaction.saleId!)}
+                                  disabled={transaction.cancelledInZoho || cancellingSaleId === transaction.saleId}
                                   className="px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                 >
                                   {cancellingSaleId === transaction.saleId ? (
@@ -717,6 +725,8 @@ ${(sale.ccFee ?? 0) > 0 ? `<div style="display:flex;justify-content:space-betwee
                                       <Loader2 className="w-3 h-3 inline animate-spin mr-1" />
                                       Cancelling...
                                     </>
+                                  ) : transaction.cancelledInZoho ? (
+                                    'Canceled'
                                   ) : (
                                     'Cancel in Zoho'
                                   )}

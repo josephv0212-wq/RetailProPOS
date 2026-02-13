@@ -1186,9 +1186,6 @@ export const getTransactions = async (req, res) => {
       };
     });
 
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:getTransactions',message:'transactions result',data:{fromTable:initialFromTable,mergedCount,total:transformedTransactions?.length||0,userId,isAdmin},timestamp:Date.now(),hypothesisId:'H-TXN'})}).catch(()=>{});
-    // #endregion
     return sendSuccess(res, { transactions: transformedTransactions });
   } catch (err) {
     console.error('Get transactions error:', err);
@@ -2055,6 +2052,28 @@ export const cancelZohoTransaction = async (req, res) => {
       syncedToZoho: false,
       syncError: 'Cancelled in Zoho'
     });
+
+    // Update transactions table so getTransactions returns correct cancelledInZoho
+    const txnId = sale.transactionId ? String(sale.transactionId).trim() : null;
+    if (txnId) {
+      try {
+        const isSQLite = sequelize.getDialect() === 'sqlite';
+        const quote = isSQLite ? '' : '"';
+        await sequelize.query(`
+          UPDATE transactions SET ${quote}cancelledInZoho${quote} = :cancelledInZoho, ${quote}syncedToZoho${quote} = :syncedToZoho, ${quote}syncError${quote} = :syncError
+          WHERE ${quote}transactionId${quote} = :transactionId
+        `, {
+          replacements: {
+            transactionId: txnId,
+            cancelledInZoho: isSQLite ? 1 : true,
+            syncedToZoho: isSQLite ? 0 : false,
+            syncError: 'Cancelled in Zoho'
+          }
+        });
+      } catch (txnUpdateErr) {
+        console.warn(`⚠️ Failed to update transactions table for cancel:`, txnUpdateErr.message);
+      }
+    }
 
     return sendSuccess(
       res,
