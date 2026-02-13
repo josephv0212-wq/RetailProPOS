@@ -42,8 +42,11 @@ export default function App() {
   );
 }
 
-// Helper function to get item price with UM conversion
+// Helper function to get item price with UM conversion (or priceOverride)
 const getItemPrice = (item: CartItem): number => {
+  if (item.priceOverride !== undefined && item.priceOverride !== null && Number.isFinite(item.priceOverride)) {
+    return item.priceOverride;
+  }
   const basePrice = item.product.price;
   
   // Use unitPrecision from availableUnits for all items (including dry ice)
@@ -460,6 +463,14 @@ function AppContent() {
     ));
   };
 
+  const handleUpdatePrice = (productId: number | string, price: number | undefined) => {
+    setCartItems(cartItems.map(item =>
+      String(item.product.id) === String(productId)
+        ? { ...item, priceOverride: price }
+        : item
+    ));
+  };
+
   const handleUpdateUM = (productId: number | string, um: string) => {
     setCartItems(cartItems.map(item =>
       String(item.product.id) === String(productId)
@@ -557,6 +568,30 @@ function AppContent() {
     const amountCharged = Number(paymentDetails.amount) ?? (pendingChargeItems || []).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
     const items = pendingChargeItems || [];
 
+    const invoiceItems = items.filter((it: any) => it.type === 'invoice');
+    if (invoiceItems.length > 0 && selectedCustomer?.id) {
+      try {
+        const res = await salesAPI.recordInvoicePayment({
+          customerId: selectedCustomer.id,
+          items: invoiceItems.map((it: any) => ({
+            type: 'invoice' as const,
+            id: String(it.id),
+            number: it.number || String(it.id),
+            amount: Number(it.amount) || 0,
+          })),
+          paymentType: paymentDetails.method || 'cash',
+          amount: amountCharged,
+          transactionId: paymentDetails.valorTransactionId || `POS-${Date.now()}`,
+          emailReceiptToCustomer: !!paymentDetails.emailReceiptToCustomer,
+        });
+        if (!res.success) {
+          showToast(`Payment recorded locally, but Zoho sync failed: ${(res as any).error || 'Unknown error'}`, 'warning', 5000);
+        }
+      } catch (err: any) {
+        showToast(`Payment recorded locally, but Zoho sync failed: ${err?.message || 'Unknown error'}`, 'warning', 5000);
+      }
+    }
+
     showToast(
       `Payment completed for ${count} document${count !== 1 ? 's' : ''} ($${amountCharged.toFixed(2)}) via ${paymentDetails.method?.toUpperCase() ?? 'POS'}.`,
       'success',
@@ -625,7 +660,7 @@ function AppContent() {
   };
 
   // Handle payment method selection and charge (called from receipt preview "Confirm & Pay")
-  const handlePaymentMethodSelected = async (paymentProfileId: string, profileType?: 'card' | 'ach') => {
+  const handlePaymentMethodSelected = async (paymentProfileId: string, profileType?: 'card' | 'ach', emailReceiptToCustomer?: boolean) => {
     if (!selectedCustomer || !selectedCustomer.id || pendingChargeItems.length === 0) {
       return;
     }
@@ -641,7 +676,8 @@ function AppContent() {
         customerId: selectedCustomer.id,
         paymentProfileId,
         paymentType,
-        items: pendingChargeItems
+        items: pendingChargeItems,
+        emailReceiptToCustomer: emailReceiptToCustomer ?? false,
       });
 
       if (response.success && response.data) {
@@ -1342,6 +1378,7 @@ function AppContent() {
             cartItems={cartItems}
             onUpdateQuantity={handleUpdateQuantity}
             onUpdateUM={handleUpdateUM}
+            onUpdatePrice={handleUpdatePrice}
             onRemoveItem={handleRemoveItem}
             onClearCart={handleClearCart}
             onPayNow={handlePayNow}
@@ -1408,18 +1445,19 @@ function AppContent() {
         cardReaderMode={user?.cardReaderMode || 'integrated'}
         customerId={selectedCustomer?.id || null}
         customerName={selectedCustomer?.name || selectedCustomer?.contactName || null}
+        customerEmail={selectedCustomer?.email || null}
       />
 
       {/* Invoice Modal */}
       {selectedCustomer && (
         <SalesOrderInvoiceModal
           isOpen={isOrderInvoiceModalOpen}
-          onClose={() => {
+          onClose={(hadSelection) => {
             setIsOrderInvoiceModalOpen(false);
             setOpenSalesOrders([]);
             setInvoices([]);
-            // Continue with customer selection if modal is closed without selecting
-            if (selectedCustomer) {
+            // Skip loading price list when charging invoices; only load when user cancels to start new sale
+            if (selectedCustomer && !hadSelection) {
               continueCustomerSelection(selectedCustomer);
             }
           }}
@@ -1460,6 +1498,7 @@ function AppContent() {
           }}
           storeName={constants.STORE_NAME}
           customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
+          customerEmail={selectedCustomer.email || null}
           items={pendingChargeItems.map((it: any) => ({
             type: it.type === 'invoice' ? 'invoice' : 'sales_order',
             id: String(it.id),
@@ -1470,9 +1509,9 @@ function AppContent() {
           subtotal={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0)}
           ccSurcharge={pendingStoredPaymentSelection.profileType === 'card' ? Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100 : 0}
           totalWithFee={(pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) + (pendingStoredPaymentSelection.profileType === 'card' ? Math.round((pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) * 0.03 * 100) / 100 : 0)}
-          onConfirmPay={async () => {
+          onConfirmPay={async (emailReceiptToCustomer) => {
             if (!pendingStoredPaymentSelection) return;
-            await handlePaymentMethodSelected(pendingStoredPaymentSelection.paymentProfileId, pendingStoredPaymentSelection.profileType);
+            await handlePaymentMethodSelected(pendingStoredPaymentSelection.paymentProfileId, pendingStoredPaymentSelection.profileType, emailReceiptToCustomer);
             setPendingStoredPaymentSelection(null);
             setIsInvoicePaymentReceiptPreviewOpen(false);
           }}

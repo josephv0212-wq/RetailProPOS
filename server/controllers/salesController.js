@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer, InvoicePayment, User } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
-import { createSalesReceipt, emailSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice } from '../services/zohoService.js';
+import { createSalesReceipt, emailSalesReceipt, emailInvoice, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
@@ -798,14 +798,8 @@ export const createSale = async (req, res) => {
           const shouldEmailReceipt = emailReceiptToCustomer === true || paymentDetails?.emailReceiptToCustomer === true;
           if (shouldEmailReceipt && zohoResult.salesReceiptId) {
             const emailOptions = customer?.email ? { to_mail_ids: [customer.email] } : {};
-            // #region agent log
-            try { fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:emailReceipt',message:'Attempting receipt email',data:{saleId:sale.id,salesReceiptId:zohoResult.salesReceiptId,hasCustomerEmail:!!customer?.email,toMailIdsCount:emailOptions.to_mail_ids?.length||0},timestamp:Date.now(),runId:'email-test'})}).catch(()=>{}); } catch(e){}
-            // #endregion
             emailSalesReceipt(zohoResult.salesReceiptId, emailOptions)
               .then((emailResult) => {
-                // #region agent log
-                try { fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:emailReceipt:result',message:'Receipt email result',data:{saleId:sale.id,success:emailResult.success,error:emailResult.error||null},timestamp:Date.now(),runId:'email-test'})}).catch(()=>{}); } catch(e){}
-                // #endregion
                 if (!emailResult.success) {
                   console.warn(`⚠️ Sale ${sale.id}: Receipt email failed (sale completed successfully): ${emailResult.error}`);
                 }
@@ -1516,7 +1510,7 @@ export const getSyncStatus = async (req, res) => {
  */
 export const chargeInvoicesSalesOrders = async (req, res) => {
   try {
-    const { customerId, items, paymentProfileId, paymentType: requestPaymentType } = req.body;
+    const { customerId, items, paymentProfileId, paymentType: requestPaymentType, emailReceiptToCustomer } = req.body;
     const raw = requestPaymentType && String(requestPaymentType).toLowerCase();
     // Merge CC/DC: treat any card as card
     const paymentType = raw === 'ach' ? 'ach' : 'card';
@@ -1893,6 +1887,23 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       });
     }
 
+    // Email paid invoices to customer if requested
+    if (emailReceiptToCustomer === true && customer?.email && results.length > 0) {
+      const invoiceItems = validatedItems.filter(it => it.type === 'invoice');
+      const emailOptions = customer.email ? { to_mail_ids: [customer.email] } : {};
+      for (const it of invoiceItems) {
+        emailInvoice(it.id, emailOptions)
+          .then((r) => {
+            if (r.success) {
+              console.log(`✅ Invoice ${it.number} emailed to customer`);
+            } else {
+              console.warn(`⚠️ Failed to email invoice ${it.number}: ${r.error}`);
+            }
+          })
+          .catch((err) => console.warn(`⚠️ Email invoice ${it.number} error:`, err.message));
+      }
+    }
+
     return sendSuccess(res, {
       customer: {
         id: customer.id,
@@ -1911,6 +1922,83 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
   } catch (err) {
     console.error('Charge invoices/sales orders error:', err);
     return sendError(res, 'Failed to charge invoices/sales orders', 500, err);
+  }
+};
+
+/**
+ * Record POS (cash/terminal) payment for invoices in Zoho and optionally email.
+ * POST /sales/record-invoice-payment
+ * Body: { customerId, items: [{ type, id, number, amount }], paymentType, amount, transactionId?, emailReceiptToCustomer? }
+ */
+export const recordInvoicePayment = async (req, res) => {
+  try {
+    const { customerId, items, paymentType: requestPaymentType, amount, transactionId, emailReceiptToCustomer } = req.body;
+
+    if (!customerId || !items || !Array.isArray(items) || items.length === 0) {
+      return sendValidationError(res, 'Customer ID and at least one invoice are required');
+    }
+
+    const customer = await Customer.findByPk(customerId);
+    if (!customer) return sendNotFound(res, 'Customer');
+    if (!customer.zohoId) {
+      return sendError(res, 'Customer has no Zoho ID', 400);
+    }
+
+    const invoiceItems = items.filter(it => it.type === 'invoice');
+    if (invoiceItems.length === 0) {
+      return sendValidationError(res, 'At least one invoice is required');
+    }
+
+    const paymentType = (requestPaymentType || 'cash').toString().toLowerCase();
+    const paymentModeMap = {
+      cash: 'cash',
+      card: 'creditcard',
+      credit_card: 'creditcard',
+      debit_card: 'creditcard',
+      zelle: 'banktransfer',
+      ach: 'banktransfer'
+    };
+    const zohoPaymentMode = paymentModeMap[paymentType] || 'cash';
+    const totalAmount = parseFloat(amount) || invoiceItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+
+    const invoicesForZoho = invoiceItems.map(it => ({
+      invoice_id: String(it.id).trim(),
+      amount_applied: parseFloat(it.amount) || 0
+    }));
+
+    const zohoResult = await createCustomerPayment({
+      customerId: customer.zohoId,
+      amount: totalAmount,
+      invoices: invoicesForZoho,
+      paymentMode: zohoPaymentMode,
+      referenceNumber: transactionId || `POS-${Date.now()}`,
+      description: invoiceItems.length === 1
+        ? `Invoice ${invoiceItems[0].number} - POS payment`
+        : `POS payment: ${invoiceItems.map(it => it.number).join(', ')}`
+    });
+
+    if (!zohoResult.success) {
+      return sendError(res, `Failed to record payment in Zoho: ${zohoResult.error}`, 400);
+    }
+
+    if (emailReceiptToCustomer === true && customer.email) {
+      const emailOptions = { to_mail_ids: [customer.email] };
+      for (const it of invoiceItems) {
+        emailInvoice(it.id, emailOptions)
+          .then((r) => {
+            if (r.success) console.log(`✅ Invoice ${it.number} emailed`);
+            else console.warn(`⚠️ Email invoice ${it.number}: ${r.error}`);
+          })
+          .catch((e) => console.warn(`⚠️ Email invoice ${it.number}:`, e.message));
+      }
+    }
+
+    return sendSuccess(res, {
+      zohoPaymentRecorded: true
+    }, 'Payment recorded in Zoho');
+  } catch (err) {
+    console.error('Record invoice payment error:', err);
+    return sendError(res, 'Failed to record invoice payment', 500, err);
   }
 };
 

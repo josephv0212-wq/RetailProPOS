@@ -13,12 +13,13 @@ interface InvoicePaymentReceiptPreviewProps {
   onClose: () => void;
   storeName: string;
   customerName: string;
+  customerEmail?: string | null;
   items: InvoicePaymentReceiptItem[];
   paymentMethodLabel: string;
   subtotal: number;
   ccSurcharge: number;
   totalWithFee: number;
-  onConfirmPay: () => Promise<void> | void;
+  onConfirmPay: (emailReceiptToCustomer?: boolean) => Promise<void> | void;
   loading?: boolean;
 }
 
@@ -27,6 +28,7 @@ export function InvoicePaymentReceiptPreview({
   onClose,
   storeName,
   customerName,
+  customerEmail,
   items,
   paymentMethodLabel,
   subtotal,
@@ -36,11 +38,16 @@ export function InvoicePaymentReceiptPreview({
   loading = false,
 }: InvoicePaymentReceiptPreviewProps) {
   const [isConfirming, setIsConfirming] = React.useState(false);
+  const [emailReceiptToCustomer, setEmailReceiptToCustomer] = React.useState(!!customerEmail);
+
+  React.useEffect(() => {
+    if (isOpen) setEmailReceiptToCustomer(!!customerEmail);
+  }, [isOpen, customerEmail]);
 
   const handleConfirmPay = async () => {
     setIsConfirming(true);
     try {
-      await onConfirmPay();
+      await onConfirmPay(emailReceiptToCustomer);
       onClose();
     } finally {
       setIsConfirming(false);
@@ -114,6 +121,20 @@ export function InvoicePaymentReceiptPreview({
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Email option - always shown for invoice payments; backend will email only if customer has email on file */}
+          <div className="flex items-center gap-2 py-2">
+            <input
+              id="email-invoice-to-customer"
+              type="checkbox"
+              checked={emailReceiptToCustomer}
+              onChange={(e) => setEmailReceiptToCustomer(e.target.checked)}
+              className="h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500"
+            />
+            <label htmlFor="email-invoice-to-customer" className="text-sm text-gray-700 dark:text-gray-300">
+              Email invoices to customer{customerEmail ? ` (${customerEmail})` : ''}
+            </label>
           </div>
 
           <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-3 space-y-2">

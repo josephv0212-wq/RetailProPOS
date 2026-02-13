@@ -683,6 +683,30 @@ export const emailSalesReceipt = async (salesReceiptId, options = {}) => {
 };
 
 /**
+ * Email an invoice to the customer using Zoho Books API
+ * POST /api/v3/invoices/{invoice_id}/email
+ * @param {string} invoiceId - The Zoho invoice ID
+ * @param {Object} [options] - Optional (to_mail_ids, cc_mail_ids, subject, body)
+ * @returns {Promise<Object>} Result with success status
+ */
+export const emailInvoice = async (invoiceId, options = {}) => {
+  if (!invoiceId) {
+    return { success: false, error: 'Invoice ID is required' };
+  }
+  try {
+    const emailPayload = Object.keys(options).length > 0 ? options : {};
+    const response = await makeZohoRequest(`/invoices/${invoiceId}/email`, 'POST', emailPayload);
+    if (response.code === 0) {
+      return { success: true, data: response };
+    }
+    return { success: false, error: response.message || 'Unknown error' };
+  } catch (error) {
+    const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+    return { success: false, error: errorMsg };
+  }
+};
+
+/**
  * Void/Delete a sales receipt in Zoho Books
  * @param {string} salesReceiptId - The Zoho sales receipt ID to void
  * @returns {Promise<Object>} Result with success status

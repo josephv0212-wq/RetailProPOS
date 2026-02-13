@@ -114,7 +114,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
 
   // Reset email receipt preference when modal opens - default true when customer has email
   useEffect(() => {
-    if (isOpen && context === 'sale') {
+    if (isOpen && (context === 'sale' || context === 'zohoDocuments')) {
       setEmailReceiptToCustomer(!!customerEmail);
     }
   }, [isOpen, context, customerEmail]);
@@ -183,7 +183,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
         method: selectedMethod,
         amount: finalTotal,
         useStandaloneMode: true, // Flag to indicate standalone mode
-        ...(context === 'sale' && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
+        ...((context === 'sale' || context === 'zohoDocuments') && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
       };
       
       try {
@@ -261,7 +261,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
       method: paymentMethod,
       amount: finalTotal,
       savePaymentMethod: savePaymentMethod && !!customerId,
-      ...(context === 'sale' && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
+      ...((context === 'sale' || context === 'zohoDocuments') && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
     };
 
     if (selectedMethod === 'card') {
@@ -1090,8 +1090,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
             )}
           </div>
 
-          {/* Email receipt option - only for POS sales when customer has email */}
-          {context === 'sale' && customerEmail && (
+          {/* Email receipt/invoice option when customer has email */}
+          {(context === 'sale' || context === 'zohoDocuments') && customerEmail && (
             <div className="flex items-center gap-2 py-3">
               <input
                 id="email-receipt-to-customer"
@@ -1104,7 +1104,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
                 htmlFor="email-receipt-to-customer"
                 className="text-sm text-gray-700 dark:text-gray-300"
               >
-                Email receipt to customer ({customerEmail})
+                {context === 'zohoDocuments' ? 'Email invoices to customer' : 'Email receipt to customer'} ({customerEmail})
               </label>
             </div>
           )}

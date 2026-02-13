@@ -444,6 +444,25 @@ export const salesAPI = {
     }, true);
   },
 
+  recordInvoicePayment: async (data: {
+    customerId: number;
+    items: Array<{
+      type: 'invoice';
+      id: string;
+      number: string;
+      amount: number;
+    }>;
+    paymentType?: string;
+    amount: number;
+    transactionId?: string;
+    emailReceiptToCustomer?: boolean;
+  }) => {
+    return apiRequest<{ zohoPaymentRecorded: boolean }>('/sales/record-invoice-payment', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, true);
+  },
+
   chargeInvoicesSalesOrders: async (data: {
     customerId: number;
     paymentProfileId: string;
@@ -454,6 +473,7 @@ export const salesAPI = {
       number: string;
       amount: number;
     }>;
+    emailReceiptToCustomer?: boolean;
   }) => {
     return apiRequest<{
       customer: {

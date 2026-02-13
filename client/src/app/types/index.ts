@@ -77,6 +77,8 @@ export interface CartItem {
   selectedUM?: string;
   // All available units for this item (from backend many-to-many mapping)
   availableUnits?: UnitOfMeasureOption[];
+  // Manual price override per unit (when set, used instead of product price / UM conversion)
+  priceOverride?: number;
 }
 
 export interface PaymentMethod {

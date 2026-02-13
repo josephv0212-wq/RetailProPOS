@@ -15,7 +15,8 @@ interface Invoice {
 
 interface SalesOrderInvoiceModalProps {
   isOpen: boolean;
-  onClose: () => void;
+  /** Called when modal is closed. Pass true when user selected items to charge (skip loading price list). */
+  onClose: (hadSelection?: boolean) => void;
   salesOrders: never[];
   invoices: Invoice[];
   onSelectItems: (items: Invoice[]) => void;
@@ -97,7 +98,7 @@ export function SalesOrderInvoiceModal({
     if (selected.length > 0) {
       onSelectItems(selected);
       setSelectedItems(new Set());
-      onClose();
+      onClose(true); // hadSelection - skip loading price list
     }
   };
 
@@ -121,7 +122,7 @@ export function SalesOrderInvoiceModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => onClose(false)}
             className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
@@ -214,12 +215,12 @@ export function SalesOrderInvoiceModal({
             </div>
           )}
           <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-900 dark:text-white"
-            >
-              Cancel
-            </button>
+          <button
+            onClick={() => onClose(false)}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-900 dark:text-white"
+          >
+            Cancel
+          </button>
             <button
               onClick={handleSelect}
               disabled={!hasSelection}

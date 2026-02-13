@@ -16,6 +16,7 @@ interface ShoppingCartProps {
   cartItems: CartItem[];
   onUpdateQuantity: (productId: string, quantity: number) => void;
   onUpdateUM?: (productId: string, um: string) => void;
+  onUpdatePrice?: (productId: string, price: number | undefined) => void;
   onRemoveItem: (productId: string) => void;
   onClearCart: () => void;
   onPayNow: () => void;
@@ -31,13 +32,17 @@ export function ShoppingCart({
   cartItems,
   onUpdateQuantity,
   onUpdateUM,
+  onUpdatePrice,
   onRemoveItem,
   onClearCart,
   onPayNow,
   taxRate,
 }: ShoppingCartProps) {
-  // Calculate price with UM conversion rate
+  // Calculate price with UM conversion rate (or priceOverride)
   const getItemPrice = (item: CartItem): number => {
+    if (item.priceOverride !== undefined && item.priceOverride !== null && Number.isFinite(item.priceOverride)) {
+      return item.priceOverride;
+    }
     const basePrice = item.product.price;
     
     // Use unitPrecision from availableUnits for all items (including dry ice)
@@ -190,16 +195,18 @@ export function ShoppingCart({
                   {/* Item name */}
                   <h4 className="text-xs font-medium text-gray-900 dark:text-white flex-1 min-w-0 truncate">{item.product.name}</h4>
                   
-                  {/* Quantity input */}
+                  {/* Quantity input - supports 2 decimals, no spinner */}
                   <input
                     type="number"
-                    value={item.quantity || ''}
+                    value={item.quantity ?? ''}
                     onChange={(e) => {
-                      const value = e.target.value === '' ? 0 : parseInt(e.target.value) || 0;
+                      const raw = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                      const value = Number.isFinite(raw) ? raw : 0;
                       onUpdateQuantity(String(item.product.id), Math.max(0, value));
                     }}
-                    className="w-12 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0"
+                    className="w-14 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     min="0"
+                    step="0.01"
                   />
                   
                   {/* UM Dropdown for Dry Ice Items */}
@@ -255,10 +262,36 @@ export function ShoppingCart({
                     </>
                   )}
                   
-                  {/* Calculated Price (UM Rate × Basic Price) */}
-                  <p className="text-xs text-gray-900 dark:text-white whitespace-nowrap flex-shrink-0">
-                    ${itemPrice.toFixed(2)} =
-                  </p>
+                  {/* Editable price per unit */}
+                  {onUpdatePrice ? (
+                    <span className="flex items-center gap-0.5 flex-shrink-0">
+                      <span className="text-xs text-gray-600 dark:text-gray-400">$</span>
+                      <input
+                        type="number"
+                        value={itemPrice.toFixed(2)}
+                        onChange={(e) => {
+                          const raw = parseFloat(e.target.value);
+                          if (Number.isFinite(raw) && raw >= 0) {
+                            onUpdatePrice(String(item.product.id), raw);
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const raw = parseFloat(e.target.value);
+                          if (!Number.isFinite(raw) || raw < 0) {
+                            onUpdatePrice(String(item.product.id), undefined);
+                          }
+                        }}
+                        className="w-16 text-xs text-right border border-gray-300 dark:border-gray-600 rounded py-1 px-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        min="0"
+                        step="0.01"
+                        title="Edit price"
+                      />
+                    </span>
+                  ) : (
+                    <p className="text-xs text-gray-900 dark:text-white whitespace-nowrap flex-shrink-0">
+                      ${itemPrice.toFixed(2)}
+                    </p>
+                  )}
                   
                   {/* Amount */}
                   <p className="text-base font-medium text-gray-900 dark:text-white whitespace-nowrap flex-shrink-0">
