@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Customer, CartItem } from '../types';
 import { CustomerSelector } from './CustomerSelector';
 import { ShoppingCart as ShoppingCartIcon, CircleCheck, TriangleAlert, Info, Trash2, ArrowLeft } from 'lucide-react';
@@ -38,6 +38,10 @@ export function ShoppingCart({
   onPayNow,
   taxRate,
 }: ShoppingCartProps) {
+  // Local editing state to preserve input while typing decimals (e.g. "1." or "4.2")
+  const [editingQty, setEditingQty] = useState<{ productId: string; value: string } | null>(null);
+  const [editingPrice, setEditingPrice] = useState<{ productId: string; value: string } | null>(null);
+
   // Calculate price with UM conversion rate (or priceOverride)
   const getItemPrice = (item: CartItem): number => {
     if (item.priceOverride !== undefined && item.priceOverride !== null && Number.isFinite(item.priceOverride)) {
@@ -195,18 +199,32 @@ export function ShoppingCart({
                   {/* Item name */}
                   <h4 className="text-xs font-medium text-gray-900 dark:text-white flex-1 min-w-0 truncate">{item.product.name}</h4>
                   
-                  {/* Quantity input - supports 2 decimals, no spinner */}
+                  {/* Quantity input - supports 2 decimals, no leading zeros, preserves typing e.g. "1." or "1.53" */}
                   <input
-                    type="number"
-                    value={item.quantity ?? ''}
-                    onChange={(e) => {
-                      const raw = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                      const value = Number.isFinite(raw) ? raw : 0;
-                      onUpdateQuantity(String(item.product.id), Math.max(0, value));
+                    type="text"
+                    inputMode="decimal"
+                    value={editingQty?.productId === String(item.product.id) ? editingQty.value : (item.quantity != null ? String(item.quantity).replace(/^0+(?=\d)/, '') : '')}
+                    onFocus={(e) => {
+                      setEditingQty({ productId: String(item.product.id), value: item.quantity != null ? String(item.quantity).replace(/^0+(?=\d)/, '') : '' });
+                      queueMicrotask(() => (e.target as HTMLInputElement).select());
                     }}
-                    className="w-14 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    min="0"
-                    step="0.01"
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const stripped = raw.replace(/^0+(?=\d)/, '');
+                      const num = stripped === '' ? 0 : parseFloat(stripped);
+                      setEditingQty(prev => prev && prev.productId === String(item.product.id) ? { ...prev, value: raw } : prev);
+                      if (Number.isFinite(num) && num >= 0) {
+                        onUpdateQuantity(String(item.product.id), Math.max(0, num));
+                      }
+                    }}
+                    onBlur={() => {
+                      const val = editingQty?.productId === String(item.product.id) ? editingQty.value : '';
+                      const stripped = val.replace(/^0+(?=\d)/, '');
+                      const num = stripped === '' ? 0 : parseFloat(stripped);
+                      onUpdateQuantity(String(item.product.id), Math.max(0, Number.isFinite(num) ? num : item.quantity ?? 0));
+                      setEditingQty(null);
+                    }}
+                    className="w-14 text-xs text-center border border-gray-300 dark:border-gray-600 rounded py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0"
                   />
                   
                   {/* UM Dropdown for Dry Ice Items */}
@@ -262,28 +280,39 @@ export function ShoppingCart({
                     </>
                   )}
                   
-                  {/* Editable price per unit */}
+                  {/* Editable price per unit - no leading zeros, preserves typing e.g. "4." or "4.24" */}
                   {onUpdatePrice ? (
                     <span className="flex items-center gap-0.5 flex-shrink-0">
                       <span className="text-xs text-gray-600 dark:text-gray-400">$</span>
                       <input
-                        type="number"
-                        value={itemPrice.toFixed(2)}
+                        type="text"
+                        inputMode="decimal"
+                        value={editingPrice?.productId === String(item.product.id) ? editingPrice.value : (itemPrice > 0 && itemPrice < 1 ? itemPrice.toFixed(2).replace(/^0/, '') : itemPrice.toFixed(2))}
+                        onFocus={(e) => {
+                          setEditingPrice({ productId: String(item.product.id), value: itemPrice > 0 && itemPrice < 1 ? itemPrice.toFixed(2).replace(/^0/, '') : itemPrice.toFixed(2) });
+                          queueMicrotask(() => (e.target as HTMLInputElement).select());
+                        }}
                         onChange={(e) => {
-                          const raw = parseFloat(e.target.value);
-                          if (Number.isFinite(raw) && raw >= 0) {
-                            onUpdatePrice(String(item.product.id), raw);
+                          const raw = e.target.value;
+                          const stripped = raw.replace(/^0+(?=\d)/, '');
+                          const num = stripped === '' ? NaN : parseFloat(stripped);
+                          setEditingPrice(prev => prev && prev.productId === String(item.product.id) ? { ...prev, value: raw } : prev);
+                          if (Number.isFinite(num) && num >= 0) {
+                            onUpdatePrice(String(item.product.id), num);
                           }
                         }}
-                        onBlur={(e) => {
-                          const raw = parseFloat(e.target.value);
-                          if (!Number.isFinite(raw) || raw < 0) {
+                        onBlur={() => {
+                          const val = editingPrice?.productId === String(item.product.id) ? editingPrice.value : '';
+                          const stripped = val.replace(/^0+(?=\d)/, '');
+                          const num = stripped === '' ? NaN : parseFloat(stripped);
+                          if (Number.isFinite(num) && num >= 0) {
+                            onUpdatePrice(String(item.product.id), num);
+                          } else {
                             onUpdatePrice(String(item.product.id), undefined);
                           }
+                          setEditingPrice(null);
                         }}
-                        className="w-16 text-xs text-right border border-gray-300 dark:border-gray-600 rounded py-1 px-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        min="0"
-                        step="0.01"
+                        className="w-16 text-xs text-right border border-gray-300 dark:border-gray-600 rounded py-1 px-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white flex-shrink-0"
                         title="Edit price"
                       />
                     </span>
