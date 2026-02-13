@@ -552,11 +552,20 @@ export const createSalesReceipt = async (saleData) => {
     if (resolvedCanSendInMail !== undefined) zohoParams.can_send_in_mail = resolvedCanSendInMail;
 
     const response = await makeZohoRequest('/salesreceipts', 'POST', salesReceiptData, zohoParams);
-    
+
     if (response.code === 0) {
       const salesReceipt = response.salesreceipt || {};
-      let salesReceiptId = salesReceipt.salesreceipt_id || response.salesreceipt_id || null;
-      const salesReceiptNumber = salesReceipt.salesreceipt_number || response.salesreceipt_number || null;
+      const details = response.sales_receipt_details || {};
+      let salesReceiptId =
+        salesReceipt.salesreceipt_id ||
+        response.salesreceipt_id ||
+        details.sales_receipt_id ||
+        null;
+      const salesReceiptNumber =
+        salesReceipt.salesreceipt_number ||
+        response.salesreceipt_number ||
+        details.receipt_number ||
+        null;
 
       if (!salesReceiptId && salesReceiptNumber) {
         try {
@@ -610,6 +619,62 @@ export const createSalesReceipt = async (saleData) => {
       console.error(`   Response:`, JSON.stringify(errorData, null, 2));
     }
     
+    return {
+      success: false,
+      error: errorMsg
+    };
+  }
+};
+
+/**
+ * Email a sales receipt to the customer using Zoho Books API
+ * POST /api/v3/salesreceipts/{salesreceipt_id}/email
+ * Uses customer's primary email from Zoho contact when no email details provided.
+ * @param {string} salesReceiptId - The Zoho sales receipt ID
+ * @param {Object} [options] - Optional email details (to_mail_ids, cc_mail_ids, subject, body)
+ * @returns {Promise<Object>} Result with success status
+ */
+export const emailSalesReceipt = async (salesReceiptId, options = {}) => {
+  if (!salesReceiptId) {
+    return {
+      success: false,
+      error: 'Sales receipt ID is required'
+    };
+  }
+
+  try {
+    const emailPayload = Object.keys(options).length > 0 ? options : {};
+    const response = await makeZohoRequest(
+      `/salesreceipts/${salesReceiptId}/email`,
+      'POST',
+      emailPayload
+    );
+
+    if (response.code === 0) {
+      console.log(`✅ Zoho sales receipt ${salesReceiptId} emailed successfully`);
+      return {
+        success: true,
+        message: 'Sales receipt emailed successfully',
+        data: response
+      };
+    } else {
+      const errorMsg = response.message || 'Unknown error';
+      console.error(`❌ Failed to email sales receipt ${salesReceiptId}: ${errorMsg}`);
+      return {
+        success: false,
+        error: errorMsg
+      };
+    }
+  } catch (error) {
+    const errorData = error.response?.data;
+    const errorMsg = errorData?.message || error.message || 'Unknown error';
+    const code = errorData?.code;
+    // Code 1007: customer has no email in Zoho contact - expected, not an error
+    if (code === 1007) {
+      console.log(`ℹ️ Sales receipt ${salesReceiptId}: Customer has no email in Zoho. Add email in Zoho Books contact to enable receipt emails.`);
+    } else {
+      console.warn(`⚠️ Failed to email sales receipt ${salesReceiptId}: ${errorMsg}`);
+    }
     return {
       success: false,
       error: errorMsg

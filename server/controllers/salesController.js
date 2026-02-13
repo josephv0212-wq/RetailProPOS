@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer, InvoicePayment, User } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
-import { createSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice } from '../services/zohoService.js';
+import { createSalesReceipt, emailSalesReceipt, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 
@@ -785,9 +785,7 @@ export const createSale = async (req, res) => {
           transactionId: sale.transactionId, // Transaction ID from payment processing
           // Provide user's/location Zoho tax_id so the Zoho service can enforce tax_id on all taxable line items.
           zohoTaxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null,
-          saleId: sale.id,
-          // When true, Zoho Books emails the sales receipt to the customer.
-          ...((emailReceiptToCustomer === true || paymentDetails?.emailReceiptToCustomer === true) && { canSendInMail: true }),
+          saleId: sale.id
         });
 
         if (zohoResult.success) {
@@ -795,6 +793,27 @@ export const createSale = async (req, res) => {
             syncedToZoho: true,
             zohoSalesReceiptId: zohoResult.salesReceiptId
           });
+
+          // Email receipt to customer via Zoho's dedicated email endpoint (non-blocking)
+          const shouldEmailReceipt = emailReceiptToCustomer === true || paymentDetails?.emailReceiptToCustomer === true;
+          if (shouldEmailReceipt && zohoResult.salesReceiptId) {
+            const emailOptions = customer?.email ? { to_mail_ids: [customer.email] } : {};
+            // #region agent log
+            try { fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:emailReceipt',message:'Attempting receipt email',data:{saleId:sale.id,salesReceiptId:zohoResult.salesReceiptId,hasCustomerEmail:!!customer?.email,toMailIdsCount:emailOptions.to_mail_ids?.length||0},timestamp:Date.now(),runId:'email-test'})}).catch(()=>{}); } catch(e){}
+            // #endregion
+            emailSalesReceipt(zohoResult.salesReceiptId, emailOptions)
+              .then((emailResult) => {
+                // #region agent log
+                try { fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:emailReceipt:result',message:'Receipt email result',data:{saleId:sale.id,success:emailResult.success,error:emailResult.error||null},timestamp:Date.now(),runId:'email-test'})}).catch(()=>{}); } catch(e){}
+                // #endregion
+                if (!emailResult.success) {
+                  console.warn(`⚠️ Sale ${sale.id}: Receipt email failed (sale completed successfully): ${emailResult.error}`);
+                }
+              })
+              .catch((err) => {
+                console.warn(`⚠️ Sale ${sale.id}: Receipt email error (sale completed successfully):`, err.message);
+              });
+          }
         } else {
           console.error(`❌ Sale ${sale.id} Zoho sync failed: ${zohoResult.error}`);
           await sale.update({
