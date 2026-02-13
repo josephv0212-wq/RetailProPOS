@@ -123,6 +123,8 @@ export interface PaymentDetails {
   // When true, backend will attempt to save this payment method
   // to Authorize.Net CIM for future "stored payment" use.
   savePaymentMethod?: boolean;
+  // When true, Zoho Books will email the sales receipt to the customer.
+  emailReceiptToCustomer?: boolean;
 }
 
 export interface SaleItem {

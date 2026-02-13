@@ -206,7 +206,9 @@ export const createSale = async (req, res) => {
       useStandaloneMode,
       // When true (or when paymentDetails.savePaymentMethod is true), we will create/update
       // an Authorize.Net CIM profile for the customer using the successful transaction.
-      savePaymentMethod 
+      savePaymentMethod,
+      // When true, Zoho Books will email the sales receipt to the customer.
+      emailReceiptToCustomer
     } = req.body;
     // #region agent log
     fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale entry',message:'createSale request',data:{paymentType:requestPaymentType,itemsCount:(items||[]).length,customerId:customerId||null,useStoredPayment:!!useStoredPayment,useValorApi:!!useValorApi,useStandaloneMode:!!(useStandaloneMode||paymentDetails?.useStandaloneMode)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
@@ -783,7 +785,9 @@ export const createSale = async (req, res) => {
           transactionId: sale.transactionId, // Transaction ID from payment processing
           // Provide user's/location Zoho tax_id so the Zoho service can enforce tax_id on all taxable line items.
           zohoTaxId: userTaxPercentage > 0 ? (userZohoTaxId || null) : null,
-          saleId: sale.id
+          saleId: sale.id,
+          // When true, Zoho Books emails the sales receipt to the customer.
+          ...((emailReceiptToCustomer === true || paymentDetails?.emailReceiptToCustomer === true) && { canSendInMail: true }),
         });
 
         if (zohoResult.success) {

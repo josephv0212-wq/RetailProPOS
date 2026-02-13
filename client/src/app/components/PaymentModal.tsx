@@ -29,6 +29,8 @@ interface PaymentModalProps {
   cardReaderMode?: 'integrated' | 'standalone';
   customerId?: number | null;
   customerName?: string | null;
+  /** Customer email - when present and context is 'sale', shows "Email receipt" checkbox. */
+  customerEmail?: string | null;
 }
 
 const paymentMethods: PaymentMethod[] = [
@@ -39,7 +41,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, isTaxExempt, cartItems, onConfirmPayment, context = 'sale', userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, isTaxExempt, cartItems, onConfirmPayment, context = 'sale', userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName, customerEmail }: PaymentModalProps) {
   const { showToast } = useToast();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
@@ -68,6 +70,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [loadingPaymentProfiles, setLoadingPaymentProfiles] = useState(false);
   const [savePaymentMethod, setSavePaymentMethod] = useState(false);
+  const [emailReceiptToCustomer, setEmailReceiptToCustomer] = useState(true);
 
   // Load Accept.js on mount
   useEffect(() => {
@@ -108,6 +111,13 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
       setSelectedPaymentProfileId(null);
     }
   }, [isOpen, customerId, context]);
+
+  // Reset email receipt preference when modal opens - default true when customer has email
+  useEffect(() => {
+    if (isOpen && context === 'sale') {
+      setEmailReceiptToCustomer(!!customerEmail);
+    }
+  }, [isOpen, context, customerEmail]);
 
   const loadPaymentProfiles = async () => {
     if (!customerId) return;
@@ -172,7 +182,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
       const paymentDetails: PaymentDetails = {
         method: selectedMethod,
         amount: finalTotal,
-        useStandaloneMode: true // Flag to indicate standalone mode
+        useStandaloneMode: true, // Flag to indicate standalone mode
+        ...(context === 'sale' && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
       };
       
       try {
@@ -250,6 +261,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
       method: paymentMethod,
       amount: finalTotal,
       savePaymentMethod: savePaymentMethod && !!customerId,
+      ...(context === 'sale' && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
     };
 
     if (selectedMethod === 'card') {
@@ -1077,6 +1089,25 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
               </div>
             )}
           </div>
+
+          {/* Email receipt option - only for POS sales when customer has email */}
+          {context === 'sale' && customerEmail && (
+            <div className="flex items-center gap-2 py-3">
+              <input
+                id="email-receipt-to-customer"
+                type="checkbox"
+                checked={emailReceiptToCustomer}
+                onChange={(e) => setEmailReceiptToCustomer(e.target.checked)}
+                className="h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500"
+              />
+              <label
+                htmlFor="email-receipt-to-customer"
+                className="text-sm text-gray-700 dark:text-gray-300"
+              >
+                Email receipt to customer ({customerEmail})
+              </label>
+            </div>
+          )}
 
           {/* Error Display */}
           {error && (

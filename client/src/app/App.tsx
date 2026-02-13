@@ -1075,6 +1075,11 @@ function AppContent() {
         requestBody.paymentProfileId = paymentDetails.paymentProfileId;
       }
 
+      // Add email receipt option for Zoho Books (send receipt in mail to customer)
+      if (paymentDetails.emailReceiptToCustomer === true) {
+        requestBody.emailReceiptToCustomer = true;
+      }
+
       const response = await salesAPI.create(requestBody);
 
       // Handle pending terminal payment (waiting for VP100 device)
@@ -1382,6 +1387,7 @@ function AppContent() {
         cardReaderMode={user?.cardReaderMode || 'integrated'}
         customerId={selectedCustomer?.id || null}
         customerName={selectedCustomer?.name || selectedCustomer?.contactName || null}
+        customerEmail={selectedCustomer?.email || null}
       />
 
       {/* POS Payment Modal for Zoho invoices/sales orders */}
