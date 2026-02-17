@@ -1375,6 +1375,7 @@ function AppContent() {
             customerTaxPreference={customerTaxPreference}
             customerCards={customerCards}
             onSelectCustomer={handleSelectCustomer}
+            onRefreshCustomer={selectedCustomer?.zohoId ? () => continueCustomerSelection(selectedCustomer!) : undefined}
             cartItems={cartItems}
             onUpdateQuantity={handleUpdateQuantity}
             onUpdateUM={handleUpdateUM}
