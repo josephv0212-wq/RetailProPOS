@@ -1,9 +1,11 @@
 import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById, organizeZohoSalesOrdersFuelSurcharge as organizeZohoSalesOrdersFuelSurchargeService } from '../services/zohoService.js';
-import { Customer, Item, Sale } from '../models/index.js';
+import { Customer, Item, Sale, InvoicePayment } from '../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
 import { sequelize } from '../config/db.js';
+
+const isSQLite = (process.env.DATABASE_SETTING || 'cloud').toLowerCase() === 'local';
 
 const DEFAULT_CUSTOMERS = {
   'LOC001': 'MIA Dry Ice - WALK IN MIAMI',
@@ -129,8 +131,9 @@ export const syncCustomersToDatabase = async (options = {}) => {
       });
 
       await sequelize.transaction(async (t) => {
-        // Avoid FK issues: detach existing Sales from Customers before deleting
+        // Detach FKs before truncate: Sale and InvoicePayment reference Customer
         await Sale.update({ customerId: null }, { where: {}, transaction: t });
+        await InvoicePayment.update({ customerId: null }, { where: {}, transaction: t });
         await Customer.destroy({ where: {}, truncate: true, transaction: t });
         if (rows.length > 0) {
           await Customer.bulkCreate(rows, { transaction: t });

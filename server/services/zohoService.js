@@ -154,7 +154,6 @@ const makeZohoRequest = async (endpoint, method = 'GET', data = null, params = {
       message: errorData?.message || error.message,
       code: errorData?.code
     });
-    
     throw error;
   }
 };

@@ -9,7 +9,7 @@ export const InvoicePayment = sequelize.define('InvoicePayment', {
   },
   customerId: {
     type: DataTypes.INTEGER,
-    allowNull: false
+    allowNull: true  // Nullable to allow Zoho sync replace-all (InvoicePayment rows orphaned during full customer sync)
   },
   type: {
     type: DataTypes.STRING,

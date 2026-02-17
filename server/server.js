@@ -652,6 +652,74 @@ const ensureBasicUMColumn = async () =>
     warnMessage: 'Could not ensure basicUM column on unit_of_measures table'
   });
 
+// Make invoice_payments.customerId nullable (for Zoho sync replace-all: detach before Customer truncate)
+const ensureInvoicePaymentCustomerIdNullable = async () => {
+  try {
+    if (DATABASE_SETTING === 'local') {
+      const [cols] = await sequelize.query("PRAGMA table_info(invoice_payments)");
+      const custCol = cols && cols.find(c => c.name === 'customerId');
+      if (!custCol || custCol.notnull === 0) {
+        logInfo('invoice_payments.customerId already nullable or column missing');
+        return;
+      }
+      await disableSQLiteForeignKeys();
+      try {
+        await sequelize.query(`
+          CREATE TABLE invoice_payments_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customerId INTEGER NULL,
+            type VARCHAR(255) NOT NULL,
+            documentNumber VARCHAR(255) NOT NULL,
+            documentId VARCHAR(255),
+            amount DECIMAL(10,2) NOT NULL,
+            amountCharged DECIMAL(10,2) NOT NULL,
+            ccFee DECIMAL(10,2) DEFAULT 0,
+            paymentType VARCHAR(255) NOT NULL,
+            transactionId VARCHAR(255),
+            zohoPaymentRecorded TINYINT(1) DEFAULT 0,
+            locationId VARCHAR(255),
+            userId INTEGER,
+            createdAt DATETIME NOT NULL,
+            updatedAt DATETIME NOT NULL
+          )
+        `);
+        await sequelize.query(`
+          INSERT INTO invoice_payments_new
+          (id, customerId, type, documentNumber, documentId, amount, amountCharged, ccFee, paymentType, transactionId, zohoPaymentRecorded, locationId, userId, createdAt, updatedAt)
+          SELECT id, customerId, type, documentNumber, documentId, amount, amountCharged, ccFee, paymentType, transactionId, zohoPaymentRecorded, locationId, userId, createdAt, updatedAt
+          FROM invoice_payments
+        `);
+        await sequelize.query('DROP TABLE invoice_payments');
+        await sequelize.query('ALTER TABLE invoice_payments_new RENAME TO invoice_payments');
+        logSuccess('invoice_payments.customerId made nullable for Zoho sync');
+      } finally {
+        await enableSQLiteForeignKeys();
+      }
+    } else {
+      const [rows] = await sequelize.query(`
+        SELECT is_nullable FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'invoice_payments' AND column_name = 'customerId'
+      `);
+      const row = rows && rows[0];
+      if (row && row.is_nullable === 'YES') {
+        logInfo('invoice_payments.customerId already nullable');
+        return;
+      }
+      if (row) {
+        await sequelize.query('ALTER TABLE invoice_payments ALTER COLUMN "customerId" DROP NOT NULL');
+        logSuccess('invoice_payments.customerId made nullable for Zoho sync');
+      }
+    }
+  } catch (err) {
+    const m = err?.message || '';
+    if (m.includes('duplicate column') || m.includes('already exists') || m.includes('does not exist')) {
+      logInfo('invoice_payments customerId migration skipped: ' + m);
+      return;
+    }
+    logWarning('Could not make invoice_payments.customerId nullable: ' + m);
+  }
+};
+
 // Ensure transactions table exists (legacy table for backward compatibility)
 const ensureTransactionsTable = async () => {
   try {
@@ -887,6 +955,7 @@ const startServer = async () => {
           await ensureBasicUMColumn();
           await ensureTransactionsTable();
           await ensurePricebookCacheTable();
+          await ensureInvoicePaymentCustomerIdNullable();
         } else {
           // For PostgreSQL, also ensure columns exist
           await ensureTerminalColumns();
@@ -902,6 +971,7 @@ const startServer = async () => {
           await ensureTransactionsTable();
           await ensurePricebookCacheTable();
         }
+  await ensureInvoicePaymentCustomerIdNullable();
 
   // Migrate dry ice UMs to database
   await migrateDryIceUMs();
