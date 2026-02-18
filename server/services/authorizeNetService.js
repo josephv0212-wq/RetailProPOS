@@ -508,6 +508,48 @@ export const findCustomerProfileByEmail = async (email, merchantCustomerId = nul
 };
 
 /**
+ * Search for ALL customer profiles matching the given email.
+ * Returns all matching profiles (Auth.net can have multiple profiles per email).
+ * @param {string} email - Customer email to search for
+ * @returns {Promise<Object>} { success, profiles: [{ profile, customerProfileId }], error? }
+ */
+export const searchAllCustomerProfilesByEmail = async (email) => {
+  if (!email || typeof email !== 'string' || !email.trim()) {
+    return { success: false, profiles: [], error: 'Email is required' };
+  }
+  const emailLower = email.trim().toLowerCase();
+  try {
+    const idsResult = await getCustomerProfileIds();
+    if (!idsResult.success || !idsResult.profileIds || idsResult.profileIds.length === 0) {
+      return { success: false, profiles: [], error: idsResult.error || 'No customer profiles found' };
+    }
+    const matches = [];
+    for (const profileId of idsResult.profileIds) {
+      try {
+        const profileResult = await getCustomerProfile(profileId);
+        if (profileResult.success && profileResult.profile) {
+          const profile = profileResult.profile;
+          const profileEmail = (Array.isArray(profile.email) ? profile.email[0] : profile.email) || '';
+          if (profileEmail.toLowerCase() === emailLower) {
+            matches.push({ profile, customerProfileId: profileId });
+          }
+        }
+      } catch (err) {
+        continue;
+      }
+    }
+    return {
+      success: matches.length > 0,
+      profiles: matches,
+      error: matches.length === 0 ? 'No customer profiles found for this email' : null
+    };
+  } catch (error) {
+    console.error('Search All Profiles By Email Error:', error.message);
+    return { success: false, profiles: [], error: error.message };
+  }
+};
+
+/**
  * Search for customer profile by iterating through all profile IDs
  * This is only recommended for small datasets
  * Prioritizes name matching over email matching

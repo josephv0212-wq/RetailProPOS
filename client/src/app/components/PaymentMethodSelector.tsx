@@ -11,12 +11,13 @@ interface PaymentProfile {
   accountNumber?: string;
   isDefault?: boolean;
   isStored?: boolean;
+  customerProfileId?: string | null;
 }
 
 interface PaymentMethodSelectorProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (paymentProfileId: string, profileType?: 'card' | 'ach') => void;
+  onSelect: (paymentProfileId: string, profileType?: 'card' | 'ach', customerProfileId?: string | null) => void;
   customerId: number;
   customerName: string;
   loading?: boolean;
@@ -37,6 +38,10 @@ export function PaymentMethodSelector({
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [zohoCards, setZohoCards] = useState<Array<{ last_four_digits?: string; last4?: string; card_type?: string }>>([]);
+  const [zohoLastFour, setZohoLastFour] = useState<string | null>(null);
+  const [zohoCardType, setZohoCardType] = useState<string | null>(null);
+  const [zohoBankLast4, setZohoBankLast4] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && customerId) {
@@ -50,14 +55,20 @@ export function PaymentMethodSelector({
     try {
       const response = await customersAPI.getPaymentProfiles(customerId);
 
-      if (response.success && response.data?.paymentProfiles) {
-        const profiles = response.data.paymentProfiles;
+      if (response.success && response.data) {
+        const profiles = response.data.paymentProfiles || [];
         setPaymentProfiles(profiles);
-        
+        setZohoCards(response.data.zohoCards || []);
+        setZohoLastFour(response.data.last_four_digits ?? null);
+        setZohoCardType(response.data.card_type ?? null);
+        setZohoBankLast4(response.data.bank_account_last4 ?? null);
+
         // Auto-select default or stored profile, or first one
         const defaultProfile = profiles.find((p: PaymentProfile) => p.isDefault || p.isStored) || profiles[0];
         if (defaultProfile) {
           setSelectedProfileId(defaultProfile.paymentProfileId);
+        } else {
+          setSelectedProfileId(null);
         }
       } else {
         setError(response.error || response.data?.message || 'Failed to load payment profiles');
@@ -81,7 +92,7 @@ export function PaymentMethodSelector({
 
   const handleSelect = () => {
     if (selectedProfileId && selectedProfile) {
-      onSelect(selectedProfileId, selectedProfile.type);
+      onSelect(selectedProfileId, selectedProfile.type, selectedProfile.customerProfileId ?? undefined);
       // Parent closes selector and opens receipt preview; do not call onClose() here so parent does not clear pendingChargeItems
     }
   };
@@ -108,6 +119,7 @@ export function PaymentMethodSelector({
 
   const isLoading = loading || externalLoading;
   const hasProfiles = paymentProfiles.length > 0;
+  const hasZohoPaymentInfo = zohoCards.length > 0 || zohoLastFour || zohoBankLast4;
   const canProceed = selectedProfileId && !isLoading;
 
   return (
@@ -152,14 +164,45 @@ export function PaymentMethodSelector({
               </button>
             </div>
           ) : !hasProfiles ? (
-            <div className="text-center py-12">
-              <CreditCard className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-500 dark:text-gray-400 mb-2">
-                No payment methods found
-              </p>
-              <p className="text-sm text-gray-400 dark:text-gray-500">
-                This customer does not have any stored payment methods in Authorize.net
-              </p>
+            <div className="text-center py-8 space-y-4">
+              {hasZohoPaymentInfo ? (
+                <>
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 text-left">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-2">
+                      Payment info on file (from Zoho)
+                    </p>
+                    <div className="text-sm text-amber-700 dark:text-amber-300 space-y-1">
+                      {zohoLastFour && (
+                        <div className="flex items-center gap-2">
+                          <CreditCard className="w-4 h-4 flex-shrink-0" />
+                          <span>
+                            {zohoCardType || 'Card'}: xxxx xxxx xxxx {zohoLastFour}
+                          </span>
+                        </div>
+                      )}
+                      {zohoBankLast4 && (
+                        <div className="flex items-center gap-2">
+                          <Building2 className="w-4 h-4 flex-shrink-0" />
+                          <span>Bank account: xxxx {zohoBankLast4}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    To pay invoices with stored payment, add this card by completing a sale with &quot;Save payment method&quot; checked.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto" />
+                  <p className="text-gray-500 dark:text-gray-400">
+                    No payment methods found
+                  </p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500">
+                    This customer does not have stored payment methods in Authorize.net. Add a card by completing a sale with &quot;Save payment method&quot; checked.
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -192,6 +235,7 @@ export function PaymentMethodSelector({
                           )}
                           <span className="font-semibold text-gray-900 dark:text-white">
                             {(profile.type === 'card') ? 'Card' : 'Bank Account'}
+                            {profile.profileName ? ` (${profile.profileName})` : ''}
                           </span>
                           {(profile.isDefault || profile.isStored) && (
                             <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 rounded">

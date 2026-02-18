@@ -335,8 +335,14 @@ export const customersAPI = {
         accountNumber?: string;
         isDefault?: boolean;
         isStored?: boolean;
+        customerProfileId?: string | null;
+        profileName?: string;
       }>;
       message?: string;
+      zohoCards?: Array<{ last_four_digits?: string; last4?: string; card_type?: string }>;
+      last_four_digits?: string | null;
+      card_type?: string | null;
+      bank_account_last4?: string | null;
     }>(`/customers/${id}/payment-profiles`);
   },
 };
@@ -467,6 +473,7 @@ export const salesAPI = {
   chargeInvoicesSalesOrders: async (data: {
     customerId: number;
     paymentProfileId: string;
+    customerProfileId?: string | null;
     paymentType?: 'card' | 'ach';
     items: Array<{
       type: 'invoice';

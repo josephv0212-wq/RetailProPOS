@@ -1,7 +1,7 @@
 import { Customer } from '../models/index.js';
 import { Op } from 'sequelize';
 import { syncCustomersFromZoho, getCustomerById as getZohoCustomerById, getCustomerCards } from '../services/zohoService.js';
-import { getCustomerProfileDetails, extractPaymentProfiles } from '../services/authorizeNetService.js';
+import { getCustomerProfileDetails, extractPaymentProfiles, extractBankAccountInfo, searchAllCustomerProfilesByEmail } from '../services/authorizeNetService.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
 import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
 
@@ -286,23 +286,14 @@ export const getCustomerPriceList = async (req, res) => {
       return sendNotFound(res, 'Customer');
     }
 
-    // Fetch and log Authorize.Net customer profile details
+    // Fetch bank account info from Auth.net (email-only search, use last matching profile - same as payment profiles)
     try {
-      const searchCriteria = {
-        name: customer.contactName || null,
-        email: customer.email || null,
-        merchantCustomerId: customer.zohoId || null
-      };
-
-      // Only search if we have at least name or email
-      if (searchCriteria.name || searchCriteria.email) {
-        const authorizeNetProfile = await getCustomerProfileDetails(searchCriteria);
-        
-        if (authorizeNetProfile.success && authorizeNetProfile.profile) {
-          // Extract and save bank account information
-          const { extractBankAccountInfo } = await import('../services/authorizeNetService.js');
-          const bankAccountInfo = extractBankAccountInfo(authorizeNetProfile.profile);
-          
+      if (customer.email) {
+        const allResult = await searchAllCustomerProfilesByEmail(customer.email);
+        if (allResult.success && allResult.profiles && allResult.profiles.length > 0) {
+          // Use last matching profile (same logic as getCustomerPaymentProfiles)
+          const lastProfile = allResult.profiles[allResult.profiles.length - 1];
+          const bankAccountInfo = extractBankAccountInfo(lastProfile.profile);
           if (bankAccountInfo.hasBankAccount && bankAccountInfo.bankAccountLast4) {
             try {
               await customer.update({
@@ -399,6 +390,7 @@ export const getCustomerPriceList = async (req, res) => {
 
 /**
  * Get customer payment profiles from Authorize.net CIM
+ * Also fetches Zoho payment info (cards, bank last4) for display when Auth.net has no profiles.
  * GET /customers/:id/payment-profiles
  */
 export const getCustomerPaymentProfiles = async (req, res) => {
@@ -410,69 +402,121 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       return sendNotFound(res, 'Customer');
     }
 
-    // Try to get customer profile from Authorize.net
-    let customerProfileId = customer.customerProfileId;
-    let profile = null;
-
-    // If we have stored profile ID, use it directly
-    if (customerProfileId) {
-      const { getCustomerProfile } = await import('../services/authorizeNetService.js');
-      const profileResult = await getCustomerProfile(customerProfileId);
-      if (profileResult.success) {
-        profile = profileResult.profile;
+    // Fetch Zoho payment info in parallel (for display when Auth.net has no profiles)
+    let zohoCards = [];
+    let zohoLastFour = null;
+    let zohoCardType = null;
+    let zohoBankLast4 = customer.bankAccountLast4 || null;
+    if (customer.zohoId) {
+      try {
+        const [zohoContactResult, zohoCardsResult] = await Promise.allSettled([
+          getZohoCustomerById(customer.zohoId),
+          getCustomerCards(customer.zohoId)
+        ]);
+        const zohoContact = zohoContactResult.status === 'fulfilled' ? zohoContactResult.value : null;
+        zohoCards = zohoCardsResult.status === 'fulfilled' && Array.isArray(zohoCardsResult.value) ? zohoCardsResult.value : [];
+        const firstCard = zohoCards.length > 0 ? zohoCards[0] : null;
+        zohoLastFour = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
+        zohoCardType = firstCard?.card_type
+          ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
+          : (firstCard?.brand ? (String(firstCard.brand).charAt(0).toUpperCase() + String(firstCard.brand).slice(1).toLowerCase()) : null);
+        if (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)) {
+          const bankField = zohoContact.custom_fields.find(f => {
+            const label = (f.label || '').toLowerCase();
+            return label.includes('bank_account') || label.includes('bank_last') || label.includes('ach_last') || label.includes('bank_last4');
+          });
+          if (bankField?.value) {
+            zohoBankLast4 = String(bankField.value).replace(/\D/g, '').slice(-4) || bankField.value;
+          }
+        }
+        if (!zohoBankLast4 && zohoContact?.payment_methods && Array.isArray(zohoContact.payment_methods)) {
+          const achMethod = zohoContact.payment_methods.find(pm => (pm.type || '').toLowerCase() === 'ach' || (pm.payment_type || '').toLowerCase() === 'ach');
+          zohoBankLast4 = achMethod?.last_four_digits || achMethod?.last4 || achMethod?.account_last4 || zohoBankLast4;
+        }
+      } catch (_) {
+        // Zoho fetch failed - continue with Auth.net only
       }
     }
 
-    // If not found or not stored, search for it
-    if (!profile) {
-      const searchCriteria = {
-        name: customer.contactName || null,
-        email: customer.email || null,
-        merchantCustomerId: customer.zohoId || null
-      };
+    // Collect payment profiles from Authorize.net - can have multiple profiles per email
+    let allPaymentProfiles = [];
+    let firstCustomerProfileId = null;
 
-      if (searchCriteria.name || searchCriteria.email) {
-        const profileResult = await getCustomerProfileDetails(searchCriteria);
-        
-        if (profileResult.success && profileResult.profile) {
-          profile = profileResult.profile;
-          customerProfileId = Array.isArray(profile.customerProfileId)
-            ? profile.customerProfileId[0]
-            : profile.customerProfileId;
-
-          // Store profile ID for future use
-          if (customerProfileId) {
-            await customer.update({
-              customerProfileId: customerProfileId.toString()
-            });
+    // Search by email for ALL matching profiles (Auth.net can have multiple profiles per email, e.g. Yolanda + Steven)
+    if (customer.email) {
+      const allResult = await searchAllCustomerProfilesByEmail(customer.email);
+      if (allResult.success && allResult.profiles && allResult.profiles.length > 0) {
+        const seenPaymentIds = new Set();
+        for (const { profile: p, customerProfileId: cpid } of allResult.profiles) {
+          const profileName = (Array.isArray(p.description) ? p.description[0] : p.description) || null;
+          const extracted = extractPaymentProfiles(p);
+          if (!firstCustomerProfileId && cpid) firstCustomerProfileId = cpid;
+          for (const pp of extracted) {
+            if (!seenPaymentIds.has(pp.paymentProfileId)) {
+              seenPaymentIds.add(pp.paymentProfileId);
+              allPaymentProfiles.push({
+                ...pp,
+                customerProfileId: cpid,
+                profileName: profileName || undefined
+              });
+            }
           }
+        }
+        // Store first profile ID for backward compatibility (single-profile customers)
+        if (firstCustomerProfileId && allResult.profiles.length === 1) {
+          await customer.update({ customerProfileId: firstCustomerProfileId.toString() });
         }
       }
     }
 
-    if (!profile) {
-      return sendSuccess(res, {
-        customerProfileId: null,
-        paymentProfiles: [],
-        message: 'Customer does not have a payment profile in Authorize.net'
-      });
+    // Fallback: if no email or search returned nothing, try stored profile ID
+    if (allPaymentProfiles.length === 0 && customer.customerProfileId) {
+      const { getCustomerProfile } = await import('../services/authorizeNetService.js');
+      const profileResult = await getCustomerProfile(customer.customerProfileId);
+      if (profileResult.success && profileResult.profile) {
+        const p = profileResult.profile;
+        const profileMerchantId = (Array.isArray(p.merchantCustomerId) ? p.merchantCustomerId[0] : p.merchantCustomerId) || '';
+        const zohoId = customer.zohoId ? String(customer.zohoId).trim() : '';
+        if (zohoId && profileMerchantId && String(profileMerchantId).trim() !== zohoId) {
+          await customer.update({ customerProfileId: null, customerPaymentProfileId: null });
+        } else {
+          const profileName = (Array.isArray(p.description) ? p.description[0] : p.description) || null;
+          const extracted = extractPaymentProfiles(p);
+          firstCustomerProfileId = customer.customerProfileId;
+          allPaymentProfiles = extracted.map(pp => ({
+            ...pp,
+            customerProfileId: customer.customerProfileId,
+            profileName: profileName || undefined
+          }));
+        }
+      }
     }
 
-    // Extract payment profiles
-    const paymentProfiles = extractPaymentProfiles(profile);
+    // Show only the last payment profile (not all)
+    if (allPaymentProfiles.length > 1) {
+      allPaymentProfiles = [allPaymentProfiles[allPaymentProfiles.length - 1]];
+    }
 
     // Get the stored payment profile ID if available
     const storedPaymentProfileId = customer.customerPaymentProfileId;
+    const storedCustomerProfileId = customer.customerProfileId;
 
     // Mark default/stored profile
-    const profilesWithDefault = paymentProfiles.map(p => ({
+    const profilesWithDefault = allPaymentProfiles.map(p => ({
       ...p,
-      isStored: p.paymentProfileId === storedPaymentProfileId
+      customerProfileId: p.customerProfileId || firstCustomerProfileId,
+      isStored: p.paymentProfileId === storedPaymentProfileId &&
+        (p.customerProfileId === storedCustomerProfileId || (!p.customerProfileId && !storedCustomerProfileId))
     }));
 
     return sendSuccess(res, {
-      customerProfileId: customerProfileId?.toString() || null,
-      paymentProfiles: profilesWithDefault
+      customerProfileId: firstCustomerProfileId?.toString() || null,
+      paymentProfiles: profilesWithDefault,
+      zohoCards,
+      last_four_digits: zohoLastFour,
+      card_type: zohoCardType,
+      bank_account_last4: zohoBankLast4,
+      message: allPaymentProfiles.length === 0 ? 'Customer does not have a payment profile in Authorize.net' : null
     });
   } catch (err) {
     logError('Get customer payment profiles error', err);

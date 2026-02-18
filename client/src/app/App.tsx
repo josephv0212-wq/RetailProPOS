@@ -640,10 +640,11 @@ function AppContent() {
   };
 
   // Open receipt preview when user selects a stored payment method (before charging)
-  const handleOpenReceiptPreview = (paymentProfileId: string, profileType?: 'card' | 'ach') => {
+  const handleOpenReceiptPreview = (paymentProfileId: string, profileType?: 'card' | 'ach', customerProfileId?: string | null) => {
     setPendingStoredPaymentSelection({
       paymentProfileId,
       profileType: profileType === 'ach' ? 'ach' : 'card',
+      customerProfileId: customerProfileId ?? undefined,
     });
     setIsPaymentMethodSelectorOpen(false);
     setIsInvoicePaymentReceiptPreviewOpen(true);
@@ -1440,8 +1441,8 @@ function AppContent() {
             setIsPaymentMethodSelectorOpen(false);
             setPendingChargeItems([]);
           }}
-          onSelect={(profileId, profileType) => {
-            handleOpenReceiptPreview(profileId, profileType);
+          onSelect={(profileId, profileType, customerProfileId) => {
+            handleOpenReceiptPreview(profileId, profileType, customerProfileId);
             setIsPaymentMethodSelectorOpen(false);
           }}
           customerId={selectedCustomer.id}
@@ -1476,6 +1477,7 @@ function AppContent() {
           onConfirmPay={async (emailReceiptToCustomer) => {
             if (!pendingStoredPaymentSelection) return;
             await handlePaymentMethodSelected(pendingStoredPaymentSelection.paymentProfileId, pendingStoredPaymentSelection.profileType, emailReceiptToCustomer);
+            // handlePaymentMethodSelected reads pendingStoredPaymentSelection.customerProfileId internally
             setPendingStoredPaymentSelection(null);
             setIsInvoicePaymentReceiptPreviewOpen(false);
           }}
