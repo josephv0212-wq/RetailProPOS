@@ -176,23 +176,33 @@ export const refreshCustomerPaymentFromAuthNet = async (customer) => {
     if (!allResult.success || !allResult.profiles || allResult.profiles.length === 0) return false;
 
     const lastProfile = allResult.profiles[allResult.profiles.length - 1];
-    const bankAccountInfo = extractBankAccountInfo(lastProfile.profile);
     const paymentProfiles = extractPaymentProfiles(lastProfile.profile);
 
-    if (paymentProfiles.length === 0 && !bankAccountInfo.hasBankAccount) return false;
+    if (paymentProfiles.length === 0) return false;
 
-    const lastPaymentProfile = paymentProfiles[paymentProfiles.length - 1];
+    // Use last card and last bank (same logic as getCustomerPaymentProfiles)
+    const cards = paymentProfiles.filter(p => p.type === 'card');
+    const banks = paymentProfiles.filter(p => p.type === 'ach');
+    const lastCard = cards.length > 0 ? cards[cards.length - 1] : null;
+    const lastBank = banks.length > 0 ? banks[banks.length - 1] : null;
+
     let last_four_digits = null;
     let cardBrand = null;
+    let bankAccountLast4 = null;
 
-    if (lastPaymentProfile.type === 'card') {
-      const cn = lastPaymentProfile.cardNumber || '';
+    if (lastCard) {
+      const cn = lastCard.cardNumber || '';
       last_four_digits = cn.replace(/\D/g, '').slice(-4) || null;
       cardBrand = 'Card';
     }
-    const bankAccountLast4 = bankAccountInfo.hasBankAccount ? bankAccountInfo.bankAccountLast4 : null;
+    if (lastBank) {
+      const an = lastBank.accountNumber || '';
+      bankAccountLast4 = an.replace(/\D/g, '').slice(-4) || null;
+    }
+
     const customerProfileId = lastProfile.customerProfileId || null;
-    const customerPaymentProfileId = lastPaymentProfile ? lastPaymentProfile.paymentProfileId : null;
+    // Prefer card's payment profile ID; otherwise use bank's
+    const customerPaymentProfileId = (lastCard || lastBank)?.paymentProfileId || null;
 
     await customer.update({
       last_four_digits: last_four_digits || customer.last_four_digits || null,
@@ -537,10 +547,12 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       }
     }
 
-    // Show only the last payment profile (not all)
-    if (allPaymentProfiles.length > 1) {
-      allPaymentProfiles = [allPaymentProfiles[allPaymentProfiles.length - 1]];
-    }
+    // Show at most one card and one bank: last card (if any) + last bank (if any)
+    const cards = allPaymentProfiles.filter(p => p.type === 'card');
+    const banks = allPaymentProfiles.filter(p => p.type === 'ach');
+    const lastCard = cards.length > 0 ? cards[cards.length - 1] : null;
+    const lastBank = banks.length > 0 ? banks[banks.length - 1] : null;
+    allPaymentProfiles = [lastCard, lastBank].filter(Boolean);
 
     // Get the stored payment profile ID if available
     const storedPaymentProfileId = customer.customerPaymentProfileId;
