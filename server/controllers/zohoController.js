@@ -1,6 +1,6 @@
 import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById, organizeZohoSalesOrdersFuelSurcharge as organizeZohoSalesOrdersFuelSurchargeService } from '../services/zohoService.js';
 import { Customer, Item, Sale, InvoicePayment } from '../models/index.js';
-import { refreshCustomerProfileFromZoho } from './customerController.js';
+import { refreshCustomerProfileFromZoho, refreshCustomerPaymentFromAuthNet } from './customerController.js';
 import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
@@ -187,11 +187,21 @@ export const syncCustomersToDatabase = async (options = {}) => {
 export const syncZohoCustomers = async (req, res) => {
   try {
     const result = await syncCustomersToDatabase({ replaceAll: true });
+    // Refresh Auth.net payment info for customers with email
+    const customersWithEmail = await Customer.findAll({ where: { [Op.and]: [{ email: { [Op.ne]: null } }, { email: { [Op.ne]: '' } }] } });
+    let authNetRefreshed = 0;
+    const PROFILE_CONCURRENCY = 5;
+    for (let i = 0; i < customersWithEmail.length; i += PROFILE_CONCURRENCY) {
+      const batch = customersWithEmail.slice(i, i + PROFILE_CONCURRENCY);
+      const results = await Promise.all(batch.map((c) => refreshCustomerPaymentFromAuthNet(c)));
+      authNetRefreshed += results.filter(Boolean).length;
+    }
     res.json({ 
       success: result.success,
       message: result.message,
       data: {
-        stats: result.stats
+        stats: result.stats,
+        authNetPaymentRefreshed: authNetRefreshed
       }
     });
   } catch (err) {
@@ -325,11 +335,20 @@ export const syncAll = async (req, res) => {
       profilesRefreshed += results.filter(Boolean).length;
     }
 
+    // Refresh Auth.net payment info (cards, bank, profile IDs) for customers with email
+    const customersWithEmail = await Customer.findAll({ where: { [Op.and]: [{ email: { [Op.ne]: null } }, { email: { [Op.ne]: '' } }] } });
+    let authNetRefreshed = 0;
+    for (let i = 0; i < customersWithEmail.length; i += PROFILE_CONCURRENCY) {
+      const batch = customersWithEmail.slice(i, i + PROFILE_CONCURRENCY);
+      const results = await Promise.all(batch.map((c) => refreshCustomerPaymentFromAuthNet(c)));
+      authNetRefreshed += results.filter(Boolean).length;
+    }
+
     res.json({
       success: true,
       message: 'Zoho data synced successfully',
       data: {
-        customers: { total: customerResult?.stats?.total || 0, created: customersCreated, updated: customersUpdated, profilesRefreshed },
+        customers: { total: customerResult?.stats?.total || 0, created: customersCreated, updated: customersUpdated, profilesRefreshed, authNetPaymentRefreshed: authNetRefreshed },
         items: { total: zohoItems.length, created: itemsCreated, updated: itemsUpdated }
       }
     });

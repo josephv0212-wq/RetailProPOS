@@ -163,6 +163,51 @@ export const refreshCustomerProfileFromZoho = async (customer) => {
   }
 };
 
+/**
+ * Refresh a single customer's payment info from Authorize.net (card, bank, profile IDs).
+ * Uses email-only search, last matching profile - same logic as getCustomerPaymentProfiles.
+ * @param {import('../models/Customer.js').Customer} customer
+ * @returns {Promise<boolean>} true if updated, false if skipped or failed
+ */
+export const refreshCustomerPaymentFromAuthNet = async (customer) => {
+  if (!customer?.email) return false;
+  try {
+    const allResult = await searchAllCustomerProfilesByEmail(customer.email);
+    if (!allResult.success || !allResult.profiles || allResult.profiles.length === 0) return false;
+
+    const lastProfile = allResult.profiles[allResult.profiles.length - 1];
+    const bankAccountInfo = extractBankAccountInfo(lastProfile.profile);
+    const paymentProfiles = extractPaymentProfiles(lastProfile.profile);
+
+    if (paymentProfiles.length === 0 && !bankAccountInfo.hasBankAccount) return false;
+
+    const lastPaymentProfile = paymentProfiles[paymentProfiles.length - 1];
+    let last_four_digits = null;
+    let cardBrand = null;
+
+    if (lastPaymentProfile.type === 'card') {
+      const cn = lastPaymentProfile.cardNumber || '';
+      last_four_digits = cn.replace(/\D/g, '').slice(-4) || null;
+      cardBrand = 'Card';
+    }
+    const bankAccountLast4 = bankAccountInfo.hasBankAccount ? bankAccountInfo.bankAccountLast4 : null;
+    const customerProfileId = lastProfile.customerProfileId || null;
+    const customerPaymentProfileId = lastPaymentProfile ? lastPaymentProfile.paymentProfileId : null;
+
+    await customer.update({
+      last_four_digits: last_four_digits || customer.last_four_digits || null,
+      cardBrand: cardBrand || customer.cardBrand || null,
+      bankAccountLast4: bankAccountLast4 || customer.bankAccountLast4 || null,
+      customerProfileId: customerProfileId || customer.customerProfileId || null,
+      customerPaymentProfileId: customerPaymentProfileId || customer.customerPaymentProfileId || null
+    });
+    return true;
+  } catch (err) {
+    logWarning(`Could not refresh Auth.net payment for customer ${customer.id} (${customer.contactName}): ${err?.message}`);
+    return false;
+  }
+};
+
 export const getCustomers = async (req, res) => {
   try {
     const { search, locationId, isActive } = req.query;
@@ -349,10 +394,10 @@ export const getCustomerPriceList = async (req, res) => {
       : undefined) ?? null;
 
     const firstCard = cards.length > 0 ? cards[0] : null;
-    const last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
+    const last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? customer.last_four_digits ?? null;
     const card_type = firstCard?.card_type
       ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
-      : null;
+      : (customer.cardBrand || null);
 
     // Best-effort DB update for observability/history; response always uses live Zoho values above.
     try {

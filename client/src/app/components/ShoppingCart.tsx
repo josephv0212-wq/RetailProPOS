@@ -106,7 +106,7 @@ export function ShoppingCart({
             </div>
           )}
           
-          {selectedCustomer && customerCards.length > 0 && (
+          {selectedCustomer && (customerCards.length > 0 || selectedCustomer.last_four_digits || selectedCustomer.cardBrand || selectedCustomer.bankAccountLast4 || selectedCustomer.paymentInfo?.last4 || selectedCustomer.paymentInfo?.cardBrand || selectedCustomer.paymentInfo?.bankAccountLast4) && (
             <div className="flex flex-col gap-1 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
               <div className="flex items-center gap-2">
                 <CircleCheck className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
@@ -117,14 +117,16 @@ export function ShoppingCart({
                   <div key={idx} className="text-xs text-blue-600 dark:text-blue-400">
                     {card.cardBrand && card.last_four_digits ? (
                       <span>{card.cardBrand}: xxxx xxxx xxxx {card.last_four_digits}</span>
-                    ) : selectedCustomer.cardBrand && selectedCustomer.last_four_digits ? (
-                      <span>{selectedCustomer.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits}</span>
+                    ) : card.last4 ? (
+                      <span>Card: xxxx xxxx xxxx {card.last4}</span>
+                    ) : (selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand) && (selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4) ? (
+                      <span>{selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4}</span>
                     ) : null}
                   </div>
                 ))}
-                {customerCards.length === 0 && selectedCustomer.cardBrand && selectedCustomer.last_four_digits && (
+                {customerCards.length === 0 && ((selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand) && (selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4)) && (
                   <div className="text-xs text-blue-600 dark:text-blue-400">
-                    {selectedCustomer.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits}
+                    {selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4}
                   </div>
                 )}
                 {(selectedCustomer.bankAccountLast4 || selectedCustomer.paymentInfo?.bankAccountLast4) && (
