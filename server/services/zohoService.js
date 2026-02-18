@@ -1059,16 +1059,13 @@ const makeZohoBillingRequest = async (endpoint, method = 'GET', data = null, ret
   }
 };
 
-export const getCustomerCards = async (customerId) => {
-  try {
-    // Get full customer details from Zoho Books API
-    const customer = await getCustomerById(customerId);
-    
-    if (!customer) {
-      return [];
-    }
-    
-    const cards = [];
+/**
+ * Extract cards from a Zoho contact object (no API call).
+ * Used when caller already has the contact from getCustomerById.
+ */
+const extractCardsFromContact = (customer) => {
+  if (!customer) return [];
+  const cards = [];
     
     // Extract card information from customer's custom_fields
     if (customer.custom_fields && Array.isArray(customer.custom_fields)) {
@@ -1156,12 +1153,21 @@ export const getCustomerCards = async (customerId) => {
         ...card // Include all other card properties
       }));
       cards.push(...mappedCards);
-    }
-    
-    return cards;
+  }
+  return cards;
+};
+
+/**
+ * Get customer cards from Zoho. If preFetchedContact is provided, extracts from it (no API call).
+ * @param {string} customerId - Zoho contact ID
+ * @param {object} [preFetchedContact] - Optional contact from getCustomerById to avoid duplicate API call
+ */
+export const getCustomerCards = async (customerId, preFetchedContact = null) => {
+  try {
+    const customer = preFetchedContact ?? await getCustomerById(customerId);
+    return extractCardsFromContact(customer);
   } catch (error) {
     console.error(`❌ Failed to get customer cards for ${customerId}:`, error.response?.data || error.message);
-    // Return empty array if customer has no cards or API fails
     return [];
   }
 };

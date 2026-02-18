@@ -187,7 +187,8 @@ export const syncCustomersToDatabase = async (options = {}) => {
 export const syncZohoCustomers = async (req, res) => {
   try {
     const result = await syncCustomersToDatabase({ replaceAll: true });
-    const PROFILE_CONCURRENCY = 5;
+    const PROFILE_CONCURRENCY = 3;
+    const ZOHO_BATCH_DELAY_MS = 2500;
     // Refresh Zoho profile (cards, pricebook, tax) for all customers with Zoho ID
     const customersWithZoho = await Customer.findAll({ where: { zohoId: { [Op.ne]: null } } });
     let profilesRefreshed = 0;
@@ -195,6 +196,9 @@ export const syncZohoCustomers = async (req, res) => {
       const batch = customersWithZoho.slice(i, i + PROFILE_CONCURRENCY);
       const results = await Promise.all(batch.map((c) => refreshCustomerProfileFromZoho(c)));
       profilesRefreshed += results.filter(Boolean).length;
+      if (i + PROFILE_CONCURRENCY < customersWithZoho.length) {
+        await new Promise((r) => setTimeout(r, ZOHO_BATCH_DELAY_MS));
+      }
     }
     // Refresh Auth.net payment info for all customers (skips those without email)
     const allCustomers = await Customer.findAll();
@@ -336,12 +340,16 @@ export const syncAll = async (req, res) => {
 
     // Refresh payment/profile info for all customers (cards, bank, pricebook, tax from Zoho)
     const customersWithZoho = await Customer.findAll({ where: { zohoId: { [Op.ne]: null } } });
-    const PROFILE_CONCURRENCY = 5;
+    const PROFILE_CONCURRENCY = 3;
+    const ZOHO_BATCH_DELAY_MS = 2500;
     let profilesRefreshed = 0;
     for (let i = 0; i < customersWithZoho.length; i += PROFILE_CONCURRENCY) {
       const batch = customersWithZoho.slice(i, i + PROFILE_CONCURRENCY);
       const results = await Promise.all(batch.map((c) => refreshCustomerProfileFromZoho(c)));
       profilesRefreshed += results.filter(Boolean).length;
+      if (i + PROFILE_CONCURRENCY < customersWithZoho.length) {
+        await new Promise((r) => setTimeout(r, ZOHO_BATCH_DELAY_MS));
+      }
     }
 
     // Refresh Auth.net payment info (cards, bank, profile IDs) for all customers (skips those without email)

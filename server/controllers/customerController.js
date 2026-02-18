@@ -107,15 +107,9 @@ const isDefaultCustomer = (contactName) => {
 export const refreshCustomerProfileFromZoho = async (customer) => {
   if (!customer?.zohoId) return false;
   try {
-    const [zohoContactResult, zohoCardsResult] = await Promise.allSettled([
-      getZohoCustomerById(customer.zohoId),
-      getCustomerCards(customer.zohoId)
-    ]);
-    const zohoContact = zohoContactResult.status === 'fulfilled' ? zohoContactResult.value : null;
-    const cards = zohoCardsResult.status === 'fulfilled' && Array.isArray(zohoCardsResult.value)
-      ? zohoCardsResult.value
-      : [];
+    const zohoContact = await getZohoCustomerById(customer.zohoId).catch(() => null);
     if (!zohoContact) return false;
+    const cards = await getCustomerCards(customer.zohoId, zohoContact);
 
     const pricebook_name = zohoContact?.pricebook_name ?? zohoContact?.price_list_name ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
       ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('pricebook') || (f.label || '').toLowerCase().includes('price_list'))?.value)
@@ -341,28 +335,21 @@ export const getCustomerPriceList = async (req, res) => {
       return sendNotFound(res, 'Customer');
     }
 
-    // Fetch bank account info from Auth.net (email-only search, use last matching profile - same as payment profiles)
-    try {
-      if (customer.email) {
-        const allResult = await searchAllCustomerProfilesByEmail(customer.email);
-        if (allResult.success && allResult.profiles && allResult.profiles.length > 0) {
-          // Use last matching profile (same logic as getCustomerPaymentProfiles)
-          const lastProfile = allResult.profiles[allResult.profiles.length - 1];
-          const bankAccountInfo = extractBankAccountInfo(lastProfile.profile);
-          if (bankAccountInfo.hasBankAccount && bankAccountInfo.bankAccountLast4) {
-            try {
-              await customer.update({
-                bankAccountLast4: bankAccountInfo.bankAccountLast4
-              });
-              console.log(`💳 Bank Account: XXXX${bankAccountInfo.bankAccountLast4}`);
-            } catch (updateError) {
-              // Silently fail - don't log errors
+    // Defer Auth.net bank lookup to background - it was blocking 25+ seconds and is not needed for price list.
+    // Bank info is updated during sync and when opening payment profiles.
+    if (customer.email) {
+      const cust = customer;
+      searchAllCustomerProfilesByEmail(cust.email)
+        .then((allResult) => {
+          if (allResult.success && allResult.profiles && allResult.profiles.length > 0) {
+            const lastProfile = allResult.profiles[allResult.profiles.length - 1];
+            const bankAccountInfo = extractBankAccountInfo(lastProfile.profile);
+            if (bankAccountInfo.hasBankAccount && bankAccountInfo.bankAccountLast4) {
+              return cust.update({ bankAccountLast4: bankAccountInfo.bankAccountLast4 });
             }
           }
-        }
-      }
-    } catch (authNetError) {
-      // Don't fail the request if Authorize.Net lookup fails - silently continue
+        })
+        .catch(() => {});
     }
 
     // If customer has no Zoho ID, return with existing last_four_digits
@@ -379,53 +366,68 @@ export const getCustomerPriceList = async (req, res) => {
       });
     }
 
-    // Always fetch Zoho profile details live (do not use DB cache for Zoho data)
-    const [zohoContactResult, zohoCardsResult] = await Promise.allSettled([
-      getZohoCustomerById(customer.zohoId),
-      getCustomerCards(customer.zohoId)
-    ]);
+    const PRICE_LIST_CACHE_MS = 5 * 60 * 1000;
+    const useCached = customer.zohoProfileSyncedAt &&
+      (Date.now() - new Date(customer.zohoProfileSyncedAt).getTime()) < PRICE_LIST_CACHE_MS;
 
-    if (zohoContactResult.status !== 'fulfilled' || !zohoContactResult.value) {
-      const err = zohoContactResult.status === 'rejected' ? zohoContactResult.reason : null;
-      logError('Get customer price list: failed to fetch Zoho customer', err);
-      return sendError(res, 'Failed to fetch customer profile from Zoho', 502, err);
+    let zohoContact = null;
+    let cards = [];
+    if (useCached && customer.zohoCards) {
+      try {
+        cards = JSON.parse(customer.zohoCards) || [];
+      } catch (_) {
+        cards = [];
+      }
     }
-
-    const zohoContact = zohoContactResult.value;
-    const cards = zohoCardsResult.status === 'fulfilled' && Array.isArray(zohoCardsResult.value)
-      ? zohoCardsResult.value
-      : [];
-
-    const pricebook_name = zohoContact?.pricebook_name ?? zohoContact?.price_list_name ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
-      ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('pricebook') || (f.label || '').toLowerCase().includes('price_list'))?.value)
-      : undefined) ?? null;
-    const tax_preference = zohoContact?.tax_preference ?? zohoContact?.tax_exemption_code ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
-      ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('tax'))?.value)
-      : undefined) ?? null;
-
-    const firstCard = cards.length > 0 ? cards[0] : null;
-    const last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? customer.last_four_digits ?? null;
-    const card_type = firstCard?.card_type
-      ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
-      : (customer.cardBrand || null);
-
-    // Best-effort DB update for observability/history; response always uses live Zoho values above.
-    try {
-      await customer.update({
-        pricebook_name,
-        tax_preference,
-        zohoCards: JSON.stringify(cards),
-        zohoProfileSyncedAt: new Date(),
-        last_four_digits: last_four_digits || customer.last_four_digits || null,
-        cardBrand: card_type || customer.cardBrand || null
+    if (!useCached) {
+      zohoContact = await getZohoCustomerById(customer.zohoId).catch((err) => {
+        logError('Get customer price list: failed to fetch Zoho customer', err);
+        return null;
       });
-    } catch (persistErr) {
-      logWarning('Get customer price list: could not persist Zoho profile snapshot');
+      if (!zohoContact) {
+        return sendError(res, 'Failed to fetch customer profile from Zoho', 502);
+      }
+      cards = await getCustomerCards(customer.zohoId, zohoContact);
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customerController:getPriceList',message:'from Zoho live',data:{customerId:id,pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
+    let pricebook_name;
+    let tax_preference;
+    let last_four_digits;
+    let card_type;
+    if (useCached) {
+      pricebook_name = customer.pricebook_name ?? null;
+      tax_preference = customer.tax_preference ?? null;
+      last_four_digits = customer.last_four_digits ?? null;
+      card_type = customer.cardBrand ?? null;
+    } else {
+      pricebook_name = zohoContact?.pricebook_name ?? zohoContact?.price_list_name ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
+        ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('pricebook') || (f.label || '').toLowerCase().includes('price_list'))?.value)
+        : undefined) ?? null;
+      tax_preference = zohoContact?.tax_preference ?? zohoContact?.tax_exemption_code ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
+        ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('tax'))?.value)
+        : undefined) ?? null;
+      const firstCard = cards.length > 0 ? cards[0] : null;
+      last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? customer.last_four_digits ?? null;
+      card_type = firstCard?.card_type
+        ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
+        : (firstCard?.brand ? (String(firstCard.brand).charAt(0).toUpperCase() + String(firstCard.brand).slice(1).toLowerCase()) : (customer.cardBrand || null));
+    }
+
+    // Best-effort DB update for observability/history (only when we fetched from Zoho)
+    if (!useCached) {
+      try {
+        await customer.update({
+          pricebook_name: pricebook_name || customer.pricebook_name || null,
+          tax_preference: tax_preference || customer.tax_preference || null,
+          zohoCards: JSON.stringify(cards),
+          zohoProfileSyncedAt: new Date(),
+          last_four_digits: last_four_digits || customer.last_four_digits || null,
+          cardBrand: card_type || customer.cardBrand || null
+        });
+      } catch (persistErr) {
+        logWarning('Get customer price list: could not persist Zoho profile snapshot');
+      }
+    }
 
     return sendSuccess(res, {
       pricebook_name: pricebook_name || null,
@@ -462,31 +464,41 @@ export const getCustomerPaymentProfiles = async (req, res) => {
     let zohoLastFour = null;
     let zohoCardType = null;
     let zohoBankLast4 = customer.bankAccountLast4 || null;
+    const PAYMENT_PROFILES_CACHE_MS = 5 * 60 * 1000;
+    const useZohoCache = customer.zohoId && customer.zohoProfileSyncedAt &&
+      (Date.now() - new Date(customer.zohoProfileSyncedAt).getTime()) < PAYMENT_PROFILES_CACHE_MS;
     if (customer.zohoId) {
       try {
-        const [zohoContactResult, zohoCardsResult] = await Promise.allSettled([
-          getZohoCustomerById(customer.zohoId),
-          getCustomerCards(customer.zohoId)
-        ]);
-        const zohoContact = zohoContactResult.status === 'fulfilled' ? zohoContactResult.value : null;
-        zohoCards = zohoCardsResult.status === 'fulfilled' && Array.isArray(zohoCardsResult.value) ? zohoCardsResult.value : [];
-        const firstCard = zohoCards.length > 0 ? zohoCards[0] : null;
-        zohoLastFour = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
-        zohoCardType = firstCard?.card_type
-          ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
-          : (firstCard?.brand ? (String(firstCard.brand).charAt(0).toUpperCase() + String(firstCard.brand).slice(1).toLowerCase()) : null);
-        if (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)) {
-          const bankField = zohoContact.custom_fields.find(f => {
-            const label = (f.label || '').toLowerCase();
-            return label.includes('bank_account') || label.includes('bank_last') || label.includes('ach_last') || label.includes('bank_last4');
-          });
-          if (bankField?.value) {
-            zohoBankLast4 = String(bankField.value).replace(/\D/g, '').slice(-4) || bankField.value;
+        if (useZohoCache && customer.zohoCards) {
+          try {
+            zohoCards = JSON.parse(customer.zohoCards) || [];
+          } catch (_) {
+            zohoCards = [];
           }
-        }
-        if (!zohoBankLast4 && zohoContact?.payment_methods && Array.isArray(zohoContact.payment_methods)) {
-          const achMethod = zohoContact.payment_methods.find(pm => (pm.type || '').toLowerCase() === 'ach' || (pm.payment_type || '').toLowerCase() === 'ach');
-          zohoBankLast4 = achMethod?.last_four_digits || achMethod?.last4 || achMethod?.account_last4 || zohoBankLast4;
+          zohoLastFour = customer.last_four_digits ?? (zohoCards[0]?.last_four_digits ?? zohoCards[0]?.last4) ?? null;
+          zohoCardType = customer.cardBrand ?? (zohoCards[0]?.card_type ?? zohoCards[0]?.brand) ?? null;
+          zohoBankLast4 = customer.bankAccountLast4 ?? zohoBankLast4;
+        } else {
+          const zohoContact = await getZohoCustomerById(customer.zohoId).catch(() => null);
+          zohoCards = zohoContact ? await getCustomerCards(customer.zohoId, zohoContact) : [];
+          const firstCard = zohoCards.length > 0 ? zohoCards[0] : null;
+          zohoLastFour = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
+          zohoCardType = firstCard?.card_type
+            ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
+            : (firstCard?.brand ? (String(firstCard.brand).charAt(0).toUpperCase() + String(firstCard.brand).slice(1).toLowerCase()) : null);
+          if (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)) {
+            const bankField = zohoContact.custom_fields.find(f => {
+              const label = (f.label || '').toLowerCase();
+              return label.includes('bank_account') || label.includes('bank_last') || label.includes('ach_last') || label.includes('bank_last4');
+            });
+            if (bankField?.value) {
+              zohoBankLast4 = String(bankField.value).replace(/\D/g, '').slice(-4) || bankField.value;
+            }
+          }
+          if (!zohoBankLast4 && zohoContact?.payment_methods && Array.isArray(zohoContact.payment_methods)) {
+            const achMethod = zohoContact.payment_methods.find(pm => (pm.type || '').toLowerCase() === 'ach' || (pm.payment_type || '').toLowerCase() === 'ach');
+            zohoBankLast4 = achMethod?.last_four_digits || achMethod?.last4 || achMethod?.account_last4 || zohoBankLast4;
+          }
         }
       } catch (_) {
         // Zoho fetch failed - continue with Auth.net only
