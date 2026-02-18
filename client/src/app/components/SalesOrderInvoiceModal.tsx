@@ -143,9 +143,40 @@ export function SalesOrderInvoiceModal({
               {/* Invoices Section */}
               {invoices.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Invoices ({invoices.length})
-                  </h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      Invoices ({invoices.length})
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allInvoiceIds = invoices.map(inv => inv.invoice_id);
+                        const allSelected = allInvoiceIds.every(id => selectedItems.has(id));
+                        if (allSelected) {
+                          setSelectedItems(prev => {
+                            const next = new Set(prev);
+                            allInvoiceIds.forEach(id => next.delete(id));
+                            return next;
+                          });
+                        } else {
+                          setSelectedItems(prev => new Set([...prev, ...allInvoiceIds]));
+                        }
+                      }}
+                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5"
+                    >
+                      {invoices.every(inv => selectedItems.has(inv.invoice_id)) ? (
+                        <>
+                          <Check className="w-4 h-4" />
+                          Uncheck all
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-4 h-4 border-2 border-gray-400 dark:border-gray-500 rounded" />
+                          Check all invoices
+                        </>
+                      )}
+                    </button>
+                  </div>
                   {invoices.map((inv) => {
                     const isSelected = selectedItems.has(inv.invoice_id);
                     return (
