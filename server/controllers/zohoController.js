@@ -187,12 +187,20 @@ export const syncCustomersToDatabase = async (options = {}) => {
 export const syncZohoCustomers = async (req, res) => {
   try {
     const result = await syncCustomersToDatabase({ replaceAll: true });
-    // Refresh Auth.net payment info for customers with email
-    const customersWithEmail = await Customer.findAll({ where: { [Op.and]: [{ email: { [Op.ne]: null } }, { email: { [Op.ne]: '' } }] } });
-    let authNetRefreshed = 0;
     const PROFILE_CONCURRENCY = 5;
-    for (let i = 0; i < customersWithEmail.length; i += PROFILE_CONCURRENCY) {
-      const batch = customersWithEmail.slice(i, i + PROFILE_CONCURRENCY);
+    // Refresh Zoho profile (cards, pricebook, tax) for all customers with Zoho ID
+    const customersWithZoho = await Customer.findAll({ where: { zohoId: { [Op.ne]: null } } });
+    let profilesRefreshed = 0;
+    for (let i = 0; i < customersWithZoho.length; i += PROFILE_CONCURRENCY) {
+      const batch = customersWithZoho.slice(i, i + PROFILE_CONCURRENCY);
+      const results = await Promise.all(batch.map((c) => refreshCustomerProfileFromZoho(c)));
+      profilesRefreshed += results.filter(Boolean).length;
+    }
+    // Refresh Auth.net payment info for all customers (skips those without email)
+    const allCustomers = await Customer.findAll();
+    let authNetRefreshed = 0;
+    for (let i = 0; i < allCustomers.length; i += PROFILE_CONCURRENCY) {
+      const batch = allCustomers.slice(i, i + PROFILE_CONCURRENCY);
       const results = await Promise.all(batch.map((c) => refreshCustomerPaymentFromAuthNet(c)));
       authNetRefreshed += results.filter(Boolean).length;
     }
@@ -201,6 +209,7 @@ export const syncZohoCustomers = async (req, res) => {
       message: result.message,
       data: {
         stats: result.stats,
+        profilesRefreshed,
         authNetPaymentRefreshed: authNetRefreshed
       }
     });
@@ -335,11 +344,11 @@ export const syncAll = async (req, res) => {
       profilesRefreshed += results.filter(Boolean).length;
     }
 
-    // Refresh Auth.net payment info (cards, bank, profile IDs) for customers with email
-    const customersWithEmail = await Customer.findAll({ where: { [Op.and]: [{ email: { [Op.ne]: null } }, { email: { [Op.ne]: '' } }] } });
+    // Refresh Auth.net payment info (cards, bank, profile IDs) for all customers (skips those without email)
+    const allCustomers = await Customer.findAll();
     let authNetRefreshed = 0;
-    for (let i = 0; i < customersWithEmail.length; i += PROFILE_CONCURRENCY) {
-      const batch = customersWithEmail.slice(i, i + PROFILE_CONCURRENCY);
+    for (let i = 0; i < allCustomers.length; i += PROFILE_CONCURRENCY) {
+      const batch = allCustomers.slice(i, i + PROFILE_CONCURRENCY);
       const results = await Promise.all(batch.map((c) => refreshCustomerPaymentFromAuthNet(c)));
       authNetRefreshed += results.filter(Boolean).length;
     }
