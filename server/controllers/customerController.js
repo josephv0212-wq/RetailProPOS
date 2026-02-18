@@ -361,26 +361,7 @@ export const getCustomerPriceList = async (req, res) => {
     const last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
     const card_type = firstCard?.card_type
       ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
-      : (firstCard?.brand ? (String(firstCard.brand).charAt(0).toUpperCase() + String(firstCard.brand).slice(1).toLowerCase()) : null);
-
-    // Extract bank_account_last4 from Zoho (custom_fields or payment_methods)
-    let bank_account_last4 = customer.bankAccountLast4 || null;
-    if (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)) {
-      const bankField = zohoContact.custom_fields.find(f => {
-        const label = (f.label || '').toLowerCase();
-        return label.includes('bank_account') || label.includes('bank_last') || label.includes('ach_last') || label.includes('bank_last4');
-      });
-      if (bankField?.value) {
-        bank_account_last4 = String(bankField.value).replace(/\D/g, '').slice(-4) || bankField.value;
-      }
-    }
-    // Also check payment_methods for ACH/bank (Zoho may return type: 'ach' with account last4)
-    if (!bank_account_last4 && zohoContact?.payment_methods && Array.isArray(zohoContact.payment_methods)) {
-      const achMethod = zohoContact.payment_methods.find(pm => (pm.type || '').toLowerCase() === 'ach' || (pm.payment_type || '').toLowerCase() === 'ach');
-      if (achMethod?.last_four_digits) bank_account_last4 = achMethod.last_four_digits;
-      else if (achMethod?.last4) bank_account_last4 = achMethod.last4;
-      else if (achMethod?.account_last4) bank_account_last4 = achMethod.account_last4;
-    }
+      : null;
 
     // Best-effort DB update for observability/history; response always uses live Zoho values above.
     try {
@@ -390,12 +371,15 @@ export const getCustomerPriceList = async (req, res) => {
         zohoCards: JSON.stringify(cards),
         zohoProfileSyncedAt: new Date(),
         last_four_digits: last_four_digits || customer.last_four_digits || null,
-        cardBrand: card_type || customer.cardBrand || null,
-        bankAccountLast4: bank_account_last4 || customer.bankAccountLast4 || null
+        cardBrand: card_type || customer.cardBrand || null
       });
     } catch (persistErr) {
       logWarning('Get customer price list: could not persist Zoho profile snapshot');
     }
+
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customerController:getPriceList',message:'from Zoho live',data:{customerId:id,pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
 
     return sendSuccess(res, {
       pricebook_name: pricebook_name || null,
@@ -405,7 +389,7 @@ export const getCustomerPriceList = async (req, res) => {
       card_type: card_type || null,
       has_card_info: !!last_four_digits || cards.length > 0,
       card_info_checked: true,
-      bank_account_last4: bank_account_last4 || null
+      bank_account_last4: customer.bankAccountLast4 || null
     });
   } catch (err) {
     logError('Get customer price list error', err);

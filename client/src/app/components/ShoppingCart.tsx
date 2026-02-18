@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Customer, CartItem } from '../types';
 import { CustomerSelector } from './CustomerSelector';
-import { ShoppingCart as ShoppingCartIcon, CircleCheck, TriangleAlert, Info, Trash2, ArrowLeft, RefreshCw } from 'lucide-react';
+import { ShoppingCart as ShoppingCartIcon, CircleCheck, TriangleAlert, Info, Trash2, ArrowLeft } from 'lucide-react';
 
 export const isDryIceItem = (itemName: string): boolean => {
   return itemName.toLowerCase().includes('dry ice');
@@ -13,7 +13,6 @@ interface ShoppingCartProps {
   customerTaxPreference?: 'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE' | null;
   customerCards?: any[];
   onSelectCustomer: (customer: Customer | null) => void;
-  onRefreshCustomer?: () => void;
   cartItems: CartItem[];
   onUpdateQuantity: (productId: string, quantity: number) => void;
   onUpdateUM?: (productId: string, um: string) => void;
@@ -30,7 +29,6 @@ export function ShoppingCart({
   customerTaxPreference,
   customerCards = [],
   onSelectCustomer,
-  onRefreshCustomer,
   cartItems,
   onUpdateQuantity,
   onUpdateUM,
@@ -108,21 +106,11 @@ export function ShoppingCart({
             </div>
           )}
           
-          {selectedCustomer && (customerCards.length > 0 || selectedCustomer.cardBrand || selectedCustomer.last_four_digits || selectedCustomer.bankAccountLast4 || selectedCustomer.paymentInfo?.bankAccountLast4) && (
+          {selectedCustomer && customerCards.length > 0 && (
             <div className="flex flex-col gap-1 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
               <div className="flex items-center gap-2">
                 <CircleCheck className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
                 <span className="text-xs md:text-sm font-medium text-blue-700 dark:text-blue-300">Saved Payment Methods</span>
-                {onRefreshCustomer && selectedCustomer.zohoId && (
-                  <button
-                    type="button"
-                    onClick={onRefreshCustomer}
-                    className="ml-auto p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-800/40 text-blue-600 dark:text-blue-400"
-                    title="Refresh card/ACH info from Zoho"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                )}
               </div>
               <div className="ml-6 space-y-1">
                 {customerCards.map((card, idx) => (

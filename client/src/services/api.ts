@@ -321,7 +321,7 @@ export const customersAPI = {
       has_card_info: boolean;
       card_info_checked: boolean;
       bank_account_last4: string | null;
-    }>(`/customers/${id}/price-list`, {}, true);
+    }>(`/customers/${id}/price-list`);
   },
 
   getPaymentProfiles: async (id: number) => {
