@@ -286,9 +286,6 @@ function AppContent() {
 
   // Handle customer selection with pricebook integration
   const handleSelectCustomer = async (customer: Customer | null) => {
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:handleSelectCustomer entry',message:'customer selected',data:{customerId:customer?.id,customerName:customer?.contactName,zohoId:!!customer?.zohoId},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
     // Check if vendor contact
     if (customer && isVendorContact(customer.contactType)) {
       showToast('Only Zoho customer contacts can be selected for POS checkouts.', 'warning', 4000);
@@ -316,10 +313,6 @@ function AppContent() {
         setLoadingMessage('Checking orders & invoices…');
         const invoiceResponse = await zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid').catch(() => ({ success: false, data: { invoices: [] } }));
         const invoiceList = invoiceResponse.success && invoiceResponse.data?.invoices ? invoiceResponse.data.invoices : [];
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:invoices fetched',message:'invoice payment flow',data:{invoicesCount:invoiceList.length,customerZohoId:customer.zohoId},timestamp:Date.now(),hypothesisId:'INV1'})}).catch(()=>{});
-        // #endregion
-
         setOpenSalesOrders([]);
         setInvoices(invoiceList);
 
@@ -343,9 +336,6 @@ function AppContent() {
       setInvoices([]);
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before continueCustomerSelection',message:'calling continueCustomerSelection',data:{},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
     // Continue with customer selection (this will be called after SO/Invoice check or if none found)
     await continueCustomerSelection(customer);
   };
@@ -821,24 +811,13 @@ function AppContent() {
   // Continue customer selection after SO/Invoice handling
   const continueCustomerSelection = async (customer: Customer | null) => {
     if (!customer) return;
-    // #region agent log
-    const t0Continue = Date.now();
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:continueCustomerSelection entry',message:'start',data:{t0:t0Continue},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
     setLoadingMessage('Loading price list…');
     try {
       // Use items already in DB (synced via Nav "Sync Zoho" or background). Do not sync on every customer select to avoid 15+ s latency.
       // Fetch price list first only (no parallel loadProducts) so server isn't handling two heavy requests; then get pricebook or loadProducts.
       if (customer.id) {
         try {
-          // #region agent log
-          const t0PriceList = Date.now();
-          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before getPriceList',message:'before getPriceList',data:{t0:t0PriceList},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-          // #endregion
           const priceListRes = await customersAPI.getPriceList(customer.id);
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after getPriceList',message:'after getPriceList',data:{durationMs:Date.now()-t0PriceList,pricebookName:priceListRes?.data?.pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-        // #endregion
         const pricebookName = priceListRes.data?.pricebook_name;
         const taxPreference = priceListRes.data?.tax_preference;
         const cards = priceListRes.data?.cards || [];
@@ -847,7 +826,7 @@ function AppContent() {
         const has_card_info = priceListRes.data?.has_card_info;
         const card_info_checked = priceListRes.data?.card_info_checked;
         const bank_account_last4 = priceListRes.data?.bank_account_last4;
-        
+
         // Update customer object with card info, bank account info, and tax exemption from Zoho
         const isTaxExemptFromZoho = taxPreference === 'SALES TAX EXCEPTION CERTIFICATE';
         const updatedCustomer: Customer = {
@@ -875,14 +854,7 @@ function AppContent() {
           setLoadingMessage('Loading items…');
           // Fetch items from the pricebook (includes both pricebook items and regular items)
           try {
-            // #region agent log
-            const t0Pricebook = Date.now();
-            fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before getFromPricebook',message:'before getFromPricebook',data:{pricebookName,t0:t0Pricebook},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-            // #endregion
             const pricebookItemsRes = await itemsAPI.getFromPricebook(pricebookName);
-            // #region agent log
-            fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after getFromPricebook',message:'after getFromPricebook',data:{durationMs:Date.now()-t0Pricebook,itemsCount:pricebookItemsRes?.data?.items?.length??0},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-            // #endregion
             const allItems = pricebookItemsRes.data?.items || [];
             const pricebookItemsCount = pricebookItemsRes.data?.pricebookItemsCount || 0;
             
@@ -906,18 +878,12 @@ function AppContent() {
               // Update items with merged list (pricebook items have custom prices, others have regular prices)
               setProducts(transformedProducts);
               if (pricebookItemsCount > 0) {
-                // #region agent log
-                fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:loaded items toast',message:'showToast loaded items',data:{totalDurationMs:Date.now()-t0Continue},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-                // #endregion
                 showToast(
                   `Loaded ${allItems.length} items (${pricebookItemsCount} with pricebook prices, ${allItems.length - pricebookItemsCount} with regular prices)`,
                   'success',
                   4000
                 );
               } else {
-                // #region agent log
-                fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:loaded items toast',message:'showToast loaded items',data:{totalDurationMs:Date.now()-t0Continue},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-                // #endregion
                 showToast(`Loaded ${allItems.length} items with regular prices`, 'info', 3000);
               }
             } else {
@@ -940,9 +906,6 @@ function AppContent() {
           }
           setLoadingMessage('Loading products…');
           await loadProducts();
-          // #region agent log
-          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:no pricebook loaded',message:'path no pricebook',data:{totalDurationMs:Date.now()-t0Continue},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-          // #endregion
         }
       } catch (error: any) {
         const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
@@ -1362,6 +1325,7 @@ function AppContent() {
         onNavigateToReports={navigationHandlers.toReports}
         onNavigateToSettings={navigationHandlers.toSettings}
         onNavigateToAdmin={navigationHandlers.toAdmin}
+        onSyncComplete={loadCustomers}
         userRole={user?.role || 'cashier'}
         userLocation={user?.locationName || 'Store'}
       />

@@ -14,6 +14,7 @@ interface TopNavigationProps {
   onNavigateToReports?: () => void;
   onNavigateToSettings?: () => void;
   onNavigateToAdmin?: () => void;
+  onSyncComplete?: () => void;
   userRole?: 'admin' | 'cashier';
   userLocation?: string;
 }
@@ -78,6 +79,7 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
       const response = await zohoAPI.syncAll();
       if (response.success) {
         showToast('Zoho sync started successfully.', 'success', 4000);
+        onSyncComplete?.();
       } else {
         showToast(response.message || 'Zoho sync failed.', 'error', 5000);
       }

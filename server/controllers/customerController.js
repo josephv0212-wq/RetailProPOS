@@ -98,6 +98,71 @@ const isDefaultCustomer = (contactName) => {
   );
 };
 
+/**
+ * Refresh a single customer's payment/profile info from Zoho (cards, bank, pricebook, tax).
+ * Used by getCustomerPriceList and by syncAll for bulk refresh.
+ * @param {import('../models/Customer.js').Customer} customer
+ * @returns {Promise<boolean>} true if updated, false if skipped or failed
+ */
+export const refreshCustomerProfileFromZoho = async (customer) => {
+  if (!customer?.zohoId) return false;
+  try {
+    const [zohoContactResult, zohoCardsResult] = await Promise.allSettled([
+      getZohoCustomerById(customer.zohoId),
+      getCustomerCards(customer.zohoId)
+    ]);
+    const zohoContact = zohoContactResult.status === 'fulfilled' ? zohoContactResult.value : null;
+    const cards = zohoCardsResult.status === 'fulfilled' && Array.isArray(zohoCardsResult.value)
+      ? zohoCardsResult.value
+      : [];
+    if (!zohoContact) return false;
+
+    const pricebook_name = zohoContact?.pricebook_name ?? zohoContact?.price_list_name ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
+      ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('pricebook') || (f.label || '').toLowerCase().includes('price_list'))?.value)
+      : undefined) ?? null;
+    const tax_preference = zohoContact?.tax_preference ?? zohoContact?.tax_exemption_code ?? (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)
+      ? (zohoContact.custom_fields.find(f => (f.label || '').toLowerCase().includes('tax'))?.value)
+      : undefined) ?? null;
+
+    const firstCard = cards.length > 0 ? cards[0] : null;
+    const last_four_digits = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
+    const card_type = firstCard?.card_type
+      ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase())
+      : (firstCard?.brand ? (String(firstCard.brand).charAt(0).toUpperCase() + String(firstCard.brand).slice(1).toLowerCase()) : null);
+
+    let bank_account_last4 = customer.bankAccountLast4 || null;
+    if (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)) {
+      const bankField = zohoContact.custom_fields.find(f => {
+        const label = (f.label || '').toLowerCase();
+        return label.includes('bank_account') || label.includes('bank_last') || label.includes('ach_last') || label.includes('bank_last4');
+      });
+      if (bankField?.value) {
+        bank_account_last4 = String(bankField.value).replace(/\D/g, '').slice(-4) || bankField.value;
+      }
+    }
+    if (!bank_account_last4 && zohoContact?.payment_methods && Array.isArray(zohoContact.payment_methods)) {
+      const achMethod = zohoContact.payment_methods.find(pm => (pm.type || '').toLowerCase() === 'ach' || (pm.payment_type || '').toLowerCase() === 'ach');
+      if (achMethod?.last_four_digits) bank_account_last4 = achMethod.last_four_digits;
+      else if (achMethod?.last4) bank_account_last4 = achMethod.last4;
+      else if (achMethod?.account_last4) bank_account_last4 = achMethod.account_last4;
+    }
+
+    await customer.update({
+      pricebook_name,
+      tax_preference,
+      zohoCards: JSON.stringify(cards),
+      zohoProfileSyncedAt: new Date(),
+      last_four_digits: last_four_digits || customer.last_four_digits || null,
+      cardBrand: card_type || customer.cardBrand || null,
+      bankAccountLast4: bank_account_last4 || customer.bankAccountLast4 || null
+    });
+    return true;
+  } catch (err) {
+    logWarning(`Could not refresh profile for customer ${customer.id} (${customer.contactName}): ${err?.message}`);
+    return false;
+  }
+};
+
 export const getCustomers = async (req, res) => {
   try {
     const { search, locationId, isActive } = req.query;

@@ -91,6 +91,7 @@ async function apiRequest<T = any>(
     const response = await fetch(url, {
       ...options,
       headers,
+      ...(noCache && { cache: 'no-store' as RequestCache }), // Bypass browser HTTP cache for fresh data
     });
 
     // Handle 401 Unauthorized

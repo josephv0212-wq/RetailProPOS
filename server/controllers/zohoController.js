@@ -1,5 +1,6 @@
 import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById, organizeZohoSalesOrdersFuelSurcharge as organizeZohoSalesOrdersFuelSurchargeService } from '../services/zohoService.js';
 import { Customer, Item, Sale, InvoicePayment } from '../models/index.js';
+import { refreshCustomerProfileFromZoho } from './customerController.js';
 import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
@@ -314,11 +315,21 @@ export const syncAll = async (req, res) => {
       else itemsUpdated++;
     }
 
+    // Refresh payment/profile info for all customers (cards, bank, pricebook, tax from Zoho)
+    const customersWithZoho = await Customer.findAll({ where: { zohoId: { [Op.ne]: null } } });
+    const PROFILE_CONCURRENCY = 5;
+    let profilesRefreshed = 0;
+    for (let i = 0; i < customersWithZoho.length; i += PROFILE_CONCURRENCY) {
+      const batch = customersWithZoho.slice(i, i + PROFILE_CONCURRENCY);
+      const results = await Promise.all(batch.map((c) => refreshCustomerProfileFromZoho(c)));
+      profilesRefreshed += results.filter(Boolean).length;
+    }
+
     res.json({
       success: true,
       message: 'Zoho data synced successfully',
       data: {
-        customers: { total: customerResult?.stats?.total || 0, created: customersCreated, updated: customersUpdated },
+        customers: { total: customerResult?.stats?.total || 0, created: customersCreated, updated: customersUpdated, profilesRefreshed },
         items: { total: zohoItems.length, created: itemsCreated, updated: itemsUpdated }
       }
     });
