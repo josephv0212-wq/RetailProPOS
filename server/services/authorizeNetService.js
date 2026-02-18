@@ -510,12 +510,13 @@ export const findCustomerProfileByEmail = async (email, merchantCustomerId = nul
 /**
  * Search for customer profile by iterating through all profile IDs
  * This is only recommended for small datasets
- * Prioritizes name matching over email matching
- * @param {string} name - Customer name to search for (primary)
- * @param {string} email - Customer email to search for (fallback)
+ * Prioritizes merchantCustomerId (zohoId) match to avoid returning wrong customer when email/name is shared
+ * @param {string} name - Customer name to search for
+ * @param {string} email - Customer email to search for
+ * @param {string} merchantCustomerId - Zoho customer ID; when provided, only return profile where profile.merchantCustomerId matches
  * @returns {Promise<Object>} Customer profile if found
  */
-export const searchCustomerProfileIteratively = async (name = null, email = null) => {
+export const searchCustomerProfileIteratively = async (name = null, email = null, merchantCustomerId = null) => {
   try {
     // Get all customer profile IDs
     const idsResult = await getCustomerProfileIds();
@@ -527,8 +528,6 @@ export const searchCustomerProfileIteratively = async (name = null, email = null
       };
     }
 
-    // Silently search through profiles
-
     // Search through each profile
     for (const profileId of idsResult.profileIds) {
       try {
@@ -536,12 +535,24 @@ export const searchCustomerProfileIteratively = async (name = null, email = null
         
         if (profileResult.success && profileResult.profile) {
           const profile = profileResult.profile;
-          // XML parsing returns arrays, so we need to handle that
+          const profileMerchantId = (Array.isArray(profile.merchantCustomerId) ? profile.merchantCustomerId[0] : profile.merchantCustomerId) || '';
           const profileEmail = (Array.isArray(profile.email) ? profile.email[0] : profile.email) || '';
-          const profileName = (Array.isArray(profile.description) ? profile.description[0] : profile.description) || 
-                             (Array.isArray(profile.merchantCustomerId) ? profile.merchantCustomerId[0] : profile.merchantCustomerId) || '';
+          const profileName = (Array.isArray(profile.description) ? profile.description[0] : profile.description) || profileMerchantId || '';
           
-          // Prioritize name matching first
+          // If we have merchantCustomerId (zohoId), require exact match - prevents wrong customer when email/name is shared
+          if (merchantCustomerId) {
+            if (profileMerchantId && String(profileMerchantId).trim() === String(merchantCustomerId).trim()) {
+              return {
+                success: true,
+                profile: profile,
+                customerProfileId: profileId
+              };
+            }
+            // Profile belongs to different customer or has no merchantCustomerId - skip
+            continue;
+          }
+          
+          // No zohoId constraint: match by name first
           if (name && profileName && profileName.toLowerCase().includes(name.toLowerCase())) {
             return {
               success: true,
@@ -550,7 +561,7 @@ export const searchCustomerProfileIteratively = async (name = null, email = null
             };
           }
           
-          // Fallback to email matching if name doesn't match
+          // Fallback: match by email
           if (email && profileEmail && profileEmail.toLowerCase() === email.toLowerCase()) {
             return {
               success: true,
@@ -560,7 +571,6 @@ export const searchCustomerProfileIteratively = async (name = null, email = null
           }
         }
       } catch (err) {
-        // Continue searching if one profile fails
         continue;
       }
     }
@@ -729,9 +739,9 @@ export const getCustomerProfileDetails = async (searchCriteria) => {
     }
   }
 
-  // Method 2: Iterative search by name (prioritized) or email (fallback)
-  if (name || email) {
-    const result = await searchCustomerProfileIteratively(name || null, email || null);
+  // Method 2: Iterative search by name/email; when merchantCustomerId (zohoId) provided, require it to match to avoid wrong customer
+  if (name || email || merchantCustomerId) {
+    const result = await searchCustomerProfileIteratively(name || null, email || null, merchantCustomerId || null);
     if (result.success) {
       return result;
     }
