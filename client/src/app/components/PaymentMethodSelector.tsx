@@ -34,8 +34,6 @@ export function PaymentMethodSelector({
   totalAmount,
 }: PaymentMethodSelectorProps) {
   const [paymentProfiles, setPaymentProfiles] = useState<PaymentProfile[]>([]);
-  const [zohoCards, setZohoCards] = useState<Array<{ last_four_digits?: string; last4?: string; card_type?: string }>>([]);
-  const [zohoBankLast4, setZohoBankLast4] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,23 +47,17 @@ export function PaymentMethodSelector({
   const loadPaymentProfiles = async () => {
     setLoading(true);
     setError(null);
-    setZohoCards([]);
-    setZohoBankLast4(null);
     try {
       const response = await customersAPI.getPaymentProfiles(customerId);
 
-      if (response.success && response.data) {
-        const data = response.data;
-        const profiles = data.paymentProfiles || [];
+      if (response.success && response.data?.paymentProfiles) {
+        const profiles = response.data.paymentProfiles;
         setPaymentProfiles(profiles);
-        setZohoCards(data.zohoCards || []);
-        setZohoBankLast4(data.bank_account_last4 ?? null);
         
-        if (profiles.length > 0) {
-          const defaultProfile = profiles.find((p: PaymentProfile) => p.isDefault || p.isStored) || profiles[0];
-          if (defaultProfile) setSelectedProfileId(defaultProfile.paymentProfileId);
-        } else {
-          setSelectedProfileId(null);
+        // Auto-select default or stored profile, or first one
+        const defaultProfile = profiles.find((p: PaymentProfile) => p.isDefault || p.isStored) || profiles[0];
+        if (defaultProfile) {
+          setSelectedProfileId(defaultProfile.paymentProfileId);
         }
       } else {
         setError(response.error || response.data?.message || 'Failed to load payment profiles');
@@ -116,7 +108,6 @@ export function PaymentMethodSelector({
 
   const isLoading = loading || externalLoading;
   const hasProfiles = paymentProfiles.length > 0;
-  const hasZohoPaymentInfo = zohoCards.length > 0 || zohoBankLast4;
   const canProceed = selectedProfileId && !isLoading;
 
   return (
@@ -162,48 +153,13 @@ export function PaymentMethodSelector({
             </div>
           ) : !hasProfiles ? (
             <div className="text-center py-12">
-              {hasZohoPaymentInfo ? (
-                <>
-                  <div className="space-y-3 mb-4 text-left">
-                    {zohoCards.map((card, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center gap-3 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50"
-                      >
-                        <CreditCard className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-                        <div>
-                          <span className="font-medium text-gray-900 dark:text-white">
-                            {card.card_type || 'Card'}: xxxx xxxx xxxx {card.last_four_digits || card.last4 || 'XXXX'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                    {zohoBankLast4 && (
-                      <div className="flex items-center gap-3 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-                        <Building2 className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                        <div>
-                          <span className="font-medium text-gray-900 dark:text-white">
-                            Bank Account: XXXX{zohoBankLast4}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-sm text-amber-600 dark:text-amber-400 mt-4">
-                    Payment info on file. To pay invoices with stored payment, add this card by completing a sale with &quot;Save payment method&quot; checked.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <CreditCard className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400 mb-2">
-                    No payment methods found
-                  </p>
-                  <p className="text-sm text-gray-400 dark:text-gray-500">
-                    This customer does not have any stored payment methods in Authorize.net
-                  </p>
-                </>
-              )}
+              <CreditCard className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-500 dark:text-gray-400 mb-2">
+                No payment methods found
+              </p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">
+                This customer does not have any stored payment methods in Authorize.net
+              </p>
             </div>
           ) : (
             <div className="space-y-3">

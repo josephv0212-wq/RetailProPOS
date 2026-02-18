@@ -337,10 +337,6 @@ export const customersAPI = {
         isStored?: boolean;
       }>;
       message?: string;
-      zohoCards?: Array<{ last_four_digits?: string; last4?: string; card_type?: string }>;
-      last_four_digits?: string | null;
-      card_type?: string | null;
-      bank_account_last4?: string | null;
     }>(`/customers/${id}/payment-profiles`);
   },
 };

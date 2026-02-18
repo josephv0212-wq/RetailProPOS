@@ -377,6 +377,10 @@ export const getCustomerPriceList = async (req, res) => {
       logWarning('Get customer price list: could not persist Zoho profile snapshot');
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customerController:getPriceList',message:'from Zoho live',data:{customerId:id,pricebook_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
+
     return sendSuccess(res, {
       pricebook_name: pricebook_name || null,
       tax_preference: tax_preference || null,
@@ -395,7 +399,6 @@ export const getCustomerPriceList = async (req, res) => {
 
 /**
  * Get customer payment profiles from Authorize.net CIM
- * Also fetches Zoho payment info (same as getPriceList) for display when Auth.net has no profiles
  * GET /customers/:id/payment-profiles
  */
 export const getCustomerPaymentProfiles = async (req, res) => {
@@ -407,59 +410,16 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       return sendNotFound(res, 'Customer');
     }
 
-    // Fetch Zoho payment info in parallel (same source as customer select / getPriceList)
-    let zohoCards = [];
-    let zohoLastFour = null;
-    let zohoCardType = null;
-    let zohoBankLast4 = customer.bankAccountLast4 || null;
-    if (customer.zohoId) {
-      try {
-        const [zohoContactResult, zohoCardsResult] = await Promise.allSettled([
-          getZohoCustomerById(customer.zohoId),
-          getCustomerCards(customer.zohoId)
-        ]);
-        const zohoContact = zohoContactResult.status === 'fulfilled' ? zohoContactResult.value : null;
-        zohoCards = zohoCardsResult.status === 'fulfilled' && Array.isArray(zohoCardsResult.value) ? zohoCardsResult.value : [];
-        const firstCard = zohoCards.length > 0 ? zohoCards[0] : null;
-        zohoLastFour = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
-        zohoCardType = firstCard?.card_type ? (String(firstCard.card_type).charAt(0).toUpperCase() + String(firstCard.card_type).slice(1).toLowerCase()) : null;
-        if (zohoContact?.custom_fields && Array.isArray(zohoContact.custom_fields)) {
-          const bankField = zohoContact.custom_fields.find(f => {
-            const label = (f.label || '').toLowerCase();
-            return label.includes('bank_account') || label.includes('bank_last') || label.includes('ach_last') || label.includes('bank_last4');
-          });
-          if (bankField?.value) zohoBankLast4 = String(bankField.value).replace(/\D/g, '').slice(-4) || bankField.value;
-        }
-        if (!zohoBankLast4 && zohoContact?.payment_methods && Array.isArray(zohoContact.payment_methods)) {
-          const achMethod = zohoContact.payment_methods.find(pm => (pm.type || '').toLowerCase() === 'ach' || (pm.payment_type || '').toLowerCase() === 'ach');
-          zohoBankLast4 = achMethod?.last_four_digits || achMethod?.last4 || achMethod?.account_last4 || zohoBankLast4;
-        }
-      } catch (_) {
-        // Zoho fetch failed - continue with Auth.net only
-      }
-    }
-
     // Try to get customer profile from Authorize.net
     let customerProfileId = customer.customerProfileId;
     let profile = null;
 
-    // If we have stored profile ID, use it only when it belongs to this customer (merchantCustomerId matches zohoId)
+    // If we have stored profile ID, use it directly
     if (customerProfileId) {
       const { getCustomerProfile } = await import('../services/authorizeNetService.js');
       const profileResult = await getCustomerProfile(customerProfileId);
       if (profileResult.success) {
-        const p = profileResult.profile;
-        const profileMerchantId = (Array.isArray(p.merchantCustomerId) ? p.merchantCustomerId[0] : p.merchantCustomerId) || '';
-        const zohoId = customer.zohoId ? String(customer.zohoId).trim() : '';
-        if (zohoId && profileMerchantId && String(profileMerchantId).trim() !== zohoId) {
-          // Stored profile belongs to different customer - clear and search again
-          await customer.update({ customerProfileId: null, customerPaymentProfileId: null });
-          customerProfileId = null;
-          customer.customerProfileId = null;
-          customer.customerPaymentProfileId = null;
-        } else {
-          profile = p;
-        }
+        profile = profileResult.profile;
       }
     }
 
@@ -494,11 +454,7 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       return sendSuccess(res, {
         customerProfileId: null,
         paymentProfiles: [],
-        message: 'Customer does not have a payment profile in Authorize.net',
-        zohoCards,
-        last_four_digits: zohoLastFour,
-        card_type: zohoCardType,
-        bank_account_last4: zohoBankLast4
+        message: 'Customer does not have a payment profile in Authorize.net'
       });
     }
 
@@ -516,11 +472,7 @@ export const getCustomerPaymentProfiles = async (req, res) => {
 
     return sendSuccess(res, {
       customerProfileId: customerProfileId?.toString() || null,
-      paymentProfiles: profilesWithDefault,
-      zohoCards,
-      last_four_digits: zohoLastFour,
-      card_type: zohoCardType,
-      bank_account_last4: zohoBankLast4
+      paymentProfiles: profilesWithDefault
     });
   } catch (err) {
     logError('Get customer payment profiles error', err);
