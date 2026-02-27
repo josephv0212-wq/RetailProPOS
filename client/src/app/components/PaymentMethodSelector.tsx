@@ -7,11 +7,13 @@ interface PaymentProfile {
   paymentProfileId: string;
   type: 'card' | 'ach';
   cardNumber?: string;
+  last4?: string;
   expirationDate?: string;
   accountNumber?: string;
   isDefault?: boolean;
   isStored?: boolean;
   customerProfileId?: string | null;
+  profileName?: string;
 }
 
 interface PaymentMethodSelectorProps {

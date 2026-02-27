@@ -957,22 +957,28 @@ export const extractPaymentProfiles = (profile) => {
           const card = payment.creditCard[0];
           const cardNumber = Array.isArray(card.cardNumber) ? card.cardNumber[0] : card.cardNumber;
           const expirationDate = Array.isArray(card.expirationDate) ? card.expirationDate[0] : card.expirationDate;
-          
+          const cardNumStr = (cardNumber || 'XXXX').replace(/\D/g, '');
+          const last4 = cardNumStr.length >= 4 ? cardNumStr.slice(-4) : null;
+
           result.push({
             paymentProfileId: paymentProfileId.toString(),
             type: 'card',
             cardNumber: cardNumber || 'XXXX',
+            last4: last4 || undefined,
             expirationDate: expirationDate || '',
             isDefault: paymentProfile.billTo && Array.isArray(paymentProfile.billTo) && paymentProfile.billTo[0]?.defaultPaymentProfile === 'true'
           });
         } else if (payment.bankAccount && Array.isArray(payment.bankAccount)) {
           const bankAccount = payment.bankAccount[0];
           const accountNumber = Array.isArray(bankAccount.accountNumber) ? bankAccount.accountNumber[0] : bankAccount.accountNumber;
-          
+          const acctNumStr = (accountNumber || 'XXXX').replace(/\D/g, '');
+          const last4 = acctNumStr.length >= 4 ? acctNumStr.slice(-4) : null;
+
           result.push({
             paymentProfileId: paymentProfileId.toString(),
             type: 'ach',
             accountNumber: accountNumber || 'XXXX',
+            last4: last4 || undefined,
             isDefault: paymentProfile.billTo && Array.isArray(paymentProfile.billTo) && paymentProfile.billTo[0]?.defaultPaymentProfile === 'true'
           });
         }
