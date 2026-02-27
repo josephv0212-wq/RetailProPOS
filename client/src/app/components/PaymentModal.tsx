@@ -129,10 +129,18 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
 
   const loadPaymentProfiles = async () => {
     if (!customerId) return;
-    
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'PaymentModal.tsx:loadPaymentProfiles',message:'loadPaymentProfiles CALLED',data:{customerId,isOpen},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     setLoadingPaymentProfiles(true);
     try {
       const response = await customersAPI.getPaymentProfiles(customerId);
+      // #region agent log
+      const profLen = (response?.data?.paymentProfiles ?? []).length;
+      const zohoLen = (response?.data?.zohoCards ?? []).length;
+      const last4 = response?.data?.last_four_digits ?? null;
+      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'PaymentModal.tsx:loadPaymentProfiles',message:'loadPaymentProfiles RESPONSE',data:{customerId,success:response?.success,profiles:profLen,zohoCards:zohoLen,last_four_digits:last4},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (response.success && response.data) {
         setPaymentProfiles(response.data.paymentProfiles || []);
         setZohoCards(response.data.zohoCards || []);

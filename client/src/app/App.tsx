@@ -819,6 +819,10 @@ function AppContent() {
       if (customer.id) {
         try {
           const priceListRes = await customersAPI.getPriceList(customer.id);
+        // #region agent log
+        const cards = priceListRes?.data?.cards ?? [];
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'App.tsx:continueCustomerSelection',message:'getPriceList RESPONSE',data:{customerId:customer.id,cardsLen:cards.length,last_four:priceListRes?.data?.last_four_digits},hypothesisId:'H4',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         const pricebookName = priceListRes.data?.pricebook_name;
         const taxPreference = priceListRes.data?.tax_preference;
         const cards = priceListRes.data?.cards || [];
@@ -1138,6 +1142,9 @@ function AppContent() {
         setCompletedSale(sale);
         setIsPaymentModalOpen(false);
         setCartItems([]);
+        // #region agent log
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'App.tsx:handleConfirmPayment',message:'Sale complete clearing selectedCustomer',data:{},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         setSelectedCustomer(null);
         setCurrentScreen('receipt');
       } else {
@@ -1150,6 +1157,9 @@ function AppContent() {
   };
 
   const handleNewSale = async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'App.tsx:handleNewSale',message:'handleNewSale clearing state',data:{},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     setSelectedCustomer(null);
     setCustomerTaxPreference(null);
     setCustomerCards([]);

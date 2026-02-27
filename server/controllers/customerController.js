@@ -370,6 +370,10 @@ export const getCustomerPriceList = async (req, res) => {
     const useCached = customer.zohoProfileSyncedAt &&
       (Date.now() - new Date(customer.zohoProfileSyncedAt).getTime()) < PRICE_LIST_CACHE_MS;
 
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'customerController.js:getCustomerPriceList',message:'getCustomerPriceList',data:{customerId:id,useCached,hasZohoCards:!!customer.zohoCards},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     let zohoContact = null;
     let cards = [];
     if (useCached && customer.zohoCards) {
@@ -429,6 +433,9 @@ export const getCustomerPriceList = async (req, res) => {
       }
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'customerController.js:getCustomerPriceList',message:'getCustomerPriceList SENDING',data:{customerId:id,cardsLen:cards.length,last_four_digits:last_four_digits},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return sendSuccess(res, {
       pricebook_name: pricebook_name || null,
       tax_preference: tax_preference || null,
@@ -468,6 +475,10 @@ export const getCustomerPaymentProfiles = async (req, res) => {
     const useZohoCache = customer.zohoId && customer.zohoProfileSyncedAt &&
       (Date.now() - new Date(customer.zohoProfileSyncedAt).getTime()) < PAYMENT_PROFILES_CACHE_MS;
     const hasDbZoho = customer.last_four_digits || customer.zohoCards;
+
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'customerController.js:getCustomerPaymentProfiles',message:'getCustomerPaymentProfiles',data:{customerId:id,useZohoCache,hasDbZoho},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     const loadZohoData = async () => {
       if (!customer.zohoId) return;
@@ -639,6 +650,9 @@ export const getCustomerPaymentProfiles = async (req, res) => {
         (p.customerProfileId === storedCustomerProfileId || (!p.customerProfileId && !storedCustomerProfileId))
     }));
 
+    // #region agent log
+    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'customerController.js:getCustomerPaymentProfiles',message:'getCustomerPaymentProfiles SENDING',data:{customerId:id,profilesLen:profilesWithDefault.length,zohoCardsLen:zohoCards.length,last_four_digits:zohoLastFour},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return sendSuccess(res, {
       customerProfileId: firstCustomerProfileId?.toString() || null,
       paymentProfiles: profilesWithDefault,

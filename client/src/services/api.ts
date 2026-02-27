@@ -72,6 +72,13 @@ async function apiRequest<T = any>(
   if (!noCache && (options.method === 'GET' || !options.method)) {
     const cached = requestCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      // #region agent log
+      if (endpoint.includes('/price-list') || endpoint.includes('/payment-profiles')) {
+        const profLen = (cached.data?.data?.paymentProfiles ?? []).length;
+        const zohoLen = (cached.data?.data?.zohoCards ?? cached.data?.data?.cards ?? []).length;
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'api.ts:cache-hit',message:'API cache HIT',data:{endpoint,profiles:profLen,zohoCards:zohoLen},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
       return cached.data;
     }
   }
@@ -115,6 +122,13 @@ async function apiRequest<T = any>(
 
     // Cache successful GET requests
     if (!noCache && (options.method === 'GET' || !options.method) && data.success) {
+      // #region agent log
+      if (endpoint.includes('/price-list') || endpoint.includes('/payment-profiles')) {
+        const profLen = (data?.data?.paymentProfiles ?? []).length;
+        const zohoLen = (data?.data?.zohoCards ?? data?.data?.cards ?? []).length;
+        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'api.ts:cache-set',message:'API cache SET (fresh fetch)',data:{endpoint,profiles:profLen,zohoCards:zohoLen},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
       requestCache.set(cacheKey, { data, timestamp: Date.now() });
     }
 
