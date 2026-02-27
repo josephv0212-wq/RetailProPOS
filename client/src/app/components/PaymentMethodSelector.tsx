@@ -25,6 +25,15 @@ interface PaymentMethodSelectorProps {
   loading?: boolean;
   /** When set (e.g. invoice/sales order charge), show subtotal + 3% CC surcharge when a credit card is selected */
   totalAmount?: number;
+  /** Pre-fetched payment profiles (from checkout-data). When set, skips initial API call for faster display. */
+  initialPaymentProfiles?: {
+    customerProfileId?: string | null;
+    paymentProfiles?: any[];
+    zohoCards?: Array<{ last_four_digits?: string; last4?: string; card_type?: string }>;
+    last_four_digits?: string | null;
+    card_type?: string | null;
+    bank_account_last4?: string | null;
+  } | null;
 }
 
 export function PaymentMethodSelector({
@@ -35,6 +44,7 @@ export function PaymentMethodSelector({
   customerName,
   loading: externalLoading = false,
   totalAmount,
+  initialPaymentProfiles,
 }: PaymentMethodSelectorProps) {
   const [paymentProfiles, setPaymentProfiles] = useState<PaymentProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -47,9 +57,21 @@ export function PaymentMethodSelector({
 
   useEffect(() => {
     if (isOpen && customerId) {
-      loadPaymentProfiles();
+      if (initialPaymentProfiles) {
+        const profiles = initialPaymentProfiles.paymentProfiles || [];
+        setPaymentProfiles(profiles);
+        setZohoCards(initialPaymentProfiles.zohoCards || []);
+        setZohoLastFour(initialPaymentProfiles.last_four_digits ?? null);
+        setZohoCardType(initialPaymentProfiles.card_type ?? null);
+        setZohoBankLast4(initialPaymentProfiles.bank_account_last4 ?? null);
+        const defaultProfile = profiles.find((p: PaymentProfile) => p.isDefault || p.isStored) || profiles[0];
+        setSelectedProfileId(defaultProfile ? defaultProfile.paymentProfileId : null);
+        setLoading(false);
+      } else {
+        loadPaymentProfiles();
+      }
     }
-  }, [isOpen, customerId]);
+  }, [isOpen, customerId, initialPaymentProfiles]);
 
   const loadPaymentProfiles = async () => {
     setLoading(true);
@@ -73,7 +95,7 @@ export function PaymentMethodSelector({
           setSelectedProfileId(null);
         }
       } else {
-        setError(response.error || response.data?.message || 'Failed to load payment profiles');
+        setError((response as any).error || (response.data as any)?.message || 'Failed to load payment profiles');
       }
     } catch (err: any) {
       logger.error('Failed to load payment profiles', err);

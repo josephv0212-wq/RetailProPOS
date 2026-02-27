@@ -984,8 +984,8 @@ const startServer = async () => {
   app.listen(PORT, '0.0.0.0', () => {
     logServerStart(PORT, process.env.NODE_ENV || 'development');
 
-    // Background Zoho auto-sync every 5 min (ZOHO_AUTO_SYNC_INTERVAL_MS, 0 = disabled)
-    const autoSyncMs = parseInt(process.env.ZOHO_AUTO_SYNC_INTERVAL_MS || '300000', 10);
+    // Background Zoho auto-sync (ZOHO_AUTO_SYNC_INTERVAL_MS in ms, 0 = disabled; set to 300000 for every 5 min)
+    const autoSyncMs = parseInt(process.env.ZOHO_AUTO_SYNC_INTERVAL_MS || '0', 10);
     if (autoSyncMs > 0) {
       let syncInProgress = false;
       const runBackgroundSync = () => {

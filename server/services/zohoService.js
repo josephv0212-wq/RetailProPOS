@@ -502,9 +502,6 @@ export const createSalesReceipt = async (saleData) => {
   // We always send tax_percentage (and optionally tax_id) on line items. Setting place_of_contact
   // causes Zoho to override with the customer's location tax (e.g. 7% for MIA Warehouse) instead
   // of our POS location tax (e.g. 7.5%), causing a mismatch. POS sales use the store's tax rate.
-  // #region agent log
-  try { fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'zohoService.js:createSalesReceipt',message:'tax config (place_of_contact disabled for POS)',data:{saleId,zohoTaxId:zohoTaxId||null,firstLineTaxPct:safeLineItems[0]?.taxPercentage},timestamp:Date.now(),hypothesisId:'H-ZOHO'})}).catch(()=>{}); } catch(e){}
-  // #endregion
 
   // Keep Zoho total in sync with POS total (cc fee is an adjustment, not a line item)
   if (processingFee > 0) {

@@ -210,9 +210,6 @@ export const createSale = async (req, res) => {
       // When true, Zoho Books will email the sales receipt to the customer.
       emailReceiptToCustomer
     } = req.body;
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale entry',message:'createSale request',data:{paymentType:requestPaymentType,itemsCount:(items||[]).length,customerId:customerId||null,useStoredPayment:!!useStoredPayment,useValorApi:!!useValorApi,useStandaloneMode:!!(useStandaloneMode||paymentDetails?.useStandaloneMode)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     let paymentType = requestPaymentType;
     // Merge debit_card into card: store and process as single "card" type
     if (paymentType === 'debit_card') paymentType = 'card';
@@ -414,13 +411,7 @@ export const createSale = async (req, res) => {
       // Keep payment type as card; mark as manual card reader payment
       // The description will indicate "manual card reader payment" in the sale record
       // Do NOT process any card payment - skip all card processing logic below
-      // #region agent log
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_standalone',data:{paymentType:'card',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
     } else if (useStoredPayment && paymentProfileId && customer) {
-      // #region agent log
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:stored payment branch',message:'entering stored payment',data:{customerId:customer.id,paymentProfileId,paymentProfileIdType:typeof paymentProfileId},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
       // Stored payment method via Authorize.net CIM - use same logic as chargeInvoicesSalesOrders
       let customerProfileId = customer.customerProfileId;
       let customerPaymentProfileId = paymentProfileId;
@@ -459,9 +450,6 @@ export const createSale = async (req, res) => {
 
         // Extract payment profiles
         const paymentProfiles = extractPaymentProfiles(profile);
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:after extractPaymentProfiles',message:'profile ids',data:{requestedId:paymentProfileId,requestedType:typeof paymentProfileId,profileIds:paymentProfiles.map(p=>({id:p.paymentProfileId,type:typeof p.paymentProfileId})),match:paymentProfiles.some(p=>p.paymentProfileId==paymentProfileId)},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-        // #endregion
         if (paymentProfiles.length === 0) {
           return sendError(
             res,
@@ -510,9 +498,6 @@ export const createSale = async (req, res) => {
       }
 
       // Charge using stored payment method
-      // #region agent log
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:before chargeCustomerProfile',message:'charging',data:{customerProfileId,paymentProfileId,amount:total},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
       paymentResult = await chargeCustomerProfile({
         customerProfileId,
         customerPaymentProfileId: paymentProfileId,
@@ -520,9 +505,6 @@ export const createSale = async (req, res) => {
         invoiceNumber: `POS-${Date.now()}`,
         description: `POS Sale - ${locationName}`
       });
-      // #region agent log
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:after chargeCustomerProfile',message:'charge result',data:{success:paymentResult.success,error:paymentResult.error,transactionId:paymentResult.transactionId},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
       if (!paymentResult.success) {
         return sendError(res, 'Stored payment processing failed', 400, paymentResult.error);
       }
@@ -530,9 +512,6 @@ export const createSale = async (req, res) => {
       transactionId = paymentResult.transactionId;
       // Update paymentType to actual type determined from profile
       paymentType = actualPaymentType;
-      // #region agent log
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_stored',data:{paymentType,transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
     } else if (paymentType === 'card') {
       // IMPORTANT: Double-check standalone mode - if enabled, skip all card processing
       if (isStandaloneMode) {
@@ -544,7 +523,7 @@ export const createSale = async (req, res) => {
           transactionId: transactionId
         };
       } else {
-        // Accept.js / opaqueData flow (preferred for PCI); keep legacy flags for backward compatibility.
+        // Accept.js / opaqueData flow (preferred for PCI)
         const usingOpaqueData = !!useOpaqueData || !!useBluetoothReader;
         const opaquePayload = opaqueDataPayload || bluetoothPayload;
 
@@ -569,9 +548,6 @@ export const createSale = async (req, res) => {
           }
 
           transactionId = paymentResult.transactionId;
-          // #region agent log
-          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_opaque',data:{paymentType:'card',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-          // #endregion
         } else if (useValorApi) {
         // Valor API mode - payment already processed in frontend via Valor API (NO Authorize.Net)
         // Flow: Frontend -> Valor API -> VP100 Terminal -> Valor API -> Frontend -> Backend (record sale)
@@ -591,9 +567,6 @@ export const createSale = async (req, res) => {
           transactionId: valorTransactionId,
           message: 'Payment processed successfully via Valor API'
         };
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_valor',data:{paymentType:'card',transactionId:valorTransactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-        // #endregion
       } else {
         // Card-not-present mode - process through API
         // Validation is now handled by middleware, but keep as backup
@@ -615,9 +588,6 @@ export const createSale = async (req, res) => {
         }
 
         transactionId = paymentResult.transactionId;
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=card_manual',data:{paymentType:'card',transactionId:paymentResult.transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-        // #endregion
         }
       }
     } else if (paymentType === 'ach') {
@@ -641,9 +611,6 @@ export const createSale = async (req, res) => {
       }
 
       transactionId = paymentResult.transactionId;
-      // #region agent log
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=ach',data:{paymentType:'ach',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
     } else if (paymentType === 'cash') {
       // Cash payment - no processing needed
       transactionId = `CASH-${Date.now()}`;
@@ -652,9 +619,6 @@ export const createSale = async (req, res) => {
         message: 'Cash payment recorded',
         transactionId: transactionId
       };
-      // #region agent log
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=cash',data:{paymentType:'cash',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
     } else if (paymentType === 'zelle') {
       // Zelle payment - record like cash (no processing needed)
       // If a confirmation number is provided (optional), include it in transactionId for traceability.
@@ -665,9 +629,6 @@ export const createSale = async (req, res) => {
         message: 'Zelle payment recorded',
         transactionId
       };
-      // #region agent log
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:payment branch',message:'payment branch=zelle',data:{paymentType:'zelle',transactionId},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
     }
 
     // Optionally save payment method in Authorize.Net CIM when a customer is present and
@@ -922,9 +883,7 @@ export const createSale = async (req, res) => {
 
     // Sale is complete - return success immediately
     // Printer runs in background and won't affect the response
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale success',message:'sale completed',data:{saleId:sale.id,transactionId:sale.transactionId,paymentType:sale.paymentType},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
+
     return sendSuccess(res, {
       sale: completeSale,
       payment: paymentResult,
@@ -937,9 +896,6 @@ export const createSale = async (req, res) => {
 
   } catch (err) {
     console.error('Sale creation error:', err);
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:createSale error',message:'sale creation failed',data:{error:err?.message||String(err),stack:(err?.stack||'').slice(0,300)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
     return sendError(res, 'Sale creation failed. Please try again.', 500, err);
   }
 };
@@ -1186,9 +1142,6 @@ export const getTransactions = async (req, res) => {
       };
     });
 
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController.js:getTransactions',message:'transactions result',data:{fromTable:initialFromTable,mergedCount,total:transformedTransactions?.length||0,userId,isAdmin},timestamp:Date.now(),hypothesisId:'H-TXN'})}).catch(()=>{});
-    // #endregion
     return sendSuccess(res, { transactions: transformedTransactions });
   } catch (err) {
     console.error('Get transactions error:', err);
@@ -1745,9 +1698,6 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
     let zohoPaymentRecorded = false;
     let zohoPaymentError = null;
     const invoiceItems = validatedItems.filter(it => it.type === 'invoice');
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController:chargeInvoices Zoho entry',message:'invoice payment Zoho flow',data:{invoiceCount:invoiceItems.length,totalFee,totalOriginal,paymentType,zohoCustomerId:!!(customer.zohoId)},timestamp:Date.now(),hypothesisId:'INV3'})}).catch(()=>{});
-    // #endregion
 
     if (invoiceItems.length > 0) {
       const zohoCustomerId = (customer.zohoId && String(customer.zohoId).trim()) || null;
@@ -1792,9 +1742,6 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
         });
         if (zohoPaymentResult.success) {
           zohoPaymentRecorded = true;
-          // #region agent log
-          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController:createCustomerPayment success',message:'Zoho payment recorded',data:{zohoPaymentRecorded:true,useFeeInvoice},timestamp:Date.now(),hypothesisId:'INV5'})}).catch(()=>{});
-          // #endregion
           if (totalFee > 0 && !useFeeInvoice) {
             const journalResult = await createProcessingFeeJournal({
               feeAmount: totalFee,
@@ -1807,9 +1754,6 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
           }
         } else {
           zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
-          // #region agent log
-          fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'salesController:createCustomerPayment failed',message:'Zoho payment failed',data:{error:zohoPaymentError},timestamp:Date.now(),hypothesisId:'INV6'})}).catch(()=>{});
-          // #endregion
           console.error(`⚠️ Zoho: could not record invoice payment: ${zohoPaymentError}`);
         }
       }

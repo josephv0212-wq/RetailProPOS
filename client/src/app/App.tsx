@@ -17,7 +17,7 @@ import { AlertProvider } from './contexts/AlertContext';
 import { useAuth } from './contexts/AuthContext';
 import { useAlert } from './contexts/AlertContext';
 import { Customer, Product, CartItem, PaymentDetails, Sale, UnitOfMeasureOption } from './types';
-import { itemsAPI, customersAPI, salesAPI, zohoAPI, itemUnitsAPI, unitsAPI } from '../services/api';
+import { itemsAPI, customersAPI, salesAPI, zohoAPI, itemUnitsAPI, unitsAPI, invalidatePaymentProfilesCache } from '../services/api';
 import { SalesOrderInvoiceModal } from './components/SalesOrderInvoiceModal';
 import { PaymentMethodSelector } from './components/PaymentMethodSelector';
 import { InvoicePaymentReceiptPreview } from './components/InvoicePaymentReceiptPreview';
@@ -77,6 +77,7 @@ function AppContent() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerTaxPreference, setCustomerTaxPreference] = useState<'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE' | null>(null);
   const [customerCards, setCustomerCards] = useState<any[]>([]);
+  const [checkoutPaymentProfiles, setCheckoutPaymentProfiles] = useState<{ customerId: number; data: any } | null>(null);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
@@ -93,7 +94,7 @@ function AppContent() {
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [pendingChargeItems, setPendingChargeItems] = useState<any[]>([]);
   const [isInvoicePaymentReceiptPreviewOpen, setIsInvoicePaymentReceiptPreviewOpen] = useState(false);
-  const [pendingStoredPaymentSelection, setPendingStoredPaymentSelection] = useState<{ paymentProfileId: string; profileType: 'card' | 'ach' } | null>(null);
+  const [pendingStoredPaymentSelection, setPendingStoredPaymentSelection] = useState<{ paymentProfileId: string; profileType: 'card' | 'ach'; customerProfileId?: string | null } | null>(null);
   const [isZohoPaymentOptionsOpen, setIsZohoPaymentOptionsOpen] = useState(false);
   const [isZohoDocsPaymentModalOpen, setIsZohoDocsPaymentModalOpen] = useState(false);
   const [zohoDocsCartItems, setZohoDocsCartItems] = useState<CartItem[]>([]);
@@ -524,9 +525,7 @@ function AppContent() {
       return;
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:charge items prepared',message:'sending to charge API',data:{count:chargeItems.length,items:chargeItems.map(i=>({type:i.type,number:i.number,amount:i.amount}))},timestamp:Date.now(),hypothesisId:'INV2'})}).catch(()=>{});
-    // #endregion
+
     // Store items and show payment options
     setPendingChargeItems(chargeItems);
     setIsOrderInvoiceModalOpen(false);
@@ -590,6 +589,7 @@ function AppContent() {
 
     setIsZohoDocsPaymentModalOpen(false);
     setIsZohoPaymentOptionsOpen(false);
+    if (selectedCustomer?.id) invalidatePaymentProfilesCache(selectedCustomer.id);
 
     // Build receipt sale and show receipt screen (same as stored-payment flow)
     const subtotal = items.reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
@@ -666,6 +666,7 @@ function AppContent() {
       const response = await salesAPI.chargeInvoicesSalesOrders({
         customerId: selectedCustomer.id,
         paymentProfileId,
+        customerProfileId: pendingStoredPaymentSelection?.customerProfileId ?? undefined,
         paymentType,
         items: pendingChargeItems,
         emailReceiptToCustomer: emailReceiptToCustomer ?? false,
@@ -678,6 +679,7 @@ function AppContent() {
         setPendingChargeItems([]);
         setPendingStoredPaymentSelection(null);
         setIsInvoicePaymentReceiptPreviewOpen(false);
+        invalidatePaymentProfilesCache(selectedCustomer.id);
 
         // Check for transactions under review
         const underReviewItems = results.filter((r: any) => r.underReview);
@@ -814,23 +816,25 @@ function AppContent() {
     if (!customer) return;
     setLoadingMessage('Loading price list…');
     try {
-      // Use items already in DB (synced via Nav "Sync Zoho" or background). Do not sync on every customer select to avoid 15+ s latency.
-      // Fetch price list first only (no parallel loadProducts) so server isn't handling two heavy requests; then get pricebook or loadProducts.
+      // Fetch price list + payment profiles in one request (checkout-data), then get pricebook or loadProducts.
       if (customer.id) {
         try {
-          const priceListRes = await customersAPI.getPriceList(customer.id);
-        // #region agent log
-        const cards = priceListRes?.data?.cards ?? [];
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'App.tsx:continueCustomerSelection',message:'getPriceList RESPONSE',data:{customerId:customer.id,cardsLen:cards.length,last_four:priceListRes?.data?.last_four_digits},hypothesisId:'H4',timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        const pricebookName = priceListRes.data?.pricebook_name;
-        const taxPreference = priceListRes.data?.tax_preference;
-        const cards = priceListRes.data?.cards || [];
-        const last_four_digits = priceListRes.data?.last_four_digits;
-        const card_type = priceListRes.data?.card_type;
-        const has_card_info = priceListRes.data?.has_card_info;
-        const card_info_checked = priceListRes.data?.card_info_checked;
-        const bank_account_last4 = priceListRes.data?.bank_account_last4;
+          const checkoutRes = await customersAPI.getCheckoutData(customer.id);
+          const priceListRes = checkoutRes.data?.priceList;
+          const paymentProfilesRes = checkoutRes.data?.paymentProfiles;
+          if (paymentProfilesRes) {
+            setCheckoutPaymentProfiles({ customerId: customer.id, data: paymentProfilesRes });
+          } else {
+            setCheckoutPaymentProfiles(null);
+          }
+        const pricebookName = priceListRes?.pricebook_name;
+        const taxPreference = priceListRes?.tax_preference;
+        const cards = priceListRes?.cards || [];
+        const last_four_digits = priceListRes?.last_four_digits;
+        const card_type = priceListRes?.card_type;
+        const has_card_info = priceListRes?.has_card_info;
+        const card_info_checked = priceListRes?.card_info_checked;
+        const bank_account_last4 = priceListRes?.bank_account_last4;
 
         // Update customer object with card info, bank account info, and tax exemption from Zoho
         const isTaxExemptFromZoho = taxPreference === 'SALES TAX EXCEPTION CERTIFICATE';
@@ -918,6 +922,7 @@ function AppContent() {
         setSelectedCustomer(customer);
         setCustomerTaxPreference(null);
         setCustomerCards([]);
+        setCheckoutPaymentProfiles(null);
         setLoadingMessage('Loading products…');
         await loadProducts();
         showToast(`Failed to fetch customer details: ${errorMsg}. Showing all items.`, 'warning', 5000);
@@ -966,18 +971,11 @@ function AppContent() {
       return sum + (itemPrice * item.quantity);
     }, 0);
     
-    // Get customer tax preference
-    let customerTaxPreference: 'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE' = 'STANDARD';
-    try {
-      const priceListRes = await customersAPI.getPriceList(selectedCustomer.id);
-      if (priceListRes.success && priceListRes.data?.tax_preference === 'SALES TAX EXCEPTION CERTIFICATE') {
-        customerTaxPreference = 'SALES TAX EXCEPTION CERTIFICATE';
-      }
-    } catch (err) {
-      logger.error('Failed to get customer tax preference', err);
-    }
+    // Use customer tax preference from state (set during checkout-data load)
+    const taxPref: 'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE' =
+      customerTaxPreference === 'SALES TAX EXCEPTION CERTIFICATE' ? 'SALES TAX EXCEPTION CERTIFICATE' : 'STANDARD';
 
-    const isTaxExempt = customerTaxPreference === 'SALES TAX EXCEPTION CERTIFICATE';
+    const isTaxExempt = taxPref === 'SALES TAX EXCEPTION CERTIFICATE';
     const tax = isTaxExempt ? 0 : subtotal * constants.TAX_RATE;
     const total = subtotal + tax;
 
@@ -1046,7 +1044,7 @@ function AppContent() {
         customerId: selectedCustomer.id,
         paymentType: paymentType as any,
         paymentDetails: apiPaymentDetails,
-        customerTaxPreference,
+        customerTaxPreference: taxPref,
       };
 
       // Add useBluetoothReader and bluetoothPayload at root level if using USB card reader
@@ -1142,9 +1140,8 @@ function AppContent() {
         setCompletedSale(sale);
         setIsPaymentModalOpen(false);
         setCartItems([]);
-        // #region agent log
-        fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'App.tsx:handleConfirmPayment',message:'Sale complete clearing selectedCustomer',data:{},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
+        invalidatePaymentProfilesCache(selectedCustomer.id);
+        setCheckoutPaymentProfiles(null);
         setSelectedCustomer(null);
         setCurrentScreen('receipt');
       } else {
@@ -1157,15 +1154,14 @@ function AppContent() {
   };
 
   const handleNewSale = async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'App.tsx:handleNewSale',message:'handleNewSale clearing state',data:{},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setSelectedCustomer(null);
     setCustomerTaxPreference(null);
     setCustomerCards([]);
+    setCheckoutPaymentProfiles(null);
     setCartItems([]);
     setCompletedSale(null);
     setCurrentScreen('pos');
+    invalidatePaymentProfilesCache();
     await loadProducts(); // Load regular items
   };
 
@@ -1400,6 +1396,7 @@ function AppContent() {
         customerId={selectedCustomer?.id || null}
         customerName={selectedCustomer?.name || selectedCustomer?.contactName || null}
         customerEmail={selectedCustomer?.email || null}
+        initialPaymentProfiles={checkoutPaymentProfiles && checkoutPaymentProfiles.customerId === selectedCustomer?.id ? checkoutPaymentProfiles.data : undefined}
       />
 
       {/* POS Payment Modal for Zoho invoices/sales orders */}
@@ -1421,6 +1418,7 @@ function AppContent() {
         customerId={selectedCustomer?.id || null}
         customerName={selectedCustomer?.name || selectedCustomer?.contactName || null}
         customerEmail={selectedCustomer?.email || null}
+        initialPaymentProfiles={checkoutPaymentProfiles && checkoutPaymentProfiles.customerId === selectedCustomer?.id ? checkoutPaymentProfiles.data : undefined}
       />
 
       {/* Invoice Modal */}
@@ -1459,6 +1457,7 @@ function AppContent() {
           customerName={selectedCustomer.name || selectedCustomer.contactName || 'Customer'}
           loading={loadingOrders}
           totalAmount={pendingChargeItems.length > 0 ? (pendingChargeItems as any[]).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0) : undefined}
+          initialPaymentProfiles={checkoutPaymentProfiles && checkoutPaymentProfiles.customerId === selectedCustomer.id ? checkoutPaymentProfiles.data : undefined}
         />
       )}
 

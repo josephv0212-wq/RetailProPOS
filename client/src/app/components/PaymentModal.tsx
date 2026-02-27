@@ -31,6 +31,15 @@ interface PaymentModalProps {
   customerName?: string | null;
   /** Customer email - when present and context is 'sale', shows "Email receipt" checkbox. */
   customerEmail?: string | null;
+  /** Pre-fetched payment profiles (from checkout-data). When set, skips initial API call for faster display. */
+  initialPaymentProfiles?: {
+    customerProfileId?: string | null;
+    paymentProfiles?: any[];
+    zohoCards?: Array<{ last_four_digits?: string; last4?: string; card_type?: string }>;
+    last_four_digits?: string | null;
+    card_type?: string | null;
+    bank_account_last4?: string | null;
+  } | null;
 }
 
 const paymentMethods: PaymentMethod[] = [
@@ -41,7 +50,7 @@ const paymentMethods: PaymentMethod[] = [
   { type: 'ach', label: 'ACH' },
 ];
 
-export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, isTaxExempt, cartItems, onConfirmPayment, context = 'sale', userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName, customerEmail }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, isTaxExempt, cartItems, onConfirmPayment, context = 'sale', userTerminalNumber, userTerminalIP, userTerminalPort, cardReaderMode = 'integrated', customerId, customerName, customerEmail, initialPaymentProfiles }: PaymentModalProps) {
   const { showToast } = useToast();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod['type']>('cash');
   const [cardNumber, setCardNumber] = useState('');
@@ -107,9 +116,26 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
   }, [userTerminalNumber, userTerminalIP, userTerminalPort]);
 
   // Load payment profiles when customer is available (sale context; zohoDocuments uses separate flow)
+  // Use initialPaymentProfiles when provided for instant display, otherwise fetch
   useEffect(() => {
-    if (context === 'sale' && isOpen && customerId) {
-      loadPaymentProfiles();
+    if ((context === 'sale' || context === 'zohoDocuments') && isOpen && customerId) {
+      if (initialPaymentProfiles) {
+        setPaymentProfiles(initialPaymentProfiles.paymentProfiles || []);
+        setZohoCards(initialPaymentProfiles.zohoCards || []);
+        setZohoLastFour(initialPaymentProfiles.last_four_digits ?? null);
+        setZohoCardType(initialPaymentProfiles.card_type ?? null);
+        setZohoBankLast4(initialPaymentProfiles.bank_account_last4 ?? null);
+        const profiles = initialPaymentProfiles.paymentProfiles || [];
+        const defaultProfile = profiles.find((p: any) => p.isDefault || p.isStored) || profiles[0];
+        if (defaultProfile) {
+          setSelectedPaymentProfileId(defaultProfile.paymentProfileId);
+        } else {
+          setSelectedPaymentProfileId(null);
+        }
+        setLoadingPaymentProfiles(false);
+      } else {
+        loadPaymentProfiles();
+      }
     } else {
       setPaymentProfiles([]);
       setSelectedPaymentProfileId(null);
@@ -118,7 +144,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
       setZohoCardType(null);
       setZohoBankLast4(null);
     }
-  }, [isOpen, customerId, context]);
+  }, [isOpen, customerId, context, initialPaymentProfiles]);
 
   // Reset email receipt preference when modal opens - default true when customer has email
   useEffect(() => {
@@ -129,18 +155,9 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
 
   const loadPaymentProfiles = async () => {
     if (!customerId) return;
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'PaymentModal.tsx:loadPaymentProfiles',message:'loadPaymentProfiles CALLED',data:{customerId,isOpen},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setLoadingPaymentProfiles(true);
     try {
       const response = await customersAPI.getPaymentProfiles(customerId);
-      // #region agent log
-      const profLen = (response?.data?.paymentProfiles ?? []).length;
-      const zohoLen = (response?.data?.zohoCards ?? []).length;
-      const last4 = response?.data?.last_four_digits ?? null;
-      fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34c8a7'},body:JSON.stringify({sessionId:'34c8a7',location:'PaymentModal.tsx:loadPaymentProfiles',message:'loadPaymentProfiles RESPONSE',data:{customerId,success:response?.success,profiles:profLen,zohoCards:zohoLen,last_four_digits:last4},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (response.success && response.data) {
         setPaymentProfiles(response.data.paymentProfiles || []);
         setZohoCards(response.data.zohoCards || []);

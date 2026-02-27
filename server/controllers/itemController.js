@@ -62,9 +62,7 @@ export const getItemsFromPricebook = async (req, res) => {
     }
 
     console.log(`Fetching items from pricebook: "${pricebookName}"`);
-    // #region agent log
     const t0Pricebook = Date.now();
-    // #endregion
     // First: get from DB. Second: if not in DB, get from Zoho and save to DB.
     const PRICEBOOK_DB_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
     let zohoItems = [];
@@ -98,9 +96,6 @@ export const getItemsFromPricebook = async (req, res) => {
       }
       console.log(`Retrieved ${zohoItems.length} items from Zoho pricebook "${pricebookName}" (saved to DB)`);
     }
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'itemController:getItemsFromPricebook',message:source==='db'?'from DB':'from Zoho',data:{pricebookName,source,zohoItemsCount:zohoItems?.length,durationMsSoFar:Date.now()-t0Pricebook},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
 
     // Get all active items from database
     const allDbItems = await Item.findAll({
@@ -188,9 +183,6 @@ export const getItemsFromPricebook = async (req, res) => {
     });
 
     console.log(`Returning ${mergedItems.length} merged items (${validPricebookItems.length} from pricebook)`);
-    // #region agent log
-    fetch('http://127.0.0.1:1024/ingest/d43f1d4c-4d33-4f77-a4e3-9e9d56debc45',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'itemController:getItemsFromPricebook end',message:'merged items ready',data:{durationMs:Date.now()-t0Pricebook,mergedCount:mergedItems?.length},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     return sendSuccess(res, { 
       items: mergedItems,
       pricebookName,
