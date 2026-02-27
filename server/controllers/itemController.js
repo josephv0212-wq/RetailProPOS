@@ -275,6 +275,9 @@ export const syncItemsFromZoho = async (req, res) => {
       });
     }
 
+    // Clear pricebook cache so POS shows updated item prices/names after Zoho changes
+    await PricebookCache.destroy({ where: {} });
+
     // Sync unit of measure for items that have a unit (in parallel, batched)
     const itemsWithUnit = (zohoItems || []).filter((z) => extractUnitFromZohoItem(z));
     if (itemsWithUnit.length > 0) {

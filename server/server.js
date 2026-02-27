@@ -15,7 +15,7 @@ import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { Customer, User } from './models/index.js';
 import bcrypt from 'bcryptjs';
-import { syncCustomersToDatabase } from './controllers/zohoController.js';
+import { syncCustomersToDatabase, runZohoSyncCore } from './controllers/zohoController.js';
 import { logServerStart, logDatabase, logSuccess, logWarning, logError, logInfo, log, logApiRequest } from './utils/logger.js';
 
 dotenv.config();
@@ -983,6 +983,24 @@ const startServer = async () => {
 
   app.listen(PORT, '0.0.0.0', () => {
     logServerStart(PORT, process.env.NODE_ENV || 'development');
+
+    // Background Zoho auto-sync every 5 min (ZOHO_AUTO_SYNC_INTERVAL_MS, 0 = disabled)
+    const autoSyncMs = parseInt(process.env.ZOHO_AUTO_SYNC_INTERVAL_MS || '300000', 10);
+    if (autoSyncMs > 0) {
+      let syncInProgress = false;
+      const runBackgroundSync = () => {
+        if (syncInProgress) return;
+        syncInProgress = true;
+        runZohoSyncCore()
+          .then((r) => { if (r?.success) logInfo(`Zoho auto-sync completed: ${r.data?.customers?.total || 0} customers, ${r.data?.items?.total || 0} items`); })
+          .catch((err) => logWarning(`Zoho auto-sync failed (non-fatal): ${err?.message || err}`))
+          .finally(() => { syncInProgress = false; });
+      };
+      setInterval(runBackgroundSync, autoSyncMs);
+      setTimeout(runBackgroundSync, 60000); // First run after 1 min (let server warm up)
+      logInfo(`Zoho auto-sync enabled: every ${autoSyncMs / 60000} min`);
+    }
+
     logDatabase(`Database: ${DATABASE_SETTING} (${DATABASE_SETTING === 'local' ? 'SQLite' : 'PostgreSQL'})`);
     log('');
     log('Available Endpoints:');

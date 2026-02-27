@@ -1,6 +1,5 @@
 import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById, organizeZohoSalesOrdersFuelSurcharge as organizeZohoSalesOrdersFuelSurchargeService } from '../services/zohoService.js';
-import { Customer, Item, Sale, InvoicePayment } from '../models/index.js';
-import { refreshCustomerProfileFromZoho, refreshCustomerPaymentFromAuthNet } from './customerController.js';
+import { Customer, Item, Sale, InvoicePayment, PricebookCache } from '../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
@@ -271,6 +270,9 @@ export const syncZohoItems = async (req, res) => {
       else updated++;
     }
 
+    // Clear pricebook cache so POS shows updated item prices/names
+    await PricebookCache.destroy({ where: {} });
+
     res.json({ 
       success: true,
       message: 'Items synced successfully',
@@ -289,90 +291,76 @@ export const syncZohoItems = async (req, res) => {
   }
 };
 
+/**
+ * Core Zoho sync logic (customers + items + clear pricebook cache).
+ * Used by both manual sync (syncAll) and background auto-sync.
+ * @returns {{ success: boolean, data?: object, error?: string }}
+ */
+export const runZohoSyncCore = async () => {
+  const [customerResult, zohoItems] = await Promise.all([
+    syncCustomersToDatabase({ replaceAll: true }),
+    syncItemsFromZoho()
+  ]);
+
+  let customersCreated = customerResult?.stats?.created || 0;
+  let customersUpdated = customerResult?.stats?.updated || 0;
+  let itemsCreated = 0;
+  let itemsUpdated = 0;
+
+  for (const zohoItem of zohoItems) {
+    const unit = extractUnitFromZohoItem(zohoItem);
+
+    const [item, isNew] = await Item.upsert({
+      zohoId: zohoItem.item_id,
+      name: zohoItem.name,
+      sku: zohoItem.sku || null,
+      description: zohoItem.description || null,
+      price: parseFloat(zohoItem.rate) || 0,
+      taxId: zohoItem.tax_id || null,
+      taxName: zohoItem.tax_name || null,
+      taxPercentage: parseFloat(zohoItem.tax_percentage) || 0,
+      unit: unit,
+      isActive: zohoItem.status === 'active',
+      lastSyncedAt: new Date()
+    }, {
+      returning: true
+    });
+
+    const itemWithId = item.id ? item : await Item.findOne({ where: { zohoId: zohoItem.item_id } });
+    if (!itemWithId || !itemWithId.id) {
+      console.error(`⚠️ Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
+      continue;
+    }
+    if (unit) {
+      await syncItemUnitOfMeasure(itemWithId, zohoItem);
+    }
+    if (isNew) itemsCreated++;
+    else itemsUpdated++;
+  }
+
+  await PricebookCache.destroy({ where: {} });
+
+  return {
+    success: true,
+    data: {
+      customers: { total: customerResult?.stats?.total || 0, created: customersCreated, updated: customersUpdated },
+      items: { total: zohoItems.length, created: itemsCreated, updated: itemsUpdated }
+    }
+  };
+};
+
 export const syncAll = async (req, res) => {
   try {
-    // For manual sync-all, replace customer list completely
-    const [customerResult, zohoItems] = await Promise.all([
-      syncCustomersToDatabase({ replaceAll: true }),
-      syncItemsFromZoho()
-    ]);
-
-    let customersCreated = customerResult?.stats?.created || 0;
-    let customersUpdated = customerResult?.stats?.updated || 0;
-    let itemsCreated = 0;
-    let itemsUpdated = 0;
-
-    for (const zohoItem of zohoItems) {
-      const unit = extractUnitFromZohoItem(zohoItem);
-      
-      const [item, isNew] = await Item.upsert({
-        zohoId: zohoItem.item_id,
-        name: zohoItem.name,
-        sku: zohoItem.sku || null,
-        description: zohoItem.description || null,
-        price: parseFloat(zohoItem.rate) || 0,
-        taxId: zohoItem.tax_id || null,
-        taxName: zohoItem.tax_name || null,
-        taxPercentage: parseFloat(zohoItem.tax_percentage) || 0,
-        unit: unit,
-        isActive: zohoItem.status === 'active',
-        lastSyncedAt: new Date()
-      }, {
-        returning: true
-      });
-
-      // Ensure we have the item with ID
-      const itemWithId = item.id ? item : await Item.findOne({ where: { zohoId: zohoItem.item_id } });
-      
-      if (!itemWithId || !itemWithId.id) {
-        console.error(`⚠️ Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
-        continue;
-      }
-
-      // Sync unit of measure if present
-      if (unit) {
-        await syncItemUnitOfMeasure(itemWithId, zohoItem);
-      }
-
-      if (isNew) itemsCreated++;
-      else itemsUpdated++;
-    }
-
-    // Refresh payment/profile info for all customers (cards, bank, pricebook, tax from Zoho)
-    const customersWithZoho = await Customer.findAll({ where: { zohoId: { [Op.ne]: null } } });
-    const PROFILE_CONCURRENCY = 3;
-    const ZOHO_BATCH_DELAY_MS = 2500;
-    let profilesRefreshed = 0;
-    for (let i = 0; i < customersWithZoho.length; i += PROFILE_CONCURRENCY) {
-      const batch = customersWithZoho.slice(i, i + PROFILE_CONCURRENCY);
-      const results = await Promise.all(batch.map((c) => refreshCustomerProfileFromZoho(c)));
-      profilesRefreshed += results.filter(Boolean).length;
-      if (i + PROFILE_CONCURRENCY < customersWithZoho.length) {
-        await new Promise((r) => setTimeout(r, ZOHO_BATCH_DELAY_MS));
-      }
-    }
-
-    // Refresh Auth.net payment info (cards, bank, profile IDs) for all customers (skips those without email)
-    const allCustomers = await Customer.findAll();
-    let authNetRefreshed = 0;
-    for (let i = 0; i < allCustomers.length; i += PROFILE_CONCURRENCY) {
-      const batch = allCustomers.slice(i, i + PROFILE_CONCURRENCY);
-      const results = await Promise.all(batch.map((c) => refreshCustomerPaymentFromAuthNet(c)));
-      authNetRefreshed += results.filter(Boolean).length;
-    }
-
+    const result = await runZohoSyncCore();
     res.json({
-      success: true,
+      success: result.success,
       message: 'Zoho data synced successfully',
-      data: {
-        customers: { total: customerResult?.stats?.total || 0, created: customersCreated, updated: customersUpdated, profilesRefreshed, authNetPaymentRefreshed: authNetRefreshed },
-        items: { total: zohoItems.length, created: itemsCreated, updated: itemsUpdated }
-      }
+      data: result.data
     });
   } catch (err) {
     console.error('Zoho sync error:', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: 'Zoho sync failed',
       ...(isDevelopment && { error: err.message })
