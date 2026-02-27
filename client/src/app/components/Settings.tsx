@@ -29,7 +29,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { logger } from '../../utils/logger';
 
-type PrinterStatus = 'online' | 'checking' | 'offline';
+type PrinterStatus = 'online' | 'checking' | 'offline' | 'unknown';
 
 interface SettingsProps {
   locationId: string;
@@ -48,23 +48,9 @@ interface Location {
 export function Settings({ locationId, locationName, userName, userRole }: SettingsProps) {
   const { showToast } = useToast();
   const { user } = useAuth();
-  const [printerStatus, setPrinterStatus] = useState<PrinterStatus>('checking');
+  const [printerStatus, setPrinterStatus] = useState<PrinterStatus>('unknown');
   const [isTestingPrint, setIsTestingPrint] = useState(false);
   const [activeTab, setActiveTab] = useState<'profile' | 'printer' | 'cardReader' | 'valorApi'>('profile');
-
-  // Check printer status on mount
-  useEffect(() => {
-    const checkPrinter = async () => {
-      setPrinterStatus('checking');
-      try {
-        const response = await printerAPI.test();
-        setPrinterStatus(response.success ? 'online' : 'offline');
-      } catch (error) {
-        setPrinterStatus('offline');
-      }
-    };
-    checkPrinter();
-  }, []);
 
   const handleTestPrint = async () => {
     setIsTestingPrint(true);
@@ -104,6 +90,13 @@ export function Settings({ locationId, locationName, userName, userRole }: Setti
           text: 'Offline',
           icon: WifiOff,
           className: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-300 dark:border-red-700',
+        };
+      case 'unknown':
+      default:
+        return {
+          text: 'Not checked',
+          icon: Printer,
+          className: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600',
         };
     }
   };

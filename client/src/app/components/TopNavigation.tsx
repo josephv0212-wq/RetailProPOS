@@ -1,7 +1,7 @@
 import { Store, Calendar, Clock, RefreshCw, Printer, LogOut, Users, BarChart3, Settings, ShoppingCart, ChevronDown, User, Shield, MapPin, Moon, Sun } from 'lucide-react';
 import React, { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
-import { printerAPI, zohoAPI } from '../../services/api';
+import { zohoAPI } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { logger } from '../../utils/logger';
 
@@ -36,28 +36,6 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
     return () => clearInterval(timer);
   }, []);
 
-  // Check printer status
-  useEffect(() => {
-    const checkPrinterStatus = async () => {
-      try {
-        const response = await printerAPI.test();
-        setPrinterStatus(response.success ? 'online' : 'offline');
-      } catch (err: any) {
-        // Silently handle printer status check failures (printer may not be configured)
-        // Only log in development mode for debugging
-        if (import.meta.env.DEV) {
-          logger.warn('Printer status check failed', err);
-        }
-        setPrinterStatus('offline');
-      }
-    };
-
-    // Check immediately and then every 30 seconds
-    checkPrinterStatus();
-    const interval = setInterval(checkPrinterStatus, 30000);
-
-    return () => clearInterval(interval);
-  }, []);
   
   const formattedDate = currentTime.toLocaleDateString('en-US', { 
     weekday: 'short',
