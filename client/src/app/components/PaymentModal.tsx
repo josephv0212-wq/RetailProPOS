@@ -69,6 +69,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
   const [selectedPaymentProfileId, setSelectedPaymentProfileId] = useState<string | null>(null);
   const [isPaymentMethodSelectorOpen, setIsPaymentMethodSelectorOpen] = useState(false);
   const [loadingPaymentProfiles, setLoadingPaymentProfiles] = useState(false);
+  const [zohoCards, setZohoCards] = useState<Array<{ last_four_digits?: string; last4?: string; card_type?: string }>>([]);
+  const [zohoLastFour, setZohoLastFour] = useState<string | null>(null);
+  const [zohoCardType, setZohoCardType] = useState<string | null>(null);
+  const [zohoBankLast4, setZohoBankLast4] = useState<string | null>(null);
   const [savePaymentMethod, setSavePaymentMethod] = useState(false);
   const [emailReceiptToCustomer, setEmailReceiptToCustomer] = useState(true);
 
@@ -109,6 +113,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
     } else {
       setPaymentProfiles([]);
       setSelectedPaymentProfileId(null);
+      setZohoCards([]);
+      setZohoLastFour(null);
+      setZohoCardType(null);
+      setZohoBankLast4(null);
     }
   }, [isOpen, customerId, context]);
 
@@ -125,10 +133,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
     setLoadingPaymentProfiles(true);
     try {
       const response = await customersAPI.getPaymentProfiles(customerId);
-      if (response.success && response.data?.paymentProfiles) {
-        setPaymentProfiles(response.data.paymentProfiles);
-        // Auto-select default or stored profile if available
-        const defaultProfile = response.data.paymentProfiles.find((p: any) => p.isDefault || p.isStored) || response.data.paymentProfiles[0];
+      if (response.success && response.data) {
+        setPaymentProfiles(response.data.paymentProfiles || []);
+        setZohoCards(response.data.zohoCards || []);
+        setZohoLastFour(response.data.last_four_digits ?? null);
+        setZohoCardType(response.data.card_type ?? null);
+        setZohoBankLast4(response.data.bank_account_last4 ?? null);
+        const profiles = response.data.paymentProfiles || [];
+        const defaultProfile = profiles.find((p: any) => p.isDefault || p.isStored) || profiles[0];
         if (defaultProfile) {
           setSelectedPaymentProfileId(defaultProfile.paymentProfileId);
         }
@@ -723,7 +735,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
               {context !== 'zohoDocuments' && customerId && (
                 <button
                   onClick={() => {
-                    if (paymentProfiles.length === 0) return;
                     setSelectedMethod('stored_payment');
                     if (!selectedPaymentProfileId && paymentProfiles.length > 0) {
                       const defaultProfile = paymentProfiles.find((p: any) => p.isDefault || p.isStored) || paymentProfiles[0];
@@ -732,18 +743,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
                       }
                     }
                   }}
-                  disabled={loadingPaymentProfiles || paymentProfiles.length === 0}
+                  disabled={false}
                   className={`flex-1 min-w-0 px-4 py-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                    selectedMethod === 'stored_payment' && paymentProfiles.length > 0
+                    selectedMethod === 'stored_payment'
                       ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                      : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed'
+                      : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
                   }`}
                 >
-                  {loadingPaymentProfiles ? (
-                    <Loader className="w-6 h-6 animate-spin text-gray-500 dark:text-gray-400" />
-                  ) : (
-                    <Wallet className="w-6 h-6" />
-                  )}
+                  <Wallet className="w-6 h-6" />
                   <span className="text-sm">Stored</span>
                 </button>
               )}
@@ -897,9 +904,44 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
                     <p className="text-gray-600 dark:text-gray-400">Loading payment methods...</p>
                   </div>
                 ) : paymentProfiles.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-gray-600 dark:text-gray-400 mb-2">No stored payment methods available</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">This customer does not have any stored payment methods in Authorize.net</p>
+                  <div className="text-center py-8 space-y-4">
+                    {(zohoCards.length > 0 || zohoLastFour || zohoBankLast4) ? (
+                      <>
+                        <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 text-left">
+                          <p className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-2">
+                            Payment info on file (from Zoho)
+                          </p>
+                          <div className="text-sm text-amber-700 dark:text-amber-300 space-y-1">
+                            {zohoLastFour && (
+                              <div className="flex items-center gap-2">
+                                <CreditCard className="w-4 h-4 flex-shrink-0" />
+                                <span>{zohoCardType || 'Card'}: xxxx xxxx xxxx {zohoLastFour}</span>
+                              </div>
+                            )}
+                            {zohoBankLast4 && (
+                              <div className="flex items-center gap-2">
+                                <Building2 className="w-4 h-4 flex-shrink-0" />
+                                <span>Bank account: xxxx {zohoBankLast4}</span>
+                              </div>
+                            )}
+                            {!zohoLastFour && !zohoBankLast4 && zohoCards.length > 0 && zohoCards.map((c, i) => (
+                              <div key={i} className="flex items-center gap-2">
+                                <CreditCard className="w-4 h-4 flex-shrink-0" />
+                                <span>{c.card_type || 'Card'}: xxxx xxxx xxxx {c.last_four_digits || c.last4 || '****'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          To use stored payment, add this card by completing a sale with &quot;Save payment method&quot; checked.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-gray-600 dark:text-gray-400 mb-2">No stored payment methods available</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">This customer does not have any stored payment methods in Authorize.net. Add a card by completing a sale with &quot;Save payment method&quot; checked.</p>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -945,6 +987,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
                                 )}
                                 <span className="font-semibold text-gray-900 dark:text-white">
                                   {profile.type === 'card' ? 'Card' : 'Bank Account'}
+                                  {profile.profileName ? ` (${profile.profileName})` : ''}
                                 </span>
                                 {(profile.isDefault || profile.isStored) && (
                                   <span className="text-xs text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2 py-0.5 rounded">
