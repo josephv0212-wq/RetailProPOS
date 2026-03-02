@@ -1,9 +1,11 @@
+import { logError } from '../utils/logger.js';
+
 /**
  * Standardized error response handler
  * Hides internal error details in production
  */
 export const errorHandler = (err, req, res, next) => {
-  console.error('Error:', {
+  logError('Request error', {
     message: err.message,
     stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
     requestId: req.id,
@@ -42,16 +44,3 @@ export const errorHandler = (err, req, res, next) => {
     ...(req.id && { requestId: req.id })
   });
 };
-
-/**
- * Standardized success response wrapper
- */
-export const successResponse = (res, statusCode = 200, data = null, message = null) => {
-  const response = {
-    success: true,
-    ...(message && { message }),
-    ...(data && { data })
-  };
-  return res.status(statusCode).json(response);
-};
-

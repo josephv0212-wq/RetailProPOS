@@ -5,6 +5,7 @@ import { processPayment, processAchPayment, processOpaqueDataPayment, calculateC
 import { createSalesReceipt, emailSalesReceipt, emailInvoice, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
+import { invalidatePaymentProfilesCacheServer } from './customerController.js';
 
 // Authorize.Net invoiceNumber has strict limits (max 20 chars). Zoho document numbers can exceed this.
 // Normalize to a safe, short identifier while keeping type prefix + uniqueness.
@@ -881,8 +882,8 @@ export const createSale = async (req, res) => {
       error: completeSale.syncError || null
     };
 
-    // Sale is complete - return success immediately
-    // Printer runs in background and won't affect the response
+    // Sale is complete - invalidate payment profiles cache (new profile may have been saved)
+    if (customerId) invalidatePaymentProfilesCacheServer(customerId);
 
     return sendSuccess(res, {
       sale: completeSale,
@@ -1833,6 +1834,8 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
           .catch((err) => console.warn(`⚠️ Email invoice ${it.number} error:`, err.message));
       }
     }
+
+    invalidatePaymentProfilesCacheServer(customer.id);
 
     return sendSuccess(res, {
       customer: {

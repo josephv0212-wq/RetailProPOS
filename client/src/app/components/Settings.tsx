@@ -428,7 +428,7 @@ function SystemInfoEditButton({ locationName, userName, userRole }: { locationNa
         showToast(response.message || 'Failed to update profile', 'error', 4000);
       }
     } catch (error: any) {
-      console.error('Error updating profile:', error);
+      logger.error('Error updating profile:', error);
       showToast(error.message || 'Failed to update profile', 'error', 4000);
     } finally {
       setIsSaving(false);
@@ -636,7 +636,7 @@ function ValorApiConfig() {
         showToast(result.error || 'Failed to fetch devices', 'error', 3000);
       }
     } catch (error: any) {
-      console.error('Error fetching Valor devices:', error);
+      logger.error('Error fetching Valor devices:', error);
       showToast('Failed to fetch devices', 'error', 3000);
       setDevices([]);
     } finally {

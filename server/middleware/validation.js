@@ -46,11 +46,6 @@ export const validateSale = (req, res, next) => {
       // No payment processing required - just record the sale
       // Validation passes, continue to next middleware
     } else {
-      const useValorApi = req.body.useValorApi;
-      const useOpaqueData = req.body.useOpaqueData;
-      // Backward compatibility: older clients used "useBluetoothReader" + "bluetoothPayload" for Accept.js opaqueData
-      const useBluetoothReader = req.body.useBluetoothReader;
-      
       if (useValorApi) {
       // Valor API mode - validate terminalNumber and valorTransactionId
       if (!req.body.terminalNumber || req.body.terminalNumber.trim() === '') {

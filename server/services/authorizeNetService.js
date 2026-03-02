@@ -507,9 +507,16 @@ export const findCustomerProfileByEmail = async (email, merchantCustomerId = nul
   }
 };
 
+// Cache email -> profiles (5 min TTL) - avoids repeated full scans
+const EMAIL_PROFILES_CACHE_MS = 5 * 60 * 1000;
+const emailProfilesCache = new Map();
+
+const BATCH_SIZE = 8; // Parallel getCustomerProfile calls per batch
+
 /**
  * Search for ALL customer profiles matching the given email.
  * Returns all matching profiles (Auth.net can have multiple profiles per email).
+ * Uses batched parallel fetches and short-lived cache for speed.
  * @param {string} email - Customer email to search for
  * @returns {Promise<Object>} { success, profiles: [{ profile, customerProfileId }], error? }
  */
@@ -519,25 +526,35 @@ export const searchAllCustomerProfilesByEmail = async (email) => {
   }
   const emailLower = email.trim().toLowerCase();
   try {
+    const cached = emailProfilesCache.get(emailLower);
+    if (cached && (Date.now() - cached.timestamp) < EMAIL_PROFILES_CACHE_MS) {
+      return { success: cached.profiles.length > 0, profiles: cached.profiles, error: cached.profiles.length === 0 ? 'No customer profiles found for this email' : null };
+    }
+
     const idsResult = await getCustomerProfileIds();
     if (!idsResult.success || !idsResult.profileIds || idsResult.profileIds.length === 0) {
       return { success: false, profiles: [], error: idsResult.error || 'No customer profiles found' };
     }
+    const profileIds = idsResult.profileIds;
     const matches = [];
-    for (const profileId of idsResult.profileIds) {
-      try {
-        const profileResult = await getCustomerProfile(profileId);
+
+    for (let i = 0; i < profileIds.length; i += BATCH_SIZE) {
+      const batch = profileIds.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(batch.map((profileId) => getCustomerProfile(profileId).catch(() => ({ success: false }))));
+      for (let j = 0; j < results.length; j++) {
+        const profileResult = results[j];
         if (profileResult.success && profileResult.profile) {
           const profile = profileResult.profile;
           const profileEmail = (Array.isArray(profile.email) ? profile.email[0] : profile.email) || '';
           if (profileEmail.toLowerCase() === emailLower) {
-            matches.push({ profile, customerProfileId: profileId });
+            matches.push({ profile, customerProfileId: batch[j] });
           }
         }
-      } catch (err) {
-        continue;
       }
     }
+
+    emailProfilesCache.set(emailLower, { profiles: matches, timestamp: Date.now() });
+
     return {
       success: matches.length > 0,
       profiles: matches,

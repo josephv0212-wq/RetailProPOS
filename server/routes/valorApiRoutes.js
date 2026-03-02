@@ -1,4 +1,5 @@
 import express from 'express';
+import { logError, logWarning } from '../utils/logger.js';
 import { authenticate } from '../middleware/auth.js';
 import {
   authenticateValorApi,
@@ -43,7 +44,7 @@ router.post('/auth', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Valor API auth error:', error);
+    logError('Valor API auth error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -77,7 +78,7 @@ router.get('/devices', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Get Valor devices error:', error);
+    logError('Get Valor devices error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -118,7 +119,7 @@ router.post('/checkepi', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Check EPI error:', error);
+    logError('Check EPI error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -159,7 +160,7 @@ router.post('/payment', async (req, res) => {
     // This can help catch EPI issues early
     const epiCheck = await checkEPI(epiValue.trim());
     if (!epiCheck.success || !epiCheck.active) {
-      console.warn('⚠️ EPI check failed, but proceeding with payment attempt:', epiCheck);
+      logWarning('EPI check failed, but proceeding with payment attempt', epiCheck);
       // Don't fail here - let Valor Connect API handle the validation
       // Some implementations might not support EPI check endpoint
     }
@@ -193,7 +194,7 @@ router.post('/payment', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Valor API payment error:', error);
+    logError('Valor API payment error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -238,7 +239,7 @@ router.get('/status/:transactionId', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Get payment status error:', error);
+    logError('Get payment status error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -283,7 +284,7 @@ router.post('/poll/:transactionId', async (req, res) => {
       data: status
     });
   } catch (error) {
-    console.error('Poll payment status error:', error);
+    logError('Poll payment status error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -330,7 +331,7 @@ router.post('/cancel', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Cancel transaction error:', error);
+    logError('Cancel transaction error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -377,7 +378,7 @@ router.post('/void', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Void transaction error:', error);
+    logError('Void transaction error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -433,7 +434,7 @@ router.post('/test', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Valor Connect API test error:', error);
+    logError('Valor Connect API test error', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,

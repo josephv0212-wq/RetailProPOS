@@ -5,6 +5,20 @@ import { getCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, 
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
 import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
 
+// Server-side payment profiles cache (5 min TTL) - speeds up repeat loads
+const PAYMENT_PROFILES_CACHE_MS = 5 * 60 * 1000;
+const paymentProfilesCache = new Map();
+export const invalidatePaymentProfilesCacheServer = (customerId) => {
+  if (customerId) paymentProfilesCache.delete(Number(customerId));
+  else paymentProfilesCache.clear();
+};
+
+export const invalidatePaymentProfilesCacheHandler = async (req, res) => {
+  const { id } = req.params;
+  invalidatePaymentProfilesCacheServer(id ? Number(id) : null);
+  return sendSuccess(res, { invalidated: true });
+};
+
 const normalizeContactType = (value) => {
   if (!value) return null;
   return value.toString().trim().toLowerCase();
@@ -455,7 +469,13 @@ const runHandlerCapture = async (handler, req) => {
     status: (code) => { captured.statusCode = code; return mockRes; },
     json: (body) => { captured.body = body; return mockRes; }
   };
-  await handler(req, mockRes);
+  try {
+    await handler(req, mockRes);
+  } catch (err) {
+    logError('Checkout handler error', { handler: handler.name, error: err });
+    captured.statusCode = 500;
+    captured.body = { success: false, message: err?.message || 'Handler failed' };
+  }
   return captured;
 };
 
@@ -478,8 +498,10 @@ export const getCustomerCheckoutData = async (req, res) => {
     }
 
     if (priceListResult.statusCode !== 200 || paymentProfilesResult.statusCode !== 200) {
-      const errMsg = priceListResult.body?.message || paymentProfilesResult.body?.message || 'Failed to fetch checkout data';
-      return sendError(res, errMsg, priceListResult.statusCode >= 400 ? priceListResult.statusCode : 500);
+      const failed = priceListResult.statusCode !== 200 ? priceListResult : paymentProfilesResult;
+      const errMsg = failed.body?.message || failed.body?.error || 'Failed to fetch checkout data';
+      const statusCode = failed.statusCode >= 400 ? failed.statusCode : 500;
+      return sendError(res, errMsg, statusCode);
     }
 
     const priceListData = priceListResult.body?.data ?? priceListResult.body;
@@ -503,10 +525,17 @@ export const getCustomerCheckoutData = async (req, res) => {
 export const getCustomerPaymentProfiles = async (req, res) => {
   try {
     const { id } = req.params;
+    const customerId = Number(id);
     const customer = await Customer.findByPk(id);
 
     if (!customer) {
       return sendNotFound(res, 'Customer');
+    }
+
+    // Return cached result when fresh (speeds up repeat loads)
+    const cached = paymentProfilesCache.get(customerId);
+    if (cached && (Date.now() - cached.timestamp) < PAYMENT_PROFILES_CACHE_MS) {
+      return sendSuccess(res, cached.data);
     }
 
     // Zoho + Auth.net: run in parallel for speed
@@ -514,7 +543,6 @@ export const getCustomerPaymentProfiles = async (req, res) => {
     let zohoLastFour = null;
     let zohoCardType = null;
     let zohoBankLast4 = customer.bankAccountLast4 || null;
-    const PAYMENT_PROFILES_CACHE_MS = 5 * 60 * 1000;
     const useZohoCache = customer.zohoId && customer.zohoProfileSyncedAt &&
       (Date.now() - new Date(customer.zohoProfileSyncedAt).getTime()) < PAYMENT_PROFILES_CACHE_MS;
     const hasDbZoho = customer.last_four_digits || customer.zohoCards;
@@ -618,7 +646,8 @@ export const getCustomerPaymentProfiles = async (req, res) => {
 
       const fromStored = await tryStoredProfile();
       if (fromStored) {
-        await trySearchByEmail(true);
+        // Skip searchByEmail when stored profile works - saves N+1 Auth.net API calls
+        // (Customer typically has one profile; full merge can be slow with many CIM profiles)
       } else {
         await trySearchByEmail(false);
       }
@@ -689,7 +718,7 @@ export const getCustomerPaymentProfiles = async (req, res) => {
         (p.customerProfileId === storedCustomerProfileId || (!p.customerProfileId && !storedCustomerProfileId))
     }));
 
-    return sendSuccess(res, {
+    const responseData = {
       customerProfileId: firstCustomerProfileId?.toString() || null,
       paymentProfiles: profilesWithDefault,
       zohoCards,
@@ -697,7 +726,9 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       card_type: zohoCardType,
       bank_account_last4: zohoBankLast4,
       message: allPaymentProfiles.length === 0 ? 'Customer does not have a payment profile in Authorize.net' : null
-    });
+    };
+    paymentProfilesCache.set(customerId, { data: responseData, timestamp: Date.now() });
+    return sendSuccess(res, responseData);
   } catch (err) {
     logError('Get customer payment profiles error', err);
     return sendError(res, 'Failed to fetch customer payment profiles', 500, err);

@@ -1,5 +1,6 @@
 import net from 'net';
 import dotenv from 'dotenv';
+import { logWarning } from '../utils/logger.js';
 dotenv.config();
 
 // ESC/POS Commands
@@ -72,7 +73,7 @@ export const printReceipt = async (saleData, locationId) => {
     return { success: true };
   } catch (error) {
     // Log error but don't throw - printer failures should not block sales
-    console.warn(`⚠️ Printer error at ${locationId}: ${error.message} (Sale will still complete successfully)`);
+    logWarning(`Printer error at ${locationId}: ${error.message} (Sale will still complete successfully)`);
     return {
       success: false,
       error: error.message,

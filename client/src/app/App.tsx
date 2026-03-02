@@ -100,6 +100,7 @@ function AppContent() {
   const [zohoDocsCartItems, setZohoDocsCartItems] = useState<CartItem[]>([]);
   const [zohoDocsTotals, setZohoDocsTotals] = useState<{ total: number; subtotal: number; tax: number }>({ total: 0, subtotal: 0, tax: 0 });
   const [allUnits, setAllUnits] = useState<UnitOfMeasureOption[]>([]); // All units including basic UMs for dry ice
+  const preFetchedCheckoutRef = useRef<{ priceList?: any; paymentProfiles?: any } | null>(null);
 
   // Memoized constants from user data - use logged-in user's tax percentage
   const constants = useMemo(() => {
@@ -308,17 +309,31 @@ function AppContent() {
     setSelectedCustomer(customer);
 
     // Check for open sales orders and invoices if customer has Zoho ID
+    // Load checkout data (payment profiles, cards) in parallel so it's ready for payment modals
+    let preFetchedCheckout: { priceList?: any; paymentProfiles?: any } | null = null;
     if (customer.zohoId) {
       try {
         setLoadingOrders(true);
         setLoadingMessage('Checking orders & invoices…');
-        const invoiceResponse = await zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid').catch(() => ({ success: false, data: { invoices: [] } }));
+        const [invoiceResponse, checkoutRes] = await Promise.all([
+          zohoAPI.getCustomerInvoices(customer.zohoId, 'unpaid').catch(() => ({ success: false, data: { invoices: [] } })),
+          customer.id ? customersAPI.getCheckoutData(customer.id).catch(() => ({ data: null })) : Promise.resolve({ data: null })
+        ]);
         const invoiceList = invoiceResponse.success && invoiceResponse.data?.invoices ? invoiceResponse.data.invoices : [];
         setOpenSalesOrders([]);
         setInvoices(invoiceList);
 
+        // Set payment profiles + cards immediately (reduces time to show stored payment info in modals)
+        if (checkoutRes.data && customer.id) {
+          preFetchedCheckout = { priceList: checkoutRes.data.priceList, paymentProfiles: checkoutRes.data.paymentProfiles };
+          if (preFetchedCheckout.paymentProfiles) {
+            setCheckoutPaymentProfiles({ customerId: customer.id, data: preFetchedCheckout.paymentProfiles });
+          }
+        }
+
         // Show modal if we have any invoices
         if (invoiceList.length > 0) {
+          preFetchedCheckoutRef.current = preFetchedCheckout; // Store for when modal closes without charging
           setIsOrderInvoiceModalOpen(true);
           setLoadingOrders(false);
           setLoadingMessage(null);
@@ -338,7 +353,8 @@ function AppContent() {
     }
 
     // Continue with customer selection (this will be called after SO/Invoice check or if none found)
-    await continueCustomerSelection(customer);
+    await continueCustomerSelection(customer, preFetchedCheckout);
+    preFetchedCheckoutRef.current = null;
   };
 
   // Shopping cart functions
@@ -812,16 +828,20 @@ function AppContent() {
 
 
   // Continue customer selection after SO/Invoice handling
-  const continueCustomerSelection = async (customer: Customer | null) => {
+  const continueCustomerSelection = async (customer: Customer | null, preFetchedCheckout?: { priceList?: any; paymentProfiles?: any } | null) => {
     if (!customer) return;
     setLoadingMessage('Loading price list…');
     try {
-      // Fetch price list + payment profiles in one request (checkout-data), then get pricebook or loadProducts.
+      // Use pre-fetched checkout data when available (from parallel load with invoice check), otherwise fetch.
       if (customer.id) {
         try {
-          const checkoutRes = await customersAPI.getCheckoutData(customer.id);
-          const priceListRes = checkoutRes.data?.priceList;
-          const paymentProfilesRes = checkoutRes.data?.paymentProfiles;
+          let priceListRes = preFetchedCheckout?.priceList;
+          let paymentProfilesRes = preFetchedCheckout?.paymentProfiles;
+          if (!priceListRes && !paymentProfilesRes) {
+            const checkoutRes = await customersAPI.getCheckoutData(customer.id);
+            priceListRes = checkoutRes.data?.priceList;
+            paymentProfilesRes = checkoutRes.data?.paymentProfiles;
+          }
           if (paymentProfilesRes) {
             setCheckoutPaymentProfiles({ customerId: customer.id, data: paymentProfilesRes });
           } else {
@@ -1431,7 +1451,9 @@ function AppContent() {
             setInvoices([]);
             // Skip loading price list when charging invoices; only load when user cancels to start new sale
             if (selectedCustomer && !hadSelection) {
-              continueCustomerSelection(selectedCustomer);
+              const cached = preFetchedCheckoutRef.current;
+              continueCustomerSelection(selectedCustomer, cached);
+              preFetchedCheckoutRef.current = null;
             }
           }}
           salesOrders={openSalesOrders}

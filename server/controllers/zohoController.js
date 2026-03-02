@@ -2,6 +2,7 @@ import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCu
 import { Customer, Item, Sale, InvoicePayment, PricebookCache } from '../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
+import { logError } from '../utils/logger.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
 import { sequelize } from '../config/db.js';
 
@@ -178,7 +179,7 @@ export const syncCustomersToDatabase = async (options = {}) => {
       stats: { total: customerContacts.length, created, updated }
     };
   } catch (err) {
-    console.error('Customer sync error:', err);
+    logError('Customer sync error', err);
     throw err;
   }
 };
@@ -217,7 +218,7 @@ export const syncZohoCustomers = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Customer sync error:', err);
+    logError('Customer sync error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({ 
       success: false,
@@ -257,7 +258,7 @@ export const syncZohoItems = async (req, res) => {
       const itemWithId = item.id ? item : await Item.findOne({ where: { zohoId: zohoItem.item_id } });
       
       if (!itemWithId || !itemWithId.id) {
-        console.error(`⚠️ Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
+        logError(`Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
         continue;
       }
 
@@ -281,7 +282,7 @@ export const syncZohoItems = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Item sync error:', err);
+    logError('Item sync error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({ 
       success: false,
@@ -328,7 +329,7 @@ export const runZohoSyncCore = async () => {
 
     const itemWithId = item.id ? item : await Item.findOne({ where: { zohoId: zohoItem.item_id } });
     if (!itemWithId || !itemWithId.id) {
-      console.error(`⚠️ Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
+      logError(`Failed to get item ID for "${zohoItem.name}" (Zoho ID: ${zohoItem.item_id})`);
       continue;
     }
     if (unit) {
@@ -358,7 +359,7 @@ export const syncAll = async (req, res) => {
       data: result.data
     });
   } catch (err) {
-    console.error('Zoho sync error:', err);
+    logError('Zoho sync error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({
       success: false,
@@ -376,7 +377,7 @@ export const getOrganization = async (req, res) => {
       data: { organizations }
     });
   } catch (err) {
-    console.error('Get organization error:', err);
+    logError('Get organization error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({ 
       success: false,
@@ -402,8 +403,8 @@ export const getTaxRatesList = async (req, res) => {
       data: { taxes }
     });
   } catch (err) {
-    console.error('❌ Get tax rates error:', err);
-    console.error('   Error details:', {
+    logError('Get tax rates error', err);
+    logError('Error details', {
       message: err.message,
       response: err.response?.data,
       status: err.response?.status
@@ -442,8 +443,8 @@ export const getLocationsList = async (req, res) => {
       data: { locations: mappedLocations }
     });
   } catch (err) {
-    console.error('❌ Get locations error:', err);
-    console.error('   Error details:', {
+    logError('Get locations error', err);
+    logError('Error details', {
       message: err.message,
       response: err.response?.data,
       status: err.response?.status
@@ -489,7 +490,7 @@ export const getCustomerOpenSalesOrders = async (req, res) => {
       data: { salesOrders: mappedSalesOrders }
     });
   } catch (err) {
-    console.error('❌ Get customer open sales orders error:', err);
+    logError('Get customer open sales orders error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({ 
       success: false,
@@ -521,7 +522,7 @@ export const getSalesOrderDetails = async (req, res) => {
       data: { salesOrder }
     });
   } catch (err) {
-    console.error('❌ Get sales order details error:', err);
+    logError('Get sales order details error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({ 
       success: false,
@@ -567,7 +568,7 @@ export const getCustomerInvoicesList = async (req, res) => {
       data: { invoices: mappedInvoices }
     });
   } catch (err) {
-    console.error('❌ Get customer invoices error:', err);
+    logError('Get customer invoices error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({ 
       success: false,
@@ -599,7 +600,7 @@ export const getInvoiceDetails = async (req, res) => {
       data: { invoice }
     });
   } catch (err) {
-    console.error('❌ Get invoice details error:', err);
+    logError('Get invoice details error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     res.status(500).json({ 
       success: false,
@@ -636,7 +637,7 @@ export const organizeZohoSalesOrdersFuelSurcharge = async (req, res) => {
 
     return sendSuccess(res, { result }, 'Zoho sales orders organized successfully');
   } catch (err) {
-    console.error('❌ Organize Zoho sales orders (fuel surcharge) error:', err);
+    logError('Organize Zoho sales orders (fuel surcharge) error', err);
     const isDevelopment = process.env.NODE_ENV === 'development';
     return res.status(500).json({
       success: false,

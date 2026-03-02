@@ -26,8 +26,10 @@ const PAYMENT_PROFILES_CACHE_TTL_MS = 60000; // 60 seconds
 export function invalidatePaymentProfilesCache(customerId?: number): void {
   if (customerId != null) {
     paymentProfilesCache.delete(customerId);
+    apiRequest(`/customers/${customerId}/invalidate-payment-cache`, { method: 'POST' }, true).catch(() => {});
   } else {
     paymentProfilesCache.clear();
+    apiRequest('/customers/invalidate-payment-cache', { method: 'POST' }, true).catch(() => {});
   }
 }
 
