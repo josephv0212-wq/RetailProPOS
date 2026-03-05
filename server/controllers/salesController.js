@@ -569,16 +569,20 @@ export const createSale = async (req, res) => {
           message: 'Payment processed successfully via Valor API'
         };
       } else {
-        // Card-not-present mode - process through API
+        // Card-not-present mode - process through API (manual card entry)
         // Validation is now handled by middleware, but keep as backup
         if (!paymentDetails || !paymentDetails.cardNumber) {
           return sendValidationError(res, 'Payment details required for card transactions');
         }
 
+        // Authorize.Net expects expirationDate as MMYY (4 digits); normalize from MM/YY if needed
+        const expirationDate = (paymentDetails.expirationDate || '').replace(/\D/g, '');
+        const cardNumber = (paymentDetails.cardNumber || '').replace(/\D/g, '');
+
         paymentResult = await processPayment({
           amount: total,
-          cardNumber: paymentDetails.cardNumber,
-          expirationDate: paymentDetails.expirationDate,
+          cardNumber,
+          expirationDate: expirationDate || paymentDetails.expirationDate,
           cvv: paymentDetails.cvv,
           description: `POS Sale - ${locationName}`,
           invoiceNumber: `POS-${Date.now()}`
@@ -1859,13 +1863,25 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
 };
 
 /**
- * Record POS (cash/terminal) payment for invoices in Zoho and optionally email.
+ * Record POS (cash/terminal/card/ACH) payment for invoices in Zoho and optionally email.
+ * For card/ACH: charges via Authorize.Net first, then records in Zoho with the transaction ID.
  * POST /sales/record-invoice-payment
- * Body: { customerId, items: [{ type, id, number, amount }], paymentType, amount, transactionId?, emailReceiptToCustomer? }
+ * Body: { customerId, items: [{ type, id, number, amount }], paymentType, amount, transactionId?, emailReceiptToCustomer?,
+ *         useBluetoothReader?, bluetoothPayload?, paymentDetails? (cardNumber, expirationDate, cvv, zip for manual card; achDetails for ACH) }
  */
 export const recordInvoicePayment = async (req, res) => {
   try {
-    const { customerId, items, paymentType: requestPaymentType, amount, transactionId, emailReceiptToCustomer } = req.body;
+    const {
+      customerId,
+      items,
+      paymentType: requestPaymentType,
+      amount,
+      transactionId: requestTransactionId,
+      emailReceiptToCustomer,
+      useBluetoothReader,
+      bluetoothPayload,
+      paymentDetails
+    } = req.body;
 
     if (!customerId || !items || !Array.isArray(items) || items.length === 0) {
       return sendValidationError(res, 'Customer ID and at least one invoice are required');
@@ -1892,7 +1908,70 @@ export const recordInvoicePayment = async (req, res) => {
       ach: 'banktransfer'
     };
     const zohoPaymentMode = paymentModeMap[paymentType] || 'cash';
-    const totalAmount = parseFloat(amount) || invoiceItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+    const originalAmount = parseFloat(amount) || invoiceItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+
+    let transactionId = requestTransactionId || `POS-${Date.now()}`;
+    let totalAmount = originalAmount;
+
+    // For card: charge via Authorize.Net first (manual entry or Accept.js encrypted)
+    if (paymentType === 'card' || paymentType === 'credit_card' || paymentType === 'debit_card') {
+      const usingOpaqueData = !!useBluetoothReader;
+      const opaquePayload = bluetoothPayload;
+
+      if (usingOpaqueData && opaquePayload?.descriptor && opaquePayload?.value) {
+        // Accept.js encrypted (opaqueData) flow - amount from frontend already includes 3% fee
+        const paymentResult = await processOpaqueDataPayment({
+          amount: originalAmount,
+          opaqueData: { descriptor: opaquePayload.descriptor, value: opaquePayload.value },
+          deviceSessionId: opaquePayload.sessionId,
+          invoiceNumber: `INV-${Date.now()}`,
+          description: `Invoice payment: ${invoiceItems.map(it => it.number).join(', ')}`
+        });
+        if (!paymentResult.success) {
+          return sendError(res, paymentResult.error || 'Card payment failed', 400);
+        }
+        transactionId = paymentResult.transactionId;
+        totalAmount = originalAmount;
+      } else if (paymentDetails?.cardNumber) {
+        // Manual card entry (plain) - amount from frontend already includes 3% fee
+        const expirationDate = (paymentDetails.expirationDate || '').replace(/\D/g, '');
+        const cardNumber = (paymentDetails.cardNumber || '').replace(/\D/g, '');
+        const paymentResult = await processPayment({
+          amount: originalAmount,
+          cardNumber,
+          expirationDate: expirationDate || paymentDetails.expirationDate,
+          cvv: paymentDetails.cvv,
+          description: `Invoice payment: ${invoiceItems.map(it => it.number).join(', ')}`,
+          invoiceNumber: `INV-${Date.now()}`
+        });
+        if (!paymentResult.success) {
+          return sendError(res, paymentResult.error || 'Card payment failed', 400);
+        }
+        transactionId = paymentResult.transactionId;
+        totalAmount = originalAmount;
+      } else if (!requestTransactionId || String(requestTransactionId).startsWith('POS-')) {
+        // Card payment but no card data and no pre-existing transaction ID
+        return sendError(res, 'Card payment requires card details (manual entry) or encrypted payload. Please enter card details or use a different payment method.', 400);
+      }
+    }
+
+    // For ACH: charge via Authorize.Net first
+    if (paymentType === 'ach' && paymentDetails?.routingNumber && paymentDetails?.accountNumber) {
+      const paymentResult = await processAchPayment({
+        amount: originalAmount,
+        routingNumber: paymentDetails.routingNumber,
+        accountNumber: paymentDetails.accountNumber,
+        accountType: paymentDetails.accountType || 'checking',
+        nameOnAccount: paymentDetails.nameOnAccount || customer.contactName,
+        bankName: paymentDetails.bankName,
+        description: `Invoice payment: ${invoiceItems.map(it => it.number).join(', ')}`,
+        invoiceNumber: `INV-${Date.now()}`
+      });
+      if (!paymentResult.success) {
+        return sendError(res, paymentResult.error || 'ACH payment failed', 400);
+      }
+      transactionId = paymentResult.transactionId;
+    }
 
     const invoicesForZoho = invoiceItems.map(it => ({
       invoice_id: String(it.id).trim(),
@@ -1904,7 +1983,7 @@ export const recordInvoicePayment = async (req, res) => {
       amount: totalAmount,
       invoices: invoicesForZoho,
       paymentMode: zohoPaymentMode,
-      referenceNumber: transactionId || `POS-${Date.now()}`,
+      referenceNumber: transactionId,
       description: invoiceItems.length === 1
         ? `Invoice ${invoiceItems[0].number} - POS payment`
         : `POS payment: ${invoiceItems.map(it => it.number).join(', ')}`
@@ -1927,7 +2006,8 @@ export const recordInvoicePayment = async (req, res) => {
     }
 
     return sendSuccess(res, {
-      zohoPaymentRecorded: true
+      zohoPaymentRecorded: true,
+      transactionId
     }, 'Payment recorded in Zoho');
   } catch (err) {
     console.error('Record invoice payment error:', err);

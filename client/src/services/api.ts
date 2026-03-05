@@ -512,8 +512,21 @@ export const salesAPI = {
     amount: number;
     transactionId?: string;
     emailReceiptToCustomer?: boolean;
+    useBluetoothReader?: boolean;
+    bluetoothPayload?: { descriptor: string; value: string; sessionId?: string };
+    paymentDetails?: {
+      cardNumber?: string;
+      expirationDate?: string;
+      cvv?: string;
+      zip?: string;
+      routingNumber?: string;
+      accountNumber?: string;
+      accountType?: string;
+      nameOnAccount?: string;
+      bankName?: string;
+    };
   }) => {
-    return apiRequest<{ zohoPaymentRecorded: boolean }>('/sales/record-invoice-payment', {
+    return apiRequest<{ zohoPaymentRecorded: boolean; transactionId?: string }>('/sales/record-invoice-payment', {
       method: 'POST',
       body: JSON.stringify(data),
     }, true);

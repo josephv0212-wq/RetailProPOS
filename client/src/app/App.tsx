@@ -576,7 +576,7 @@ function AppContent() {
     const invoiceItems = items.filter((it: any) => it.type === 'invoice');
     if (invoiceItems.length > 0 && selectedCustomer?.id) {
       try {
-        const res = await salesAPI.recordInvoicePayment({
+        const recordPayload: Parameters<typeof salesAPI.recordInvoicePayment>[0] = {
           customerId: selectedCustomer.id,
           items: invoiceItems.map((it: any) => ({
             type: 'invoice' as const,
@@ -586,14 +586,41 @@ function AppContent() {
           })),
           paymentType: paymentDetails.method || 'cash',
           amount: amountCharged,
-          transactionId: paymentDetails.valorTransactionId || `POS-${Date.now()}`,
+          transactionId: paymentDetails.valorTransactionId || undefined,
           emailReceiptToCustomer: !!paymentDetails.emailReceiptToCustomer,
-        });
+        };
+
+        if (paymentDetails.method === 'card') {
+          if (paymentDetails.useBluetoothReader && paymentDetails.bluetoothPayload) {
+            recordPayload.useBluetoothReader = true;
+            recordPayload.bluetoothPayload = paymentDetails.bluetoothPayload;
+          } else if (paymentDetails.cardNumber) {
+            recordPayload.paymentDetails = {
+              cardNumber: paymentDetails.cardNumber,
+              expirationDate: paymentDetails.expirationDate,
+              cvv: paymentDetails.cvv,
+              zip: paymentDetails.zip,
+            };
+          }
+        } else if (paymentDetails.method === 'ach' && paymentDetails.achDetails) {
+          recordPayload.paymentDetails = {
+            routingNumber: paymentDetails.achDetails.routingNumber,
+            accountNumber: paymentDetails.achDetails.accountNumber,
+            accountType: paymentDetails.achDetails.accountType,
+            nameOnAccount: paymentDetails.achDetails.name,
+            bankName: paymentDetails.achDetails.bankName,
+          };
+        }
+
+        const res = await salesAPI.recordInvoicePayment(recordPayload);
         if (!res.success) {
-          showToast(`Payment recorded locally, but Zoho sync failed: ${(res as any).error || 'Unknown error'}`, 'warning', 5000);
+          const errMsg = (res as any).error || (res as any).message || 'Unknown error';
+          showToast(`Payment failed: ${errMsg}`, 'error', 5000);
+          throw new Error(errMsg);
         }
       } catch (err: any) {
-        showToast(`Payment recorded locally, but Zoho sync failed: ${err?.message || 'Unknown error'}`, 'warning', 5000);
+        showToast(err?.message || 'Payment failed. Please try again.', 'error', 5000);
+        throw err;
       }
     }
 
