@@ -4,7 +4,7 @@ import { authenticate, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Webhook for Zoho Books "contact created" - no auth (Zoho sends the request)
+// Webhook for Zoho Books Workflow Rules (no auth - Zoho calls this; use ZOHO_WEBHOOK_SECRET to verify)
 router.post('/webhook/customer', handleZohoCustomerWebhook);
 
 router.post('/sync/customers', authenticate, syncZohoCustomers);

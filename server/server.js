@@ -55,6 +55,7 @@ const optionalButRecommended = [
   'VALOR_API_MERCHANT_ID',
   'VALOR_API_API_KEY',
   'VALOR_API_SECRET_KEY',
+  'ZOHO_WEBHOOK_SECRET',
   'PRINTER_IP_LOC001',
   'PRINTER_IP_LOC002',
   'PRINTER_IP_LOC003',
@@ -1013,7 +1014,6 @@ const startServer = async () => {
     log('  GET  /items');
     log('  GET  /customers');
     log('  POST /zoho/sync/all');
-    log('  POST /zoho/webhook/customer (Zoho Books webhook - no auth)');
     if (process.env.NODE_ENV === 'production') {
       logWarning('Database auto-sync is disabled. Use migrations for schema changes.');
     }

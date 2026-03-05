@@ -372,73 +372,6 @@ export const syncAll = async (req, res) => {
   }
 };
 
-/**
- * Webhook handler for Zoho Books "contact created" events.
- * Configure a Workflow Rule in Zoho Books: Settings > Automation > Workflow Rules
- * - Trigger: When a contact is created
- * - Action: Webhook → POST to https://your-server.com/zoho/webhook/customer
- * - Body: Default Payload (application/JSON)
- *
- * Optional: Set ZOHO_WEBHOOK_SECRET and pass it as ?secret=xxx or X-Zoho-Webhook-Secret header
- * to validate requests.
- */
-export const handleZohoCustomerWebhook = async (req, res) => {
-  try {
-    const secret = process.env.ZOHO_WEBHOOK_SECRET;
-    if (secret) {
-      const provided = req.query?.secret || req.headers?.['x-zoho-webhook-secret'];
-      if (provided !== secret) {
-        return res.status(401).json({ success: false, error: 'Invalid webhook secret' });
-      }
-    }
-
-    const body = req.body || {};
-    // Zoho may send: contact_id, contact.contact_id, or data.contact_id
-    const contactId =
-      body.contact_id ||
-      body.contact?.contact_id ||
-      body.data?.contact_id;
-
-    if (!contactId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing contact_id in webhook payload',
-        receivedKeys: Object.keys(body)
-      });
-    }
-
-    const result = await syncSingleCustomerToDatabase(String(contactId).trim());
-
-    if (result.success) {
-      if (result.skipped) {
-        return res.status(200).json({
-          success: true,
-          skipped: true,
-          reason: result.reason
-        });
-      }
-      return res.status(200).json({
-        success: true,
-        created: result.created,
-        updated: result.updated,
-        customerId: result.customerId,
-        contactName: result.contactName
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      error: result.error
-    });
-  } catch (err) {
-    logError('Zoho customer webhook error', err);
-    return res.status(500).json({
-      success: false,
-      error: err?.message || 'Webhook processing failed'
-    });
-  }
-};
-
 export const getOrganization = async (req, res) => {
   try {
     const organizations = await getOrganizationDetails();
@@ -680,6 +613,97 @@ export const getInvoiceDetails = async (req, res) => {
         details: err.response?.data 
       })
     });
+  }
+};
+
+/**
+ * Sync a single customer from Zoho Books by contact ID.
+ * Used by webhook when a new contact is created in Zoho.
+ * @param {string} contactId - Zoho contact_id
+ * @returns {{ success: boolean, created?: boolean, skipped?: boolean, error?: string }}
+ */
+export const syncSingleCustomerFromZoho = async (contactId) => {
+  if (!contactId) {
+    return { success: false, error: 'contact_id is required' };
+  }
+  try {
+    const zohoCustomer = await getCustomerById(contactId);
+    if (!zohoCustomer) {
+      return { success: false, error: 'Contact not found in Zoho' };
+    }
+    const contactType = (zohoCustomer.contact_type || 'customer').toLowerCase();
+    if (contactType !== 'customer') {
+      return { success: true, skipped: true, reason: `Contact type "${contactType}" is not a customer` };
+    }
+    const location = extractLocation(zohoCustomer);
+    const paymentMethod = extractPaymentMethod(zohoCustomer);
+    const [customer, isNew] = await Customer.upsert({
+      zohoId: zohoCustomer.contact_id,
+      contactName: zohoCustomer.contact_name,
+      companyName: zohoCustomer.company_name || null,
+      email: zohoCustomer.email || null,
+      phone: zohoCustomer.phone || null,
+      contactType,
+      locationId: location.locationId,
+      locationName: location.locationName,
+      isDefaultCustomer: isDefaultCustomer(zohoCustomer.contact_name),
+      hasPaymentMethod: paymentMethod.hasPaymentMethod,
+      paymentMethodType: paymentMethod.paymentMethodType,
+      last_four_digits: paymentMethod.last_four_digits,
+      cardBrand: paymentMethod.cardBrand,
+      isActive: zohoCustomer.status === 'active',
+      status: zohoCustomer.status || null,
+      lastSyncedAt: new Date()
+    });
+    return { success: true, created: !!isNew };
+  } catch (err) {
+    logError('Sync single customer from Zoho error', err);
+    return { success: false, error: err?.message || String(err) };
+  }
+};
+
+/**
+ * Webhook handler for Zoho Books Workflow Rules.
+ * Configure in Zoho: Settings → Workflow Rules → Contacts → On Create → Webhook.
+ * POST to this URL with Default Payload (JSON). Optionally set ZOHO_WEBHOOK_SECRET
+ * and add it as a header (X-Zoho-Webhook-Secret) or query param for verification.
+ */
+export const handleZohoCustomerWebhook = async (req, res) => {
+  try {
+    const secret = process.env.ZOHO_WEBHOOK_SECRET;
+    if (secret) {
+      const headerSecret = req.headers['x-zoho-webhook-secret'];
+      const querySecret = req.query?.secret;
+      if (headerSecret !== secret && querySecret !== secret) {
+        logError('Zoho webhook: invalid or missing secret');
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+      }
+    }
+    const body = req.body || {};
+    const contactId = body.contact_id ?? body.contact?.contact_id ?? body.id;
+    if (!contactId) {
+      logError('Zoho webhook: missing contact_id in payload', { bodyKeys: Object.keys(body) });
+      return res.status(400).json({ success: false, error: 'contact_id is required' });
+    }
+    const result = await syncSingleCustomerFromZoho(String(contactId));
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+    if (result.skipped) {
+      return res.json({ success: true, skipped: true, reason: result.reason });
+    }
+    const customer = await Customer.findOne({ where: { zohoId: String(contactId) } });
+    if (customer) {
+      await refreshCustomerProfileFromZoho(customer).catch(() => {});
+    }
+    res.json({
+      success: true,
+      created: result.created,
+      contactId: String(contactId)
+    });
+  } catch (err) {
+    logError('Zoho webhook error', err);
+    res.status(500).json({ success: false, error: err?.message || 'Webhook failed' });
   }
 };
 
