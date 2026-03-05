@@ -1,8 +1,11 @@
 import express from 'express';
-import { syncZohoCustomers, syncZohoItems, syncAll, getOrganization, getTaxRatesList, getLocationsList, getCustomerOpenSalesOrders, getSalesOrderDetails, getCustomerInvoicesList, getInvoiceDetails, organizeZohoSalesOrdersFuelSurcharge } from '../controllers/zohoController.js';
+import { syncZohoCustomers, syncZohoItems, syncAll, getOrganization, getTaxRatesList, getLocationsList, getCustomerOpenSalesOrders, getSalesOrderDetails, getCustomerInvoicesList, getInvoiceDetails, organizeZohoSalesOrdersFuelSurcharge, handleZohoCustomerWebhook } from '../controllers/zohoController.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Webhook for Zoho Books "contact created" - no auth (Zoho sends the request)
+router.post('/webhook/customer', handleZohoCustomerWebhook);
 
 router.post('/sync/customers', authenticate, syncZohoCustomers);
 router.post('/sync/items', authenticate, syncZohoItems);

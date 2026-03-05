@@ -1013,6 +1013,7 @@ const startServer = async () => {
     log('  GET  /items');
     log('  GET  /customers');
     log('  POST /zoho/sync/all');
+    log('  POST /zoho/webhook/customer (Zoho Books webhook - no auth)');
     if (process.env.NODE_ENV === 'production') {
       logWarning('Database auto-sync is disabled. Use migrations for schema changes.');
     }

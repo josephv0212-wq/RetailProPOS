@@ -61,7 +61,7 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
         showToast(msg, 'success', 4000);
         onSyncComplete?.();
       } else {
-        showToast(response.message || 'Zoho sync failed.', 'error', 5000);
+        showToast((response as any).error || response.message || 'Zoho sync failed.', 'error', 6000);
       }
     } catch (err: any) {
       logger.error('Zoho sync failed', err);

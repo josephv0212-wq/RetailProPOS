@@ -1,4 +1,5 @@
 import { syncCustomersFromZoho, syncItemsFromZoho, getOrganizationDetails, getCustomerById, getTaxRates, getLocations, getOpenSalesOrders, getSalesOrderById, getCustomerInvoices, getInvoiceById, organizeZohoSalesOrdersFuelSurcharge as organizeZohoSalesOrdersFuelSurchargeService } from '../services/zohoService.js';
+import { refreshCustomerProfileFromZoho, refreshCustomerPaymentFromAuthNet } from './customerController.js';
 import { Customer, Item, Sale, InvoicePayment, PricebookCache } from '../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
@@ -99,7 +100,9 @@ const isDefaultCustomer = (contactName) => {
 export const syncCustomersToDatabase = async (options = {}) => {
   try {
     const zohoCustomers = await syncCustomersFromZoho();
-    const customerContacts = (zohoCustomers || []).filter(c => (c?.contact_type || 'customer').toLowerCase() === 'customer');
+    const customerContacts = (zohoCustomers || [])
+      .filter(c => (c?.contact_type || 'customer').toLowerCase() === 'customer')
+      .filter(c => c?.contact_id && c?.contact_name);
     
     let created = 0;
     let updated = 0;
@@ -219,11 +222,11 @@ export const syncZohoCustomers = async (req, res) => {
     });
   } catch (err) {
     logError('Customer sync error', err);
-    const isDevelopment = process.env.NODE_ENV === 'development';
+    const errorMessage = err?.message || String(err);
     res.status(500).json({ 
       success: false,
       message: 'Customer sync failed',
-      ...(isDevelopment && { error: err.message })
+      error: errorMessage
     });
   }
 };
@@ -365,6 +368,73 @@ export const syncAll = async (req, res) => {
       success: false,
       message: 'Zoho sync failed',
       ...(isDevelopment && { error: err.message })
+    });
+  }
+};
+
+/**
+ * Webhook handler for Zoho Books "contact created" events.
+ * Configure a Workflow Rule in Zoho Books: Settings > Automation > Workflow Rules
+ * - Trigger: When a contact is created
+ * - Action: Webhook → POST to https://your-server.com/zoho/webhook/customer
+ * - Body: Default Payload (application/JSON)
+ *
+ * Optional: Set ZOHO_WEBHOOK_SECRET and pass it as ?secret=xxx or X-Zoho-Webhook-Secret header
+ * to validate requests.
+ */
+export const handleZohoCustomerWebhook = async (req, res) => {
+  try {
+    const secret = process.env.ZOHO_WEBHOOK_SECRET;
+    if (secret) {
+      const provided = req.query?.secret || req.headers?.['x-zoho-webhook-secret'];
+      if (provided !== secret) {
+        return res.status(401).json({ success: false, error: 'Invalid webhook secret' });
+      }
+    }
+
+    const body = req.body || {};
+    // Zoho may send: contact_id, contact.contact_id, or data.contact_id
+    const contactId =
+      body.contact_id ||
+      body.contact?.contact_id ||
+      body.data?.contact_id;
+
+    if (!contactId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing contact_id in webhook payload',
+        receivedKeys: Object.keys(body)
+      });
+    }
+
+    const result = await syncSingleCustomerToDatabase(String(contactId).trim());
+
+    if (result.success) {
+      if (result.skipped) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: result.reason
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        created: result.created,
+        updated: result.updated,
+        customerId: result.customerId,
+        contactName: result.contactName
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: result.error
+    });
+  } catch (err) {
+    logError('Zoho customer webhook error', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Webhook processing failed'
     });
   }
 };

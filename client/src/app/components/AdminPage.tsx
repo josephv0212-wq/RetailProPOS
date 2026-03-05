@@ -255,7 +255,7 @@ export function AdminPage({ currentUser }: AdminPageProps) {
         // Reload data
         window.location.reload(); // Simple reload, could be more elegant
       } else {
-        showToast('Zoho sync failed', 'error');
+        showToast((response as any).error || response.message || 'Zoho sync failed', 'error');
       }
     } catch (err) {
       logger.error('Zoho sync failed', err);
