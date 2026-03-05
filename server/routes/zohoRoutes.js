@@ -1,11 +1,12 @@
 import express from 'express';
-import { syncZohoCustomers, syncZohoItems, syncAll, getOrganization, getTaxRatesList, getLocationsList, getCustomerOpenSalesOrders, getSalesOrderDetails, getCustomerInvoicesList, getInvoiceDetails, organizeZohoSalesOrdersFuelSurcharge, handleZohoCustomerWebhook } from '../controllers/zohoController.js';
+import { syncZohoCustomers, syncZohoItems, syncAll, getOrganization, getTaxRatesList, getLocationsList, getCustomerOpenSalesOrders, getSalesOrderDetails, getCustomerInvoicesList, getInvoiceDetails, organizeZohoSalesOrdersFuelSurcharge, handleZohoCustomerWebhook, handleZohoCustomerDeletedWebhook } from '../controllers/zohoController.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Webhook for Zoho Books Workflow Rules (no auth - Zoho calls this; use ZOHO_WEBHOOK_SECRET to verify)
 router.post('/webhook/customer', handleZohoCustomerWebhook);
+router.post('/webhook/customer/deleted', handleZohoCustomerDeletedWebhook);
 
 router.post('/sync/customers', authenticate, syncZohoCustomers);
 router.post('/sync/items', authenticate, syncZohoItems);

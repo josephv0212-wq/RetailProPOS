@@ -3,7 +3,7 @@ import { refreshCustomerProfileFromZoho, refreshCustomerPaymentFromAuthNet } fro
 import { Customer, Item, Sale, InvoicePayment, PricebookCache } from '../models/index.js';
 import { Op } from 'sequelize';
 import { sendSuccess, sendError } from '../utils/responseHelper.js';
-import { logError } from '../utils/logger.js';
+import { logError, logInfo } from '../utils/logger.js';
 import { extractUnitFromZohoItem, syncItemUnitOfMeasure } from '../utils/itemUnitOfMeasureHelper.js';
 import { sequelize } from '../config/db.js';
 
@@ -703,6 +703,45 @@ export const handleZohoCustomerWebhook = async (req, res) => {
     });
   } catch (err) {
     logError('Zoho webhook error', err);
+    res.status(500).json({ success: false, error: err?.message || 'Webhook failed' });
+  }
+};
+
+/**
+ * Webhook handler for Zoho Books Workflow Rules - Contact Deleted.
+ * Configure in Zoho: Settings → Workflow Rules → Contacts → On Delete → Webhook.
+ * Soft-deletes the customer in DB (sets isActive: false) to preserve sales history.
+ */
+export const handleZohoCustomerDeletedWebhook = async (req, res) => {
+  try {
+    const secret = process.env.ZOHO_WEBHOOK_SECRET;
+    if (secret) {
+      const headerSecret = req.headers['x-zoho-webhook-secret'];
+      const querySecret = req.query?.secret;
+      if (headerSecret !== secret && querySecret !== secret) {
+        logError('Zoho webhook (delete): invalid or missing secret');
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+      }
+    }
+    const body = req.body || {};
+    const contactId = body.contact_id ?? body.contact?.contact_id ?? body.id;
+    if (!contactId) {
+      logError('Zoho webhook (delete): missing contact_id in payload', { bodyKeys: Object.keys(body) });
+      return res.status(400).json({ success: false, error: 'contact_id is required' });
+    }
+    const customer = await Customer.findOne({ where: { zohoId: String(contactId) } });
+    if (!customer) {
+      return res.json({ success: true, message: 'Customer not found in DB (already removed or never synced)' });
+    }
+    await customer.update({ isActive: false, status: 'inactive' });
+    logInfo(`Customer ${contactId} (${customer.contactName}) marked inactive from Zoho delete webhook`);
+    res.json({
+      success: true,
+      contactId: String(contactId),
+      message: 'Customer marked inactive'
+    });
+  } catch (err) {
+    logError('Zoho webhook (delete) error', err);
     res.status(500).json({ success: false, error: err?.message || 'Webhook failed' });
   }
 };
