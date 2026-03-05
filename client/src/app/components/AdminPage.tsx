@@ -247,9 +247,11 @@ export function AdminPage({ currentUser }: AdminPageProps) {
   const handleSyncZoho = async () => {
     setIsSyncingZoho(true);
     try {
-      const response = await zohoAPI.syncAll();
+      const response = await zohoAPI.syncCustomers();
       if (response.success) {
-        showToast('Zoho sync completed successfully!', 'success');
+        const stats = response.data?.stats;
+        const msg = stats ? `Customer list synced: ${stats.total} total (${stats.created} new, ${stats.updated} updated)` : 'Customer list synced from Zoho.';
+        showToast(msg, 'success');
         // Reload data
         window.location.reload(); // Simple reload, could be more elegant
       } else {

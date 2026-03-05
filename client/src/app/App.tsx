@@ -1102,6 +1102,12 @@ function AppContent() {
         requestBody.emailReceiptToCustomer = true;
       }
 
+      // Add save payment method option for Authorize.Net CIM (card/ACH only)
+      if (paymentDetails.savePaymentMethod === true) {
+        requestBody.savePaymentMethod = true;
+        apiPaymentDetails.savePaymentMethod = true;
+      }
+
       const response = await salesAPI.create(requestBody);
 
       // Handle pending terminal payment (waiting for VP100 device)

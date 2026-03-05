@@ -54,9 +54,11 @@ export function TopNavigation({ storeName, userName, onLogout, onNavigateToPOS, 
     if (isSyncingZoho) return;
     setIsSyncingZoho(true);
     try {
-      const response = await zohoAPI.syncAll();
+      const response = await zohoAPI.syncCustomers();
       if (response.success) {
-        showToast('Zoho sync started successfully.', 'success', 4000);
+        const stats = response.data?.stats;
+        const msg = stats ? `Customers synced: ${stats.total} total (${stats.created} new, ${stats.updated} updated)` : 'Customer list synced from Zoho.';
+        showToast(msg, 'success', 4000);
         onSyncComplete?.();
       } else {
         showToast(response.message || 'Zoho sync failed.', 'error', 5000);
