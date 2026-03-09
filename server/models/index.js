@@ -7,6 +7,7 @@ import { UnitOfMeasure } from './UnitOfMeasure.js';
 import { ItemUnitOfMeasure } from './ItemUnitOfMeasure.js';
 import { InvoicePayment } from './InvoicePayment.js';
 import { PricebookCache } from './PricebookCache.js';
+import { AutoInvoiceCustomer } from './AutoInvoiceCustomer.js';
 
 Sale.hasMany(SaleItem, { foreignKey: 'saleId', as: 'items' });
 InvoicePayment.belongsTo(Customer, { foreignKey: 'customerId', as: 'customer' });
@@ -31,4 +32,7 @@ UnitOfMeasure.belongsToMany(Item, {
   as: 'items'
 });
 
-export { User, Customer, Item, Sale, SaleItem, UnitOfMeasure, ItemUnitOfMeasure, InvoicePayment, PricebookCache };
+AutoInvoiceCustomer.belongsTo(Customer, { foreignKey: 'customerId', as: 'customer' });
+Customer.hasOne(AutoInvoiceCustomer, { foreignKey: 'customerId', as: 'autoInvoice' });
+
+export { User, Customer, Item, Sale, SaleItem, UnitOfMeasure, ItemUnitOfMeasure, InvoicePayment, PricebookCache, AutoInvoiceCustomer };

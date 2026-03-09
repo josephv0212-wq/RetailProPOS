@@ -394,6 +394,28 @@ export const customersAPI = {
     }
     return res;
   },
+
+  getAutoInvoiceList: async () => {
+    return apiRequest<{ autoInvoiceCustomers: Array<{
+      id: number;
+      customerId: number;
+      frequency: 'weekly' | 'monthly';
+      customer: { id: number; name: string; contactName: string; company: string; companyName: string; email: string; phone: string; zohoId: string };
+    }> }>('/customers/auto-invoice/list', {}, true);
+  },
+
+  addToAutoInvoice: async (customerId: number, frequency: 'weekly' | 'monthly' = 'weekly') => {
+    return apiRequest<{ autoInvoiceCustomer: any }>('/customers/auto-invoice/add', {
+      method: 'POST',
+      body: JSON.stringify({ customerId, frequency }),
+    }, true);
+  },
+
+  removeFromAutoInvoice: async (customerId: number) => {
+    return apiRequest<{ removed: boolean }>(`/customers/auto-invoice/${customerId}`, {
+      method: 'DELETE',
+    }, true);
+  },
 };
 
 // Sales API
@@ -512,6 +534,7 @@ export const salesAPI = {
     amount: number;
     transactionId?: string;
     emailReceiptToCustomer?: boolean;
+    useStandaloneMode?: boolean;
     useBluetoothReader?: boolean;
     bluetoothPayload?: { descriptor: string; value: string; sessionId?: string };
     paymentDetails?: {

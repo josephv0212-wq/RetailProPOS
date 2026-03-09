@@ -591,7 +591,11 @@ function AppContent() {
         };
 
         if (paymentDetails.method === 'card') {
-          if (paymentDetails.useBluetoothReader && paymentDetails.bluetoothPayload) {
+          if (paymentDetails.useStandaloneMode) {
+            // Standalone card payment for invoices: behave like cash in terms of processing,
+            // but record as card payment in Zoho with a standalone reference.
+            (recordPayload as any).useStandaloneMode = true;
+          } else if (paymentDetails.useBluetoothReader && paymentDetails.bluetoothPayload) {
             recordPayload.useBluetoothReader = true;
             recordPayload.bluetoothPayload = paymentDetails.bluetoothPayload;
           } else if (paymentDetails.cardNumber) {

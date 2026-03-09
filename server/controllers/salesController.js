@@ -1,11 +1,12 @@
 import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer, InvoicePayment, User } from '../models/index.js';
 import { sequelize } from '../config/db.js';
-import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction, searchAllCustomerProfilesByEmail } from '../services/authorizeNetService.js';
+import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
 import { createSalesReceipt, emailSalesReceipt, emailInvoice, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 import { invalidatePaymentProfilesCacheServer } from './customerController.js';
+import { chargeInvoicesWithStoredPayment } from '../services/autoInvoiceChargeService.js';
 
 // Authorize.Net invoiceNumber has strict limits (max 20 chars). Zoho document numbers can exceed this.
 // Normalize to a safe, short identifier while keeping type prefix + uniqueness.
@@ -1470,7 +1471,6 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
   try {
     const { customerId, items, paymentProfileId, customerProfileId: requestCustomerProfileId, paymentType: requestPaymentType, emailReceiptToCustomer } = req.body;
     const raw = requestPaymentType && String(requestPaymentType).toLowerCase();
-    // Merge CC/DC: treat any card as card
     const paymentType = raw === 'ach' ? 'ach' : 'card';
 
     if (!customerId) {
@@ -1485,377 +1485,58 @@ export const chargeInvoicesSalesOrders = async (req, res) => {
       return sendValidationError(res, 'Payment profile ID is required');
     }
 
-    // Get customer from database
     const customer = await Customer.findByPk(customerId);
     if (!customer) {
       return sendNotFound(res, 'Customer');
     }
 
-    // Get or find customer's Authorize.net profile
-    // Use requestCustomerProfileId when provided (needed when multiple Auth.net profiles share same email)
-    let customerProfileId = requestCustomerProfileId || customer.customerProfileId;
-    let customerPaymentProfileId = paymentProfileId; // Use the provided payment profile ID
-
-    // If profile ID not provided, search ALL profiles by email and find the one containing paymentProfileId
-    if (!customerProfileId) {
-      if (!customer.email) {
-        return sendError(
-          res,
-          'Customer email is required to look up stored payment profiles in Authorize.net.',
-          400
-        );
-      }
-      console.log(`🔍 Customer ${customer.contactName} does not have stored profile ID. Searching Authorize.net by email for all matching profiles...`);
-      
-      const allResult = await searchAllCustomerProfilesByEmail(customer.email);
-      
-      if (!allResult.success || !allResult.profiles || allResult.profiles.length === 0) {
-        return sendError(
-          res,
-          'Customer does not have a payment profile in Authorize.net. Please ensure the customer has an email and a stored payment method in Authorize.net CIM.',
-          400
-        );
-      }
-
-      // Find which Auth.net profile contains the requested payment profile
-      let foundProfile = null;
-      for (const { profile, customerProfileId: cpid } of allResult.profiles) {
-        const paymentProfiles = extractPaymentProfiles(profile);
-        const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
-        if (requestedProfile) {
-          customerProfileId = cpid;
-          foundProfile = requestedProfile;
-          break;
-        }
-      }
-
-      if (!customerProfileId || !foundProfile) {
-        const allIds = allResult.profiles.flatMap(({ profile }) =>
-          extractPaymentProfiles(profile).map(p => p.paymentProfileId)
-        );
-        return sendError(
-          res,
-          `Payment profile ID ${paymentProfileId} not found for this customer. Available profiles: ${allIds.join(', ')}`,
-          400
-        );
-      }
-
-      // Store profile IDs when only one Auth.net profile matches (for backward compatibility)
-      if (allResult.profiles.length === 1) {
-        await customer.update({
-          customerProfileId: customerProfileId.toString(),
-          customerPaymentProfileId: paymentProfileId.toString()
-        });
-        console.log(`✅ Found and stored Authorize.net profile IDs for customer ${customer.contactName}`);
-      }
-    } else {
-      // Verify that the stored payment profile ID matches the requested one
-      if (customer.customerPaymentProfileId !== paymentProfileId) {
-        // Re-verify by fetching profile
-        const profileResult = await getCustomerProfileDetails({
-          customerProfileId: customerProfileId
-        });
-        
-        if (profileResult.success && profileResult.profile) {
-          const paymentProfiles = extractPaymentProfiles(profileResult.profile);
-          const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
-          
-          if (!requestedProfile) {
-            return sendError(
-              res,
-              `Payment profile ID ${paymentProfileId} not found for this customer`,
-              400
-            );
-          }
-        }
-      }
-    }
-
-    // Get payment profile type to determine fee structure
-    let actualProfileType = paymentType; // Default to request paymentType
-    try {
-      const profileResult = await getCustomerProfileDetails({
-        customerProfileId: customerProfileId
-      });
-      if (profileResult.success && profileResult.profile) {
-        const paymentProfiles = extractPaymentProfiles(profileResult.profile);
-        const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
-        if (selectedProfile) {
-          actualProfileType = selectedProfile.type === 'ach' ? 'ach' : 'card';
-        }
-      }
-    } catch (profileErr) {
-      console.warn('Could not determine payment profile type, using request type:', profileErr.message);
-    }
-
-    // Validate all items first; collect validation errors
-    const results = [];
-    const errors = [];
-    const validatedItems = [];
-
-    for (let index = 0; index < items.length; index++) {
-      const item = items[index];
-      const { type, id, number, amount } = item;
-
-      if (!type || !id || !number || amount == null) {
-        errors.push({
-          item: { type: type || 'unknown', id: id || '', number: number || '' },
-          error: 'Missing required fields: type, id, number, or amount'
-        });
-        continue;
-      }
-
-      if (type !== 'invoice') {
-        errors.push({
-          item: { type, id, number },
-          error: 'Only invoices are supported. Sales orders are not accepted.'
-        });
-        continue;
-      }
-
-      const originalAmount = parseFloat(amount);
-      if (!(originalAmount > 0)) {
-        errors.push({
-          item: { type, id, number },
-          error: 'Amount must be greater than 0'
-        });
-        continue;
-      }
-
-      validatedItems.push({
-        type,
-        id: String(id).trim(),
-        number: String(number).trim(),
-        amount: originalAmount
-      });
-    }
-
-    // If any validation failed, return without charging
-    if (errors.length > 0) {
-      return sendSuccess(res, {
-        customer: {
-          id: customer.id,
-          name: customer.contactName,
-          customerProfileId,
-          customerPaymentProfileId
-        },
-        results: [],
-        errors,
-        summary: { total: items.length, successful: 0, failed: errors.length }
-      }, 'Validation failed; no charge was made');
-    }
-
-    if (validatedItems.length === 0) {
-      return sendValidationError(res, 'No valid items to charge');
-    }
-
-    // Single charge: total amount + 3% fee only for card (not for ACH)
-    const totalOriginal = validatedItems.reduce((sum, it) => sum + it.amount, 0);
-    const addCardFee = actualProfileType === 'card';
-    const totalCharge = addCardFee ? Math.round(totalOriginal * 1.03 * 100) / 100 : totalOriginal;
-    const totalFee = addCardFee ? Math.round((totalCharge - totalOriginal) * 100) / 100 : 0;
-
-    const batchInvoiceNumber = `MULTI-${Date.now().toString().slice(-8)}`.slice(0, 20);
-    const DESC_MAX = 255;
-    let description = validatedItems.length === 1
-      ? `Invoice Payment: ${validatedItems[0].number}`
-      : `Multi payment: ${validatedItems.map(it => `INV-${it.number}`).join(', ')}`;
-    if (description.length > DESC_MAX) {
-      description = description.substring(0, DESC_MAX - 3) + '...';
-    }
-
-    const chargeResult = await chargeCustomerProfile({
-      customerProfileId,
-      customerPaymentProfileId,
-      amount: totalCharge,
-      invoiceNumber: batchInvoiceNumber,
-      description
+    const result = await chargeInvoicesWithStoredPayment({
+      customerId,
+      paymentProfileId,
+      customerProfileId: requestCustomerProfileId,
+      paymentType,
+      items,
+      systemContext: { userId: req.user?.id ?? null, locationId: req.user?.locationId ?? null }
     });
 
-    if (!chargeResult.success) {
-      const errorMsg = chargeResult.error || 'Transaction declined';
-      console.error('❌ Batch charge failed:', {
-        error: errorMsg,
-        errorCode: chargeResult.errorCode,
-        responseCode: chargeResult.responseCode,
-        totalCharge,
-        itemCount: validatedItems.length
-      });
-      return sendSuccess(res, {
-        customer: {
-          id: customer.id,
-          name: customer.contactName,
-          customerProfileId,
-          customerPaymentProfileId
-        },
-        results: [],
-        errors: [{
-          item: { type: 'batch', id: '', number: 'Multi payment' },
-          error: errorMsg,
-          errorCode: chargeResult.errorCode,
-          responseCode: chargeResult.responseCode
-        }],
-        summary: { total: validatedItems.length, successful: 0, failed: validatedItems.length }
-      }, 'Charge declined; no payment was made');
+    if (!result.success && result.error === 'Customer not found') {
+      return sendNotFound(res, 'Customer');
     }
 
-    // One charge succeeded: record one Zoho customer payment for all invoices, then one InvoicePayment per document
-    let zohoPaymentRecorded = false;
-    let zohoPaymentError = null;
-    const invoiceItems = validatedItems.filter(it => it.type === 'invoice');
-
-    if (invoiceItems.length > 0) {
-      const zohoCustomerId = (customer.zohoId && String(customer.zohoId).trim()) || null;
-      if (!zohoCustomerId) {
-        zohoPaymentError = 'Customer has no Zoho ID. Sync customers from Zoho to record payment in Zoho Books.';
-        console.warn(`⚠️ Zoho: skipping invoice payment recording: ${zohoPaymentError}`);
-      } else {
-        const zohoPaymentMode = paymentType === 'ach' ? 'banktransfer' : 'creditcard';
-        const paymentLabel = paymentType === 'ach' ? 'ACH' : 'Card';
-        let invoicesForZoho = invoiceItems.map(it => ({
-          invoice_id: it.id,
-          amount_applied: it.amount
-        }));
-        let paymentAmount = invoiceItems.reduce((sum, it) => sum + it.amount, 0);
-        let useFeeInvoice = false;
-
-        if (totalFee > 0) {
-          const feeInvoiceResult = await createInvoice({
-            customerId: zohoCustomerId,
-            feeAmount: totalFee,
-            referenceNumber: chargeResult.transactionId || `MULTI-${batchInvoiceNumber}`,
-            date: new Date().toISOString().split('T')[0]
-          });
-          if (feeInvoiceResult.success && feeInvoiceResult.invoiceId) {
-            invoicesForZoho.push({ invoice_id: feeInvoiceResult.invoiceId, amount_applied: totalFee });
-            paymentAmount += totalFee;
-            useFeeInvoice = true;
-          } else {
-            console.warn(`⚠️ Zoho: fee invoice failed, falling back to journal: ${feeInvoiceResult.error || 'unknown'}`);
-          }
-        }
-
-        const zohoPaymentResult = await createCustomerPayment({
-          customerId: zohoCustomerId,
-          amount: paymentAmount,
-          invoices: invoicesForZoho,
-          paymentMode: zohoPaymentMode,
-          referenceNumber: chargeResult.transactionId || undefined,
-          description: validatedItems.length === 1
-            ? `Invoice ${validatedItems[0].number} - POS payment (${paymentLabel})`
-            : `POS multi payment (${paymentLabel}): ${invoiceItems.map(it => it.number).join(', ')}`
-        });
-        if (zohoPaymentResult.success) {
-          zohoPaymentRecorded = true;
-          if (totalFee > 0 && !useFeeInvoice) {
-            const journalResult = await createProcessingFeeJournal({
-              feeAmount: totalFee,
-              referenceNumber: chargeResult.transactionId ? `Txn ${chargeResult.transactionId}` : `MULTI-${batchInvoiceNumber}`,
-              date: new Date().toISOString().split('T')[0]
-            });
-            if (!journalResult.success && journalResult.error !== 'Journal account IDs not configured') {
-              console.warn(`⚠️ Zoho: processing fee journal not created: ${journalResult.error}`);
-            }
-          }
-        } else {
-          zohoPaymentError = zohoPaymentResult.error || 'Unknown Zoho error';
-          console.error(`⚠️ Zoho: could not record invoice payment: ${zohoPaymentError}`);
-        }
-      }
+    if (!result.success && result.error && (result.error.includes('payment profile') || result.error.includes('email is required'))) {
+      return sendError(res, result.error, 400);
     }
 
-    // Per-item amountCharged and ccFee (proportional so sum matches totalCharge and totalFee)
-    let chargedSum = 0;
-    let feeSum = 0;
-    const perItemCharged = validatedItems.map((it, idx) => {
-      const isLast = idx === validatedItems.length - 1;
-      if (isLast) {
-        const charge = Math.round((totalCharge - chargedSum) * 100) / 100;
-        const fee = Math.round((totalFee - feeSum) * 100) / 100;
-        return { amountCharged: charge, ccFee: fee };
-      }
-      const ratio = totalOriginal > 0 ? it.amount / totalOriginal : 0;
-      const charge = Math.round(totalCharge * ratio * 100) / 100;
-      const fee = Math.round(totalFee * ratio * 100) / 100;
-      chargedSum += charge;
-      feeSum += fee;
-      return { amountCharged: charge, ccFee: fee };
-    });
+    const responseData = {
+      customer: {
+        id: customer.id,
+        name: customer.contactName,
+        customerProfileId: requestCustomerProfileId || customer.customerProfileId,
+        customerPaymentProfileId: paymentProfileId
+      },
+      results: result.results || [],
+      errors: result.errors || [],
+      summary: result.summary || { total: items.length, successful: 0, failed: items.length }
+    };
 
-    const transactionId = chargeResult.transactionId || null;
-    for (let i = 0; i < validatedItems.length; i++) {
-      const it = validatedItems[i];
-      const { amountCharged, ccFee } = perItemCharged[i];
-      try {
-        await InvoicePayment.create({
-          customerId: customer.id,
-          type: it.type,
-          documentNumber: it.number,
-          documentId: it.id,
-          amount: it.amount,
-          amountCharged,
-          ccFee,
-          paymentType: paymentType || 'card',
-          transactionId,
-          zohoPaymentRecorded: it.type === 'invoice' ? zohoPaymentRecorded : false,
-          locationId: req.user?.locationId || null,
-          userId: req.user?.id || null
-        });
-      } catch (saveErr) {
-        console.warn(`⚠️ Could not save invoice payment record for ${it.type} ${it.number}:`, saveErr.message);
-      }
-      results.push({
-        type: it.type,
-        id: it.id,
-        number: it.number,
-        amount: it.amount,
-        amountCharged,
-        ccFee,
-        transactionId,
-        authCode: chargeResult.authCode,
-        message: chargeResult.message,
-        success: true,
-        underReview: chargeResult.underReview || false,
-        reviewStatus: chargeResult.reviewStatus || null,
-        zohoPaymentRecorded: it.type === 'invoice' ? zohoPaymentRecorded : undefined,
-        zohoPaymentError: it.type === 'invoice' && zohoPaymentError ? zohoPaymentError : undefined
-      });
-    }
-
-    // Email paid invoices to customer if requested
-    if (emailReceiptToCustomer === true && customer?.email && results.length > 0) {
-      const invoiceItems = validatedItems.filter(it => it.type === 'invoice');
+    if (result.success && result.results?.length > 0 && emailReceiptToCustomer === true && customer?.email) {
+      const invoiceItems = (result.results || []).filter(r => r.type === 'invoice');
       const emailOptions = customer.email ? { to_mail_ids: [customer.email] } : {};
       for (const it of invoiceItems) {
         emailInvoice(it.id, emailOptions)
           .then((r) => {
-            if (r.success) {
-              console.log(`✅ Invoice ${it.number} emailed to customer`);
-            } else {
-              console.warn(`⚠️ Failed to email invoice ${it.number}: ${r.error}`);
-            }
+            if (r.success) console.log(`Invoice ${it.number} emailed to customer`);
+            else console.warn(`Failed to email invoice ${it.number}: ${r.error}`);
           })
-          .catch((err) => console.warn(`⚠️ Email invoice ${it.number} error:`, err.message));
+          .catch((err) => console.warn(`Email invoice ${it.number} error:`, err.message));
       }
     }
 
-    invalidatePaymentProfilesCacheServer(customer.id);
+    const message = result.success && result.summary?.successful > 0
+      ? `Charged ${result.summary.successful} item(s) in one transaction successfully`
+      : (result.summary?.failed > 0 ? (result.error || 'Charge declined; no payment was made') : 'Validation failed; no charge was made');
 
-    return sendSuccess(res, {
-      customer: {
-        id: customer.id,
-        name: customer.contactName,
-        customerProfileId,
-        customerPaymentProfileId
-      },
-      results,
-      errors,
-      summary: {
-        total: validatedItems.length,
-        successful: results.length,
-        failed: errors.length
-      }
-    }, `Charged ${results.length} item(s) in one transaction successfully`);
+    return sendSuccess(res, responseData, message);
   } catch (err) {
     console.error('Charge invoices/sales orders error:', err);
     return sendError(res, 'Failed to charge invoices/sales orders', 500, err);
@@ -1908,50 +1589,65 @@ export const recordInvoicePayment = async (req, res) => {
       ach: 'banktransfer'
     };
     const zohoPaymentMode = paymentModeMap[paymentType] || 'cash';
+    const useStandaloneMode =
+      req.body.useStandaloneMode === true || paymentDetails?.useStandaloneMode === true;
     const originalAmount = parseFloat(amount) || invoiceItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
 
     let transactionId = requestTransactionId || `POS-${Date.now()}`;
     let totalAmount = originalAmount;
 
-    // For card: charge via Authorize.Net first (manual entry or Accept.js encrypted)
+    // For card: either standalone mode (no gateway charge) or charge via Authorize.Net first
     if (paymentType === 'card' || paymentType === 'credit_card' || paymentType === 'debit_card') {
-      const usingOpaqueData = !!useBluetoothReader;
-      const opaquePayload = bluetoothPayload;
+      if (useStandaloneMode) {
+        // Standalone mode - skip payment processing, just record as card payment
+        // Ensure we have a non-generic transactionId for audit trail
+        if (!transactionId || String(transactionId).startsWith('POS-')) {
+          transactionId = `STANDALONE-${Date.now()}`;
+        }
+        totalAmount = originalAmount;
+      } else {
+        const usingOpaqueData = !!useBluetoothReader;
+        const opaquePayload = bluetoothPayload;
 
-      if (usingOpaqueData && opaquePayload?.descriptor && opaquePayload?.value) {
-        // Accept.js encrypted (opaqueData) flow - amount from frontend already includes 3% fee
-        const paymentResult = await processOpaqueDataPayment({
-          amount: originalAmount,
-          opaqueData: { descriptor: opaquePayload.descriptor, value: opaquePayload.value },
-          deviceSessionId: opaquePayload.sessionId,
-          invoiceNumber: `INV-${Date.now()}`,
-          description: `Invoice payment: ${invoiceItems.map(it => it.number).join(', ')}`
-        });
-        if (!paymentResult.success) {
-          return sendError(res, paymentResult.error || 'Card payment failed', 400);
+        if (usingOpaqueData && opaquePayload?.descriptor && opaquePayload?.value) {
+          // Accept.js encrypted (opaqueData) flow - amount from frontend already includes 3% fee
+          const paymentResult = await processOpaqueDataPayment({
+            amount: originalAmount,
+            opaqueData: { descriptor: opaquePayload.descriptor, value: opaquePayload.value },
+            deviceSessionId: opaquePayload.sessionId,
+            invoiceNumber: `INV-${Date.now()}`,
+            description: `Invoice payment: ${invoiceItems.map(it => it.number).join(', ')}`
+          });
+          if (!paymentResult.success) {
+            return sendError(res, paymentResult.error || 'Card payment failed', 400);
+          }
+          transactionId = paymentResult.transactionId;
+          totalAmount = originalAmount;
+        } else if (paymentDetails?.cardNumber) {
+          // Manual card entry (plain) - amount from frontend already includes 3% fee
+          const expirationDate = (paymentDetails.expirationDate || '').replace(/\D/g, '');
+          const cardNumber = (paymentDetails.cardNumber || '').replace(/\D/g, '');
+          const paymentResult = await processPayment({
+            amount: originalAmount,
+            cardNumber,
+            expirationDate: expirationDate || paymentDetails.expirationDate,
+            cvv: paymentDetails.cvv,
+            description: `Invoice payment: ${invoiceItems.map(it => it.number).join(', ')}`,
+            invoiceNumber: `INV-${Date.now()}`
+          });
+          if (!paymentResult.success) {
+            return sendError(res, paymentResult.error || 'Card payment failed', 400);
+          }
+          transactionId = paymentResult.transactionId;
+          totalAmount = originalAmount;
+        } else if (!requestTransactionId || String(requestTransactionId).startsWith('POS-')) {
+          // Card payment but no card data and no pre-existing transaction ID
+          return sendError(
+            res,
+            'Card payment requires card details (manual entry) or encrypted payload. Please enter card details or use a different payment method.',
+            400
+          );
         }
-        transactionId = paymentResult.transactionId;
-        totalAmount = originalAmount;
-      } else if (paymentDetails?.cardNumber) {
-        // Manual card entry (plain) - amount from frontend already includes 3% fee
-        const expirationDate = (paymentDetails.expirationDate || '').replace(/\D/g, '');
-        const cardNumber = (paymentDetails.cardNumber || '').replace(/\D/g, '');
-        const paymentResult = await processPayment({
-          amount: originalAmount,
-          cardNumber,
-          expirationDate: expirationDate || paymentDetails.expirationDate,
-          cvv: paymentDetails.cvv,
-          description: `Invoice payment: ${invoiceItems.map(it => it.number).join(', ')}`,
-          invoiceNumber: `INV-${Date.now()}`
-        });
-        if (!paymentResult.success) {
-          return sendError(res, paymentResult.error || 'Card payment failed', 400);
-        }
-        transactionId = paymentResult.transactionId;
-        totalAmount = originalAmount;
-      } else if (!requestTransactionId || String(requestTransactionId).startsWith('POS-')) {
-        // Card payment but no card data and no pre-existing transaction ID
-        return sendError(res, 'Card payment requires card details (manual entry) or encrypted payload. Please enter card details or use a different payment method.', 400);
       }
     }
 

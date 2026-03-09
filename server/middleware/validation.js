@@ -79,8 +79,9 @@ export const validateSale = (req, res, next) => {
         if (cardNumber.length < 13 || cardNumber.length > 19 || !/^\d+$/.test(cardNumber)) {
           errors.push('Invalid card number format');
         }
-        if (!paymentDetails.expirationDate || !/^\d{2}\/\d{2}$/.test(paymentDetails.expirationDate)) {
-          errors.push('Invalid expiration date format (use MM/YY)');
+        const exp = (paymentDetails.expirationDate || '').replace(/\s/g, '');
+        if (!exp || (!/^\d{2}\/\d{2}$/.test(exp) && !/^\d{4}$/.test(exp))) {
+          errors.push('Invalid expiration date format (use MM/YY or MMYY)');
         }
         if (!paymentDetails.cvv || !/^\d{3,4}$/.test(paymentDetails.cvv)) {
           errors.push('Invalid CVV format');

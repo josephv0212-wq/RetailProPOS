@@ -16,6 +16,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { Customer, User } from './models/index.js';
 import bcrypt from 'bcryptjs';
 import { syncCustomersToDatabase, runZohoSyncCore } from './controllers/zohoController.js';
+import { runAutoInvoiceChargeJob } from './jobs/autoInvoiceChargeJob.js';
 import { logServerStart, logDatabase, logSuccess, logWarning, logError, logInfo, log, logApiRequest } from './utils/logger.js';
 
 dotenv.config();
@@ -61,7 +62,9 @@ const optionalButRecommended = [
   'PRINTER_IP_LOC003',
   'PRINTER_IP_LOC004',
   'FRONTEND_URL',
-  'NODE_ENV' // Used to determine Authorize.Net endpoint (development = sandbox, production = live)
+  'NODE_ENV', // Used to determine Authorize.Net endpoint (development = sandbox, production = live)
+  'AUTO_INVOICE_CHARGE_ENABLED', // Set true to enable auto-charging of unpaid invoices for customers on Auto Invoice list
+  'AUTO_INVOICE_CHARGE_INTERVAL_MS' // Interval in ms (e.g. 86400000 = daily). Job filters by frequency + lastChargedAt per customer.
 ];
 
 const missing = requiredEnvVars.filter(key => !process.env[key]);
@@ -721,6 +724,18 @@ const ensureInvoicePaymentCustomerIdNullable = async () => {
   }
 };
 
+// Ensure lastChargedAt column exists on auto_invoice_customers table
+const ensureAutoInvoiceLastChargedColumn = async () =>
+  ensureColumn({
+    table: 'auto_invoice_customers',
+    column: 'lastChargedAt',
+    sqliteType: 'DATETIME NULL',
+    pgType: 'TIMESTAMP NULL',
+    successMessage: 'Added lastChargedAt column to auto_invoice_customers table',
+    existsMessage: 'lastChargedAt column already exists on auto_invoice_customers table',
+    warnMessage: 'Could not ensure lastChargedAt column on auto_invoice_customers table'
+  });
+
 // Ensure transactions table exists (legacy table for backward compatibility)
 const ensureTransactionsTable = async () => {
   try {
@@ -957,6 +972,7 @@ const startServer = async () => {
           await ensureTransactionsTable();
           await ensurePricebookCacheTable();
           await ensureInvoicePaymentCustomerIdNullable();
+          await ensureAutoInvoiceLastChargedColumn();
         } else {
           // For PostgreSQL, also ensure columns exist
           await ensureTerminalColumns();
@@ -973,6 +989,7 @@ const startServer = async () => {
           await ensurePricebookCacheTable();
         }
   await ensureInvoicePaymentCustomerIdNullable();
+  await ensureAutoInvoiceLastChargedColumn();
 
   // Migrate dry ice UMs to database
   await migrateDryIceUMs();
@@ -1000,6 +1017,24 @@ const startServer = async () => {
       setInterval(runBackgroundSync, autoSyncMs);
       setTimeout(runBackgroundSync, 60000); // First run after 1 min (let server warm up)
       logInfo(`Zoho auto-sync enabled: every ${autoSyncMs / 60000} min`);
+    }
+
+    // Auto invoice charge job (charges unpaid Zoho invoices for customers on Auto Invoice list)
+    const autoInvoiceEnabled = (process.env.AUTO_INVOICE_CHARGE_ENABLED || 'false').toLowerCase() === 'true';
+    const autoInvoiceIntervalMs = parseInt(process.env.AUTO_INVOICE_CHARGE_INTERVAL_MS || '0', 10);
+    if (autoInvoiceEnabled && autoInvoiceIntervalMs > 0) {
+      let autoInvoiceInProgress = false;
+      const runAutoInvoice = () => {
+        if (autoInvoiceInProgress) return;
+        autoInvoiceInProgress = true;
+        runAutoInvoiceChargeJob()
+          .then(() => {})
+          .catch((err) => logWarning(`Auto invoice charge job error (non-fatal): ${err?.message || err}`))
+          .finally(() => { autoInvoiceInProgress = false; });
+      };
+      setInterval(runAutoInvoice, autoInvoiceIntervalMs);
+      setTimeout(runAutoInvoice, 5 * 60 * 1000); // First run after 5 min (let server warm up)
+      logInfo(`Auto invoice charge enabled: every ${autoInvoiceIntervalMs / 60000} min`);
     }
 
     logDatabase(`Database: ${DATABASE_SETTING} (${DATABASE_SETTING === 'local' ? 'SQLite' : 'PostgreSQL'})`);

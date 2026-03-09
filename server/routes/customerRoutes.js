@@ -1,10 +1,13 @@
 import express from 'express';
-import { getCustomers, getCustomerById, getCustomerByLocation, getCustomerPriceList, getCustomerPaymentProfiles, getCustomerCheckoutData, invalidatePaymentProfilesCacheHandler } from '../controllers/customerController.js';
+import { getCustomers, getCustomerById, getCustomerByLocation, getCustomerPriceList, getCustomerPaymentProfiles, getCustomerCheckoutData, invalidatePaymentProfilesCacheHandler, getAutoInvoiceCustomers, addAutoInvoiceCustomer, removeAutoInvoiceCustomer } from '../controllers/customerController.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.get('/', authenticate, getCustomers);
+router.get('/auto-invoice/list', authenticate, getAutoInvoiceCustomers);
+router.post('/auto-invoice/add', authenticate, addAutoInvoiceCustomer);
+router.delete('/auto-invoice/:customerId', authenticate, removeAutoInvoiceCustomer);
 router.post('/invalidate-payment-cache', authenticate, (req, res, next) => {
   req.params = {};
   return invalidatePaymentProfilesCacheHandler(req, res, next);

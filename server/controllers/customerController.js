@@ -1,4 +1,4 @@
-import { Customer } from '../models/index.js';
+import { Customer, AutoInvoiceCustomer } from '../models/index.js';
 import { Op } from 'sequelize';
 import { syncCustomersFromZoho, getCustomerById as getZohoCustomerById, getCustomerCards } from '../services/zohoService.js';
 import { getCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, extractBankAccountInfo, searchAllCustomerProfilesByEmail } from '../services/authorizeNetService.js';
@@ -732,5 +732,87 @@ export const getCustomerPaymentProfiles = async (req, res) => {
   } catch (err) {
     logError('Get customer payment profiles error', err);
     return sendError(res, 'Failed to fetch customer payment profiles', 500, err);
+  }
+};
+
+// --- Auto Invoice Customer List ---
+
+export const getAutoInvoiceCustomers = async (req, res) => {
+  try {
+    const records = await AutoInvoiceCustomer.findAll({
+      include: [{ model: Customer, as: 'customer', attributes: ['id', 'contactName', 'companyName', 'email', 'phone', 'zohoId'] }],
+      order: [['createdAt', 'DESC']]
+    });
+    const list = records
+      .filter(r => r.customer)
+      .map(r => ({
+        id: r.id,
+        customerId: r.customerId,
+        frequency: r.frequency,
+        customer: {
+          id: r.customer.id,
+          name: r.customer.contactName,
+          contactName: r.customer.contactName,
+          company: r.customer.companyName,
+          companyName: r.customer.companyName,
+          email: r.customer.email,
+          phone: r.customer.phone,
+          zohoId: r.customer.zohoId
+        }
+      }));
+    return sendSuccess(res, { autoInvoiceCustomers: list });
+  } catch (err) {
+    logError('Get auto invoice customers error', err);
+    return sendError(res, 'Failed to fetch auto invoice customer list', 500, err);
+  }
+};
+
+export const addAutoInvoiceCustomer = async (req, res) => {
+  try {
+    const { customerId, frequency } = req.body;
+    if (!customerId) {
+      return sendValidationError(res, 'customerId is required');
+    }
+    const freq = (frequency === 'monthly' ? 'monthly' : 'weekly');
+    const customer = await Customer.findByPk(customerId);
+    if (!customer) {
+      return sendNotFound(res, 'Customer');
+    }
+    const [record, created] = await AutoInvoiceCustomer.findOrCreate({
+      where: { customerId: Number(customerId) },
+      defaults: { frequency: freq }
+    });
+    if (!created) {
+      await record.update({ frequency: freq });
+    }
+    const withCustomer = await AutoInvoiceCustomer.findByPk(record.id, {
+      include: [{ model: Customer, as: 'customer', attributes: ['id', 'contactName', 'companyName', 'email', 'phone', 'zohoId'] }]
+    });
+    const c = withCustomer?.customer;
+    return sendSuccess(res, {
+      autoInvoiceCustomer: {
+        id: record.id,
+        customerId: record.customerId,
+        frequency: record.frequency,
+        customer: c ? { id: c.id, name: c.contactName, contactName: c.contactName, company: c.companyName, companyName: c.companyName, email: c.email, phone: c.phone, zohoId: c.zohoId } : null
+      }
+    }, created ? 'Customer added to auto invoice list' : 'Customer updated in auto invoice list');
+  } catch (err) {
+    logError('Add auto invoice customer error', err);
+    return sendError(res, 'Failed to add customer to auto invoice list', 500, err);
+  }
+};
+
+export const removeAutoInvoiceCustomer = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const deleted = await AutoInvoiceCustomer.destroy({ where: { customerId: Number(customerId) } });
+    if (deleted === 0) {
+      return sendNotFound(res, 'Auto invoice customer');
+    }
+    return sendSuccess(res, { removed: true }, 'Customer removed from auto invoice list');
+  } catch (err) {
+    logError('Remove auto invoice customer error', err);
+    return sendError(res, 'Failed to remove customer from auto invoice list', 500, err);
   }
 };
