@@ -1028,6 +1028,84 @@ export const getCustomerById = async (customerId) => {
   }
 };
 
+export const findZohoCustomerByEmail = async (email) => {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) {
+    return { success: false, customerId: null, error: 'email_required' };
+  }
+
+  try {
+    const contacts = await fetchAllPages('/contacts', {
+      filter_by: 'Status.Customers',
+      search_text: normalizedEmail
+    }, 'contacts');
+
+    const exactMatch = (contacts || []).find(
+      (c) => String(c?.email || '').trim().toLowerCase() === normalizedEmail
+    );
+    const candidate = exactMatch || contacts?.[0] || null;
+    if (!candidate?.contact_id) {
+      return { success: false, customerId: null, error: 'not_found' };
+    }
+
+    return {
+      success: true,
+      customerId: String(candidate.contact_id),
+      customer: candidate
+    };
+  } catch (error) {
+    return {
+      success: false,
+      customerId: null,
+      error: error.response?.data?.message || error.message || 'unknown_error'
+    };
+  }
+};
+
+export const associateAuthorizeNetCardToZohoCustomer = async (params) => {
+  const { customerId, customerProfileId, paymentProfileId } = params || {};
+  if (!customerId || !customerProfileId || !paymentProfileId) {
+    return {
+      success: false,
+      error: 'customerId, customerProfileId and paymentProfileId are required'
+    };
+  }
+
+  // Zoho Books account setups differ; try known endpoint variants.
+  const endpointAttempts = [
+    `/contacts/${customerId}/cards`,
+    `/contacts/${customerId}/associatecard`,
+    `/contacts/${customerId}/paymentmethods`
+  ];
+
+  const payload = {
+    gateway_name: 'authorize_net',
+    gateway: 'authorize_net',
+    customer_profile_id: String(customerProfileId),
+    payment_profile_id: String(paymentProfileId),
+    customerProfileId: String(customerProfileId),
+    paymentProfileId: String(paymentProfileId)
+  };
+
+  const errors = [];
+  for (const endpoint of endpointAttempts) {
+    try {
+      const response = await makeZohoRequest(endpoint, 'POST', payload);
+      if (response?.code === 0) {
+        return { success: true, endpoint, response };
+      }
+      errors.push(`${endpoint}: ${response?.message || 'non_zero_code'}`);
+    } catch (error) {
+      errors.push(`${endpoint}: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  return {
+    success: false,
+    error: `All Zoho associate-card endpoint attempts failed: ${errors.join(' | ')}`
+  };
+};
+
 // Make Zoho Billing API request (different base URL)
 const makeZohoBillingRequest = async (endpoint, method = 'GET', data = null, retryCount = 0) => {
   const token = await getAccessToken();

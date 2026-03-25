@@ -10,6 +10,7 @@ import printerRoutes from './routes/printerRoutes.js';
 import valorApiRoutes from './routes/valorApiRoutes.js';
 import unitOfMeasureRoutes from './routes/unitOfMeasureRoutes.js';
 import itemUnitOfMeasureRoutes from './routes/itemUnitOfMeasureRoutes.js';
+import webhookRoutes from './routes/webhookRoutes.js';
 import { sequelize } from './config/db.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -42,6 +43,7 @@ const optionalButRecommended = [
   'ZOHO_ORGANIZATION_ID',
   'AUTHORIZE_NET_API_LOGIN_ID',
   'AUTHORIZE_NET_TRANSACTION_KEY',
+  'AUTHORIZE_NET_WEBHOOK_SIGNATURE_KEY',
   'PAX_TERMINAL_IP',
   'PAX_TERMINAL_PORT',
   'PAX_TERMINAL_TIMEOUT',
@@ -97,7 +99,12 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = Buffer.from(buf);
+  }
+}));
 
 // Request logging middleware - logs every request with method, path, and status
 app.use((req, res, next) => {
@@ -154,6 +161,7 @@ app.use('/zoho', zohoRoutes);
 app.use('/printer', printerRoutes);
 app.use('/valor', valorApiRoutes);
 app.use('/units', unitOfMeasureRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
