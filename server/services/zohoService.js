@@ -279,7 +279,9 @@ export const createSalesReceipt = async (saleData) => {
     canSendInMail,
     deposit_to_account_id,
     depositToAccountId,
-    terms
+    terms,
+    /** Override env ZOHO_ITEM_ID_CARD_PROCESSING_FEE when passed from caller */
+    zohoCardFeeItemId 
   } = saleData;
 
   // Validate that customerId is provided (must be Zoho customer ID)
@@ -417,53 +419,77 @@ export const createSalesReceipt = async (saleData) => {
   // If customer has a different assigned tax rate, we must use their location
   const placeOfContact = customerLocation || locationName || locationId || null;
 
+  // Card fee as a Zoho catalog line credits that item's income account (e.g. Merchant Fee Income).
+  // Receipt "adjustment" posts to Zoho's default other-charges account instead.
+  const cardProcessingFeeItemId = String(
+    (zohoCardFeeItemId && String(zohoCardFeeItemId).trim()) ||
+      (process.env.ZOHO_ITEM_ID_CARD_PROCESSING_FEE && String(process.env.ZOHO_ITEM_ID_CARD_PROCESSING_FEE).trim()) ||
+      ''
+  ).trim();
+  const useCardFeeLineItem = processingFee > 0 && cardProcessingFeeItemId.length > 0;
+
+  const productLineItems = safeLineItems.map((item) => {
+    const taxRate = Number(item.taxPercentage ?? 0);
+    const isTaxable = !Number.isNaN(taxRate) && taxRate > 0;
+    const effectiveTaxId = (item.taxId || zohoTaxId || null) ? String(item.taxId || zohoTaxId).trim() : null;
+    const lineItemPrice = parseFloat(item.rate ?? item.price);
+    const dbRate = itemPriceById.get(Number(item?.itemId));
+    const resolvedRate = Number.isFinite(lineItemPrice) ? lineItemPrice : (Number.isFinite(dbRate) ? dbRate : 0);
+    const unitKey = extractUnitKey(item);
+    const unitPrecision = unitKey ? unitPrecisionByKey.get(unitKey) : null;
+    const quantityMultiplier = Number.isFinite(unitPrecision) && unitPrecision > 0 ? unitPrecision : 1;
+    const rawQty = parseFloat(item.quantity ?? 1);
+    const resolvedQuantity = (Number.isFinite(rawQty) ? rawQty : 1) * quantityMultiplier;
+    const lineItem = {
+      description: item.description || '',
+      rate: resolvedRate,
+      quantity: resolvedQuantity,
+      is_taxable: isTaxable,
+      tax_percentage: isTaxable ? taxRate : 0
+    };
+    if (item.item_id) {
+      lineItem.item_id = item.item_id;
+    } else if (item.zohoItemId) {
+      lineItem.item_id = item.zohoItemId;
+    }
+    if (!lineItem.item_id) {
+      lineItem.name = item.itemName || item.name || 'Item';
+    }
+    if (unitKey) {
+      lineItem.unit = unitKey;
+    }
+    if (isTaxable && effectiveTaxId) {
+      lineItem.tax_id = effectiveTaxId;
+    }
+    return lineItem;
+  });
+
+  const line_items = useCardFeeLineItem
+    ? [
+        ...productLineItems,
+        {
+          item_id: cardProcessingFeeItemId,
+          description: 'A processing fee is applied to card transactions.',
+          rate: parseFloat(processingFee.toFixed(2)),
+          quantity: 1,
+          is_taxable: false,
+          tax_percentage: 0
+        }
+      ]
+    : productLineItems;
+
+  if (useCardFeeLineItem) {
+    console.log(
+      `📋 Zoho: card fee $${processingFee.toFixed(2)} as line item item_id=${cardProcessingFeeItemId} (not adjustment)`
+    );
+  }
+
   const salesReceiptData = {
     customer_id: customerId, // Zoho Books customer ID (contact_id from Zoho)
     salesreceipt_number: forcedReceiptNumber || `POS-${saleId}`,
     date: resolvedDate || new Date().toISOString().split('T')[0],
     payment_mode: paymentMode,
-    line_items: safeLineItems.map(item => {
-      const taxRate = Number(item.taxPercentage ?? 0);
-      const isTaxable = !Number.isNaN(taxRate) && taxRate > 0;
-      const effectiveTaxId = (item.taxId || zohoTaxId || null) ? String(item.taxId || zohoTaxId).trim() : null;
-      const lineItemPrice = parseFloat(item.rate ?? item.price);
-      const dbRate = itemPriceById.get(Number(item?.itemId));
-      const resolvedRate = Number.isFinite(lineItemPrice) ? lineItemPrice : (Number.isFinite(dbRate) ? dbRate : 0);
-      const unitKey = extractUnitKey(item);
-      const unitPrecision = unitKey ? unitPrecisionByKey.get(unitKey) : null;
-      const quantityMultiplier = Number.isFinite(unitPrecision) && unitPrecision > 0 ? unitPrecision : 1;
-      const rawQty = parseFloat(item.quantity ?? 1);
-      const resolvedQuantity = (Number.isFinite(rawQty) ? rawQty : 1) * quantityMultiplier;
-      const lineItem = {
-        description: item.description || '',
-        rate: resolvedRate,
-        quantity: resolvedQuantity,
-        is_taxable: isTaxable,
-        tax_percentage: isTaxable ? taxRate : 0
-      };
-      // Only include item_id if it exists (Zoho allows line items without item_id)
-      if (item.item_id) {
-        lineItem.item_id = item.item_id;
-      } else if (item.zohoItemId) {
-        lineItem.item_id = item.zohoItemId;
-      }
-      // If there's no item_id, Zoho may require a label; provide name only in that case.
-      if (!lineItem.item_id) {
-        lineItem.name = item.itemName || item.name || 'Item';
-      }
-      
-      // Include unit of measure if provided (Zoho supports unit field)
-      if (unitKey) {
-        lineItem.unit = unitKey;
-      }
-      
-      // If we know the tax for this item, let Zoho calculate it so totals match the POS
-      if (isTaxable && effectiveTaxId) {
-        lineItem.tax_id = effectiveTaxId;
-      }
-      
-      return lineItem;
-    }),
+    line_items,
     notes: (() => {
       const baseNote = notes || `Sale from POS - Location: ${locationName || locationId || 'Unknown'}`;
       // Add transaction ID to notes if available
@@ -502,8 +528,8 @@ export const createSalesReceipt = async (saleData) => {
   // causes Zoho to override with the customer's location tax (e.g. 7% for MIA Warehouse) instead
   // of our POS location tax (e.g. 7.5%), causing a mismatch. POS sales use the store's tax rate.
 
-  // Keep Zoho total in sync with POS total (cc fee is an adjustment, not a line item)
-  if (processingFee > 0) {
+  // Without ZOHO_ITEM_ID_CARD_PROCESSING_FEE, fee is an adjustment (Zoho → Other Charges style GL).
+  if (processingFee > 0 && !useCardFeeLineItem) {
     salesReceiptData.adjustment = parseFloat(processingFee.toFixed(2));
     salesReceiptData.adjustment_description = 'Credit Card Processing Fee';
   }
