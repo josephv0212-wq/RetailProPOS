@@ -124,7 +124,10 @@ export const handleAuthorizeNetWebhook = async (req, res) => {
     const associateResult = await associateAuthorizeNetCardToZohoCustomer({
       customerId: zohoCustomerId,
       customerProfileId,
-      paymentProfileId
+      paymentProfileId,
+      redirectUrl: process.env.FRONTEND_URL || undefined,
+      cancelUrl: process.env.FRONTEND_URL || undefined,
+      referenceId: `webhook_${zohoCustomerId}`
     });
 
     if (!associateResult.success) {
@@ -167,6 +170,7 @@ export const handleAuthorizeNetWebhook = async (req, res) => {
         paymentProfileId,
         zohoCustomerId,
         associatedViaZohoEndpoint: !!associateResult.success,
+        hostedPageUrl: associateResult.hostedPage?.url || null,
         metadataSync: metadataResult.success ? 'ok' : (metadataResult.skipped ? `skipped:${metadataResult.reason}` : 'failed')
       }
     });

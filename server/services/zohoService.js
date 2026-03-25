@@ -1062,8 +1062,58 @@ export const findZohoCustomerByEmail = async (email) => {
   }
 };
 
+export const createZohoHostedCardUpdateLink = async (params) => {
+  const { customerId, redirectUrl, cancelUrl, referenceId } = params || {};
+  if (!customerId) {
+    return { success: false, error: 'customerId is required' };
+  }
+
+  const hostedPayload = {
+    customer_id: String(customerId),
+    ...(redirectUrl ? { redirect_url: String(redirectUrl) } : {}),
+    ...(cancelUrl ? { cancel_url: String(cancelUrl) } : {}),
+    ...(referenceId ? { additional_param: String(referenceId) } : {})
+  };
+  const endpointCandidates = [
+    '/hostedpages/updatecard',
+    '/hostedpages/updatepaymentmethod'
+  ];
+  const hostedErrors = [];
+
+  for (const endpoint of endpointCandidates) {
+    try {
+      const response = await makeZohoBillingRequest(endpoint, 'POST', hostedPayload);
+      if (response?.code === 0 || response?.hostedpage?.url || response?.hostedpage_url) {
+        const hostedPageUrl =
+          response?.hostedpage?.url ||
+          response?.hostedpage?.hostedpage_url ||
+          response?.hostedpage_url ||
+          null;
+        const hostedPageId =
+          response?.hostedpage?.hostedpage_id ||
+          response?.hostedpage_id ||
+          null;
+        return {
+          success: true,
+          endpoint,
+          hostedPageUrl,
+          hostedPageId
+        };
+      }
+      hostedErrors.push(`${endpoint}: ${response?.message || 'non_zero_code'}`);
+    } catch (error) {
+      hostedErrors.push(`${endpoint}: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  return {
+    success: false,
+    error: hostedErrors.join(' | ')
+  };
+};
+
 export const associateAuthorizeNetCardToZohoCustomer = async (params) => {
-  const { customerId, customerProfileId, paymentProfileId } = params || {};
+  const { customerId, customerProfileId, paymentProfileId, redirectUrl, cancelUrl, referenceId } = params || {};
   if (!customerId || !customerProfileId || !paymentProfileId) {
     return {
       success: false,
@@ -1071,14 +1121,16 @@ export const associateAuthorizeNetCardToZohoCustomer = async (params) => {
     };
   }
 
-  // Zoho Books account setups differ; try known endpoint variants.
+  // Zoho Books/Billing account setups differ; try known endpoint variants.
   const endpointAttempts = [
+    `/customers/${customerId}/cards`,
     `/contacts/${customerId}/cards`,
-    `/contacts/${customerId}/associatecard`,
-    `/contacts/${customerId}/paymentmethods`
+    `/customers/${customerId}/associatecard`,
+    `/contacts/${customerId}/associatecard`
   ];
 
   const payload = {
+    payment_gateway: 'authorize_net',
     gateway_name: 'authorize_net',
     gateway: 'authorize_net',
     customer_profile_id: String(customerProfileId),
@@ -1088,16 +1140,49 @@ export const associateAuthorizeNetCardToZohoCustomer = async (params) => {
   };
 
   const errors = [];
+  let hasUnsupportedPattern = false;
   for (const endpoint of endpointAttempts) {
     try {
       const response = await makeZohoRequest(endpoint, 'POST', payload);
       if (response?.code === 0) {
         return { success: true, endpoint, response };
       }
-      errors.push(`${endpoint}: ${response?.message || 'non_zero_code'}`);
+      const message = response?.message || 'non_zero_code';
+      if (/not allowed|invalid url/i.test(message)) {
+        hasUnsupportedPattern = true;
+      }
+      errors.push(`${endpoint}: ${message}`);
     } catch (error) {
-      errors.push(`${endpoint}: ${error.response?.data?.message || error.message}`);
+      const msg = error.response?.data?.message || error.message;
+      const status = error.response?.status;
+      if (status === 404 || status === 405 || /not allowed|invalid url/i.test(String(msg || ''))) {
+        hasUnsupportedPattern = true;
+      }
+      errors.push(`${endpoint}: ${msg}`);
     }
+  }
+
+  if (hasUnsupportedPattern) {
+    const hosted = await createZohoHostedCardUpdateLink({
+      customerId,
+      redirectUrl,
+      cancelUrl,
+      referenceId
+    });
+    return {
+      success: false,
+      skipped: true,
+      reason: 'zoho_card_association_endpoint_unsupported',
+      error: `Zoho Books API does not support direct card association in this tenant: ${errors.join(' | ')}`,
+      hostedPage: hosted.success
+        ? {
+            endpoint: hosted.endpoint,
+            url: hosted.hostedPageUrl,
+            id: hosted.hostedPageId
+          }
+        : null,
+      hostedPageError: hosted.success ? null : hosted.error
+    };
   }
 
   return {

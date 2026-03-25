@@ -744,12 +744,28 @@ export const createSale = async (req, res) => {
             const associateResult = await associateAuthorizeNetCardToZohoCustomer({
               customerId: customer.zohoId,
               customerProfileId: profileResult.customerProfileId || null,
-              paymentProfileId: resolvedPaymentProfileId || null
+              paymentProfileId: resolvedPaymentProfileId || null,
+              redirectUrl: process.env.FRONTEND_URL || undefined,
+              cancelUrl: process.env.FRONTEND_URL || undefined,
+              referenceId: `customer_${customer.id}`
             });
-            if (!associateResult.success) {
+            if (!associateResult.success && !associateResult.skipped) {
               console.warn(
                 `[ZOHO_CARD_ASSOCIATE][FAILED] customerId=${customer.id} zohoId=${customer.zohoId} reason=${associateResult.error || 'unknown'}`
               );
+            } else if (associateResult.skipped) {
+              console.info(
+                `[ZOHO_CARD_ASSOCIATE][SKIPPED] customerId=${customer.id} zohoId=${customer.zohoId} reason=${associateResult.reason || 'unsupported'}`
+              );
+              if (associateResult.hostedPage?.url) {
+                console.info(
+                  `[ZOHO_CARD_ASSOCIATE][HOSTED_PAGE] customerId=${customer.id} zohoId=${customer.zohoId} url=${associateResult.hostedPage.url}`
+                );
+              } else if (associateResult.hostedPageError) {
+                console.warn(
+                  `[ZOHO_CARD_ASSOCIATE][HOSTED_PAGE_FAILED] customerId=${customer.id} zohoId=${customer.zohoId} reason=${associateResult.hostedPageError}`
+                );
+              }
             } else {
               console.info(
                 `[ZOHO_CARD_ASSOCIATE][SUCCESS] customerId=${customer.id} zohoId=${customer.zohoId} endpoint=${associateResult.endpoint || 'n/a'}`

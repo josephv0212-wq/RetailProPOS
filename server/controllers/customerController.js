@@ -1,6 +1,6 @@
 import { Customer, AutoInvoiceCustomer } from '../models/index.js';
 import { Op } from 'sequelize';
-import { syncCustomersFromZoho, getCustomerById as getZohoCustomerById, getCustomerCards } from '../services/zohoService.js';
+import { syncCustomersFromZoho, getCustomerById as getZohoCustomerById, getCustomerCards, createZohoHostedCardUpdateLink } from '../services/zohoService.js';
 import { getCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, extractBankAccountInfo, searchAllCustomerProfilesByEmail } from '../services/authorizeNetService.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
 import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
@@ -814,5 +814,48 @@ export const removeAutoInvoiceCustomer = async (req, res) => {
   } catch (err) {
     logError('Remove auto invoice customer error', err);
     return sendError(res, 'Failed to remove customer from auto invoice list', 500, err);
+  }
+};
+
+export const createZohoCardLink = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const customer = await Customer.findByPk(id);
+    if (!customer) {
+      return sendNotFound(res, 'Customer');
+    }
+    if (!customer.zohoId) {
+      return sendError(res, 'Customer is not linked to Zoho (missing Zoho ID)', 400);
+    }
+
+    const redirectUrl = process.env.FRONTEND_URL || null;
+    const hosted = await createZohoHostedCardUpdateLink({
+      customerId: customer.zohoId,
+      redirectUrl,
+      cancelUrl: redirectUrl,
+      referenceId: `customer_${customer.id}`
+    });
+
+    if (!hosted.success || !hosted.hostedPageUrl) {
+      const booksBase = process.env.ZOHO_BOOKS_APP_BASE_URL || 'https://books.zoho.com/app';
+      const manualLinkUrl = `${booksBase}#/contacts/${encodeURIComponent(String(customer.zohoId))}`;
+      return sendSuccess(res, {
+        hostedPageUrl: null,
+        hostedPageId: null,
+        endpoint: hosted.endpoint || null,
+        manualLinkUrl,
+        fallback: true,
+        reason: hosted.error || 'Zoho hosted update-card endpoint is not available for this account'
+      }, 'Zoho hosted link unavailable. Opening customer page for manual card update instead.');
+    }
+
+    return sendSuccess(res, {
+      hostedPageUrl: hosted.hostedPageUrl,
+      hostedPageId: hosted.hostedPageId || null,
+      endpoint: hosted.endpoint || null
+    });
+  } catch (err) {
+    logError('Create Zoho card link error', err);
+    return sendError(res, 'Failed to create Zoho card link', 500, err);
   }
 };

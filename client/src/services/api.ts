@@ -395,6 +395,19 @@ export const customersAPI = {
     return res;
   },
 
+  createZohoCardLink: async (id: number) => {
+    return apiRequest<{
+      hostedPageUrl: string | null;
+      hostedPageId?: string | null;
+      endpoint?: string | null;
+      manualLinkUrl?: string | null;
+      fallback?: boolean;
+      reason?: string;
+    }>(`/customers/${id}/zoho-card-link`, {
+      method: 'POST',
+    }, true);
+  },
+
   getAutoInvoiceList: async () => {
     return apiRequest<{ autoInvoiceCustomers: Array<{
       id: number;
