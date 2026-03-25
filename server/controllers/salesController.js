@@ -2,7 +2,7 @@ import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer, InvoicePayment, User } from '../models/index.js';
 import { sequelize } from '../config/db.js';
 import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction, createOrUpdateCustomerProfileWithCard } from '../services/authorizeNetService.js';
-import { createSalesReceipt, emailSalesReceipt, emailInvoice, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice, updateZohoCustomerCardMetadata } from '../services/zohoService.js';
+import { createSalesReceipt, emailSalesReceipt, emailInvoice, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice, updateZohoCustomerCardMetadata, associateAuthorizeNetCardToZohoCustomer } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 import { invalidatePaymentProfilesCacheServer } from './customerController.js';
@@ -741,6 +741,21 @@ export const createSale = async (req, res) => {
 
           await customer.update(updates);
           if (customer.zohoId) {
+            const associateResult = await associateAuthorizeNetCardToZohoCustomer({
+              customerId: customer.zohoId,
+              customerProfileId: profileResult.customerProfileId || null,
+              paymentProfileId: resolvedPaymentProfileId || null
+            });
+            if (!associateResult.success) {
+              console.warn(
+                `[ZOHO_CARD_ASSOCIATE][FAILED] customerId=${customer.id} zohoId=${customer.zohoId} reason=${associateResult.error || 'unknown'}`
+              );
+            } else {
+              console.info(
+                `[ZOHO_CARD_ASSOCIATE][SUCCESS] customerId=${customer.id} zohoId=${customer.zohoId} endpoint=${associateResult.endpoint || 'n/a'}`
+              );
+            }
+
             const syncResult = await updateZohoCustomerCardMetadata({
               customerId: customer.zohoId,
               last4: updates.last_four_digits || customer.last_four_digits || null,

@@ -1354,11 +1354,14 @@ export const updateZohoCustomerCardMetadata = async (params) => {
       // Fallback path when Zoho custom fields for card metadata do not exist:
       // write a concise marker into contact notes so data is visible in Zoho.
       const existingNotes = String(contact?.notes || '').trim();
-      const nextNotes = existingNotes.includes(noteLine)
-        ? existingNotes
-        : (existingNotes ? `${existingNotes}\n${noteLine}` : noteLine);
+      const cleanedExisting = existingNotes
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('[RetailProPOS] Saved card to Authorize.Net CIM'))
+        .join('\n')
+        .trim();
+      const nextNotes = cleanedExisting ? `${cleanedExisting}\n${noteLine}` : noteLine;
 
-      if (nextNotes !== existingNotes) {
+      if (nextNotes !== existingNotes && nextNotes.trim().length > 0) {
         const notesResponse = await makeZohoRequest(`/contacts/${customerId}`, 'PUT', {
           notes: nextNotes
         });
