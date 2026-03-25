@@ -216,12 +216,32 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
 
     // Standalone mode: Skip payment processing, just record the sale
     if (cardReaderMode === 'standalone' && selectedMethod === 'card') {
+      if (savePaymentMethod && cardPaymentMethod !== 'manual') {
+        setError('To save a card in standalone mode, switch to Manual Entry and enter card details.');
+        setIsProcessing(false);
+        return;
+      }
+
+      if (savePaymentMethod && cardPaymentMethod === 'manual' && (!cardNumber || !cardExpiry || !cardCvv)) {
+        setError('Card number, expiry, and CVV are required to save card in standalone mode.');
+        setIsProcessing(false);
+        return;
+      }
+
       const paymentDetails: PaymentDetails = {
         method: selectedMethod,
         amount: finalTotal,
         useStandaloneMode: true, // Flag to indicate standalone mode
+        savePaymentMethod: savePaymentMethod && !!customerId,
         ...((context === 'sale' || context === 'zohoDocuments') && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
       };
+
+      if (savePaymentMethod && cardPaymentMethod === 'manual') {
+        paymentDetails.cardNumber = cardNumber;
+        paymentDetails.expirationDate = cardExpiry;
+        paymentDetails.cvv = cardCvv;
+        paymentDetails.zip = cardZip;
+      }
       
       try {
         await onConfirmPayment(paymentDetails);

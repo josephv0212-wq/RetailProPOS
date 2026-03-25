@@ -1040,6 +1040,13 @@ function AppContent() {
       if (paymentDetails.useStandaloneMode) {
         // Standalone mode - no payment processing, just record the sale
         apiPaymentDetails.useStandaloneMode = true;
+        // Optional: allow saving card to CIM in standalone mode when cashier enters manual details.
+        if (paymentDetails.cardNumber && paymentDetails.expirationDate && paymentDetails.cvv) {
+          apiPaymentDetails.cardNumber = paymentDetails.cardNumber;
+          apiPaymentDetails.expirationDate = paymentDetails.expirationDate;
+          apiPaymentDetails.cvv = paymentDetails.cvv;
+          apiPaymentDetails.zip = paymentDetails.zip;
+        }
       } else if (paymentDetails.useValorApi) {
         // Valor API payment - already processed in PaymentModal
         // Just record the sale with the transaction ID

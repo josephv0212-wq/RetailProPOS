@@ -1194,6 +1194,123 @@ export const getCustomerCards = async (customerId, preFetchedContact = null) => 
   }
 };
 
+/**
+ * Best-effort update of Zoho customer payment custom fields after CIM save.
+ * Only updates fields that already exist on the Zoho contact.
+ */
+export const updateZohoCustomerCardMetadata = async (params) => {
+  const {
+    customerId,
+    last4,
+    cardBrand,
+    paymentMethodId,
+    customerProfileId
+  } = params || {};
+
+  if (!customerId) {
+    return { success: false, skipped: true, reason: 'missing_customer_id' };
+  }
+
+  try {
+
+    const contact = await getCustomerById(customerId);
+    const customFields = Array.isArray(contact?.custom_fields) ? contact.custom_fields : [];
+
+    const normalizedFieldMeta = customFields.map((f) => ({
+      customfield_id: f?.customfield_id,
+      label: String(f?.label || ''),
+      api_name: String(f?.api_name || '')
+    }));
+
+    const matchesTokens = (raw, tokens) => {
+      const text = String(raw || '').toLowerCase();
+      return tokens.every((t) => text.includes(t));
+    };
+
+    const findField = (predicate) => customFields.find((f) => {
+      const label = String(f?.label || '').toLowerCase();
+      const apiName = String(f?.api_name || '').toLowerCase();
+      return predicate(label) || predicate(apiName);
+    });
+
+    const targetLast4 = findField((v) =>
+      v.includes('card_last_4') ||
+      v.includes('last_4_digits') ||
+      v.includes('last4') ||
+      (matchesTokens(v, ['card', 'last']) && (v.includes('4') || v.includes('four') || v.includes('digit')))
+    );
+    const targetBrand = findField((v) =>
+      v.includes('card_brand') ||
+      (matchesTokens(v, ['card', 'brand'])) ||
+      (matchesTokens(v, ['card', 'type']))
+    );
+    const targetPaymentMethodId = findField((v) =>
+      v.includes('payment_method_id') ||
+      v.includes('pm_id') ||
+      (matchesTokens(v, ['payment', 'method'])) ||
+      (matchesTokens(v, ['auth', 'payment']))
+    );
+    const targetCustomerProfileId = findField((v) =>
+      v.includes('customer_profile_id') ||
+      v.includes('cim_profile_id') ||
+      (matchesTokens(v, ['customer', 'profile'])) ||
+      (matchesTokens(v, ['authorize', 'profile']))
+    );
+
+
+    const updates = [];
+    if (targetLast4 && last4) updates.push({ customfield_id: targetLast4.customfield_id, value: String(last4) });
+    if (targetBrand && cardBrand) updates.push({ customfield_id: targetBrand.customfield_id, value: String(cardBrand) });
+    if (targetPaymentMethodId && paymentMethodId) updates.push({ customfield_id: targetPaymentMethodId.customfield_id, value: String(paymentMethodId) });
+    if (targetCustomerProfileId && customerProfileId) updates.push({ customfield_id: targetCustomerProfileId.customfield_id, value: String(customerProfileId) });
+
+    if (updates.length === 0) {
+      const safeLast4 = last4 ? String(last4).replace(/\D/g, '').slice(-4) : '';
+      const noteLine = [
+        '[RetailProPOS] Saved card to Authorize.Net CIM',
+        safeLast4 ? `last4=${safeLast4}` : null,
+        customerProfileId ? `customerProfileId=${customerProfileId}` : null,
+        paymentMethodId ? `paymentProfileId=${paymentMethodId}` : null
+      ].filter(Boolean).join(' | ');
+
+      // Fallback path when Zoho custom fields for card metadata do not exist:
+      // write a concise marker into contact notes so data is visible in Zoho.
+      const existingNotes = String(contact?.notes || '').trim();
+      const nextNotes = existingNotes.includes(noteLine)
+        ? existingNotes
+        : (existingNotes ? `${existingNotes}\n${noteLine}` : noteLine);
+
+      if (nextNotes !== existingNotes) {
+        const notesResponse = await makeZohoRequest(`/contacts/${customerId}`, 'PUT', {
+          notes: nextNotes
+        });
+        const ok = notesResponse?.code === 0;
+        if (ok) {
+          return { success: true, updatedFieldCount: 0, fallback: 'notes' };
+        }
+        return { success: false, error: notesResponse?.message || 'Failed to update customer notes' };
+      }
+
+      return { success: true, updatedFieldCount: 0, fallback: 'notes_noop' };
+    }
+
+    const response = await makeZohoRequest(`/contacts/${customerId}`, 'PUT', {
+      custom_fields: updates
+    });
+
+    const ok = response?.code === 0;
+
+    return ok
+      ? { success: true, updatedFieldCount: updates.length }
+      : { success: false, error: response?.message || 'Failed to update customer custom fields' };
+  } catch (error) {
+    return {
+      success: false,
+      error: error?.response?.data?.message || error?.message || 'Unknown error'
+    };
+  }
+};
+
 const PRICEBOOKS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export const getPricebooks = async () => {

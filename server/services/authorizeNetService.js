@@ -637,6 +637,380 @@ export const searchCustomerProfileIteratively = async (name = null, email = null
   }
 };
 
+const isDuplicateProfileError = (errorCode, errorText) => {
+  const text = (errorText || '').toLowerCase();
+  return errorCode === 'E00039' || text.includes('duplicate') || text.includes('already exists');
+};
+
+const xmlEscape = (value) => {
+  if (value == null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+};
+
+const normalizeCardExpirationForCim = (expirationDate) => {
+  const digits = String(expirationDate || '').replace(/\D/g, '');
+  if (digits.length !== 4) return null;
+  const mm = digits.slice(0, 2);
+  const yy = digits.slice(2);
+  const month = parseInt(mm, 10);
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null;
+  return `20${yy}-${mm}`;
+};
+
+const extractCustomerProfileIdFromDuplicateText = (errorText) => {
+  if (!errorText) return null;
+  const profileIdMatch = errorText.match(/customer profile ID[:\s]+(\d+)/i) ||
+    errorText.match(/profile ID[:\s]+(\d+)/i) ||
+    errorText.match(/ID[:\s]+(\d+)/i);
+  return profileIdMatch?.[1] || null;
+};
+
+const extractPaymentProfileIdFromDuplicateText = (errorText) => {
+  if (!errorText) return null;
+  const match = errorText.match(/customer payment profile ID[:\s]+(\d+)/i) ||
+    errorText.match(/payment profile ID[:\s]+(\d+)/i);
+  return match?.[1] || null;
+};
+
+const extractMerchantCustomerId = (profile) => {
+  if (!profile) return '';
+  const raw = Array.isArray(profile.merchantCustomerId) ? profile.merchantCustomerId[0] : profile.merchantCustomerId;
+  return String(raw || '').trim();
+};
+
+const resolveExistingCustomerProfileId = async ({ merchantCustomerId, email }) => {
+  const merchantId = String(merchantCustomerId || '').trim();
+  const emailValue = String(email || '').trim().toLowerCase();
+
+  if (emailValue) {
+    const byEmail = await searchAllCustomerProfilesByEmail(emailValue);
+    if (byEmail.success && Array.isArray(byEmail.profiles) && byEmail.profiles.length > 0) {
+      if (merchantId) {
+        const exact = byEmail.profiles.find(({ profile }) => extractMerchantCustomerId(profile) === merchantId);
+        if (exact?.customerProfileId) {
+          return { success: true, customerProfileId: String(exact.customerProfileId) };
+        }
+      }
+      const first = byEmail.profiles[0];
+      if (first?.customerProfileId) {
+        return { success: true, customerProfileId: String(first.customerProfileId) };
+      }
+    }
+  }
+
+  if (merchantId) {
+    const idsResult = await getCustomerProfileIds();
+    if (idsResult.success && Array.isArray(idsResult.profileIds) && idsResult.profileIds.length > 0) {
+      for (const profileId of idsResult.profileIds) {
+        const profileResult = await getCustomerProfile(profileId);
+        if (!profileResult.success || !profileResult.profile) continue;
+        if (extractMerchantCustomerId(profileResult.profile) === merchantId) {
+          return { success: true, customerProfileId: String(profileId) };
+        }
+      }
+    }
+  }
+
+  return { success: false, customerProfileId: null };
+};
+
+const createCustomerPaymentProfileOnExistingCustomer = async ({
+  customerProfileId,
+  firstName,
+  lastName,
+  companyName,
+  cardNumber,
+  expirationDate,
+  cvv,
+  zip
+}) => {
+  if (!customerProfileId || !cardNumber || !expirationDate || !cvv) {
+    return {
+      success: false,
+      error: 'customerProfileId, cardNumber, expirationDate, and cvv are required'
+    };
+  }
+
+  const normalizedExpiration = normalizeCardExpirationForCim(expirationDate);
+  if (!normalizedExpiration) {
+    return {
+      success: false,
+      error: 'Invalid expiration date format for CIM profile'
+    };
+  }
+
+  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<createCustomerPaymentProfileRequest xmlns="AnetApi/xml/v1/schema/AnetApiSchema.xsd">
+  <merchantAuthentication>
+    <name>${process.env.AUTHORIZE_NET_API_LOGIN_ID}</name>
+    <transactionKey>${process.env.AUTHORIZE_NET_TRANSACTION_KEY}</transactionKey>
+  </merchantAuthentication>
+  <customerProfileId>${xmlEscape(customerProfileId)}</customerProfileId>
+  <paymentProfile>
+    ${(firstName || lastName || companyName || zip) ? `<billTo>
+      ${firstName ? `<firstName>${xmlEscape(firstName)}</firstName>` : ''}
+      ${lastName ? `<lastName>${xmlEscape(lastName)}</lastName>` : ''}
+      ${companyName ? `<company>${xmlEscape(companyName)}</company>` : ''}
+      ${zip ? `<zip>${xmlEscape(zip)}</zip>` : ''}
+    </billTo>` : ''}
+    <payment>
+      <creditCard>
+        <cardNumber>${xmlEscape(cardNumber)}</cardNumber>
+        <expirationDate>${xmlEscape(normalizedExpiration)}</expirationDate>
+        <cardCode>${xmlEscape(cvv)}</cardCode>
+      </creditCard>
+    </payment>
+  </paymentProfile>
+  <validationMode>none</validationMode>
+</createCustomerPaymentProfileRequest>`;
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, xmlBody, {
+      headers: { 'Content-Type': 'text/xml' }
+    });
+    const result = await parseStringPromise(response.data);
+    const root = result.createCustomerPaymentProfileResponse;
+    const messages = root?.messages?.[0];
+    const resultCode = messages?.resultCode?.[0];
+
+    if (resultCode === 'Ok') {
+      const customerPaymentProfileId = root?.customerPaymentProfileId?.[0] || null;
+      return {
+        success: true,
+        customerPaymentProfileId: customerPaymentProfileId || undefined
+      };
+    }
+
+    const errorCode = messages?.message?.[0]?.code?.[0] || '';
+    const errorText = messages?.message?.[0]?.text?.[0] || 'Failed to create customer payment profile';
+
+    if (isDuplicateProfileError(errorCode, errorText)) {
+      const existingPaymentProfileId = extractPaymentProfileIdFromDuplicateText(errorText);
+      if (existingPaymentProfileId) {
+        return {
+          success: true,
+          customerPaymentProfileId: existingPaymentProfileId
+        };
+      }
+      // Duplicate means card already exists in CIM; treat as saved.
+      return {
+        success: true,
+        customerPaymentProfileId: undefined
+      };
+    }
+
+    return { success: false, error: errorText };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message
+    };
+  }
+};
+
+const createCustomerPaymentProfileFromTransaction = async ({ transactionId, customerProfileId }) => {
+  if (!transactionId || !customerProfileId) {
+    return {
+      success: false,
+      error: 'transactionId and customerProfileId are required'
+    };
+  }
+
+  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<createCustomerPaymentProfileFromTransactionRequest xmlns="AnetApi/xml/v1/schema/AnetApiSchema.xsd">
+  <merchantAuthentication>
+    <name>${process.env.AUTHORIZE_NET_API_LOGIN_ID}</name>
+    <transactionKey>${process.env.AUTHORIZE_NET_TRANSACTION_KEY}</transactionKey>
+  </merchantAuthentication>
+  <customerProfileId>${customerProfileId}</customerProfileId>
+  <transId>${transactionId}</transId>
+</createCustomerPaymentProfileFromTransactionRequest>`;
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, xmlBody, {
+      headers: {
+        'Content-Type': 'text/xml'
+      }
+    });
+
+    const result = await parseStringPromise(response.data);
+    const root = result.createCustomerPaymentProfileFromTransactionResponse;
+    const messages = root?.messages?.[0];
+    const resultCode = messages?.resultCode?.[0];
+
+    if (resultCode === 'Ok') {
+      const paymentProfileId = root?.customerPaymentProfileId?.[0] || null;
+      console.info(
+        `[CIM_SAVE][PAYMENT_PROFILE_CREATED] customerProfileId=${customerProfileId} customerPaymentProfileId=${paymentProfileId || 'n/a'} transactionId=${transactionId}`
+      );
+      return {
+        success: true,
+        customerPaymentProfileId: paymentProfileId || undefined
+      };
+    }
+
+    const errorText = messages?.message?.[0]?.text?.[0] || 'Failed to create customer payment profile from transaction';
+    console.warn(
+      `[CIM_SAVE][PAYMENT_PROFILE_FAILED] customerProfileId=${customerProfileId} transactionId=${transactionId} reason=${errorText}`
+    );
+    return {
+      success: false,
+      error: errorText
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message
+    };
+  }
+};
+
+/**
+ * Save a card to Authorize.Net CIM without charging (used by standalone/manual-reader flow).
+ * Creates customer profile + payment profile in one request; if customer already exists,
+ * attaches a new payment profile to that existing customer.
+ */
+export const createOrUpdateCustomerProfileWithCard = async (options) => {
+  const {
+    email,
+    description,
+    merchantCustomerId,
+    firstName,
+    lastName,
+    companyName,
+    cardNumber,
+    expirationDate,
+    cvv,
+    zip
+  } = options || {};
+
+  if (!cardNumber || !expirationDate || !cvv) {
+    return {
+      success: false,
+      error: 'cardNumber, expirationDate, and cvv are required'
+    };
+  }
+
+  const normalizedExpiration = normalizeCardExpirationForCim(expirationDate);
+  if (!normalizedExpiration) {
+    return {
+      success: false,
+      error: 'Invalid expiration date format for CIM profile'
+    };
+  }
+
+  const existingProfileLookup = await resolveExistingCustomerProfileId({ merchantCustomerId, email });
+
+  if (existingProfileLookup.success && existingProfileLookup.customerProfileId) {
+    const paymentProfileResult = await createCustomerPaymentProfileOnExistingCustomer({
+      customerProfileId: existingProfileLookup.customerProfileId,
+      firstName,
+      lastName,
+      companyName,
+      cardNumber,
+      expirationDate,
+      cvv,
+      zip
+    });
+    if (paymentProfileResult.success) {
+      return {
+        success: true,
+        customerProfileId: existingProfileLookup.customerProfileId,
+        customerPaymentProfileId: paymentProfileResult.customerPaymentProfileId
+      };
+    }
+    return paymentProfileResult;
+  }
+
+  const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<createCustomerProfileRequest xmlns="AnetApi/xml/v1/schema/AnetApiSchema.xsd">
+  <merchantAuthentication>
+    <name>${process.env.AUTHORIZE_NET_API_LOGIN_ID}</name>
+    <transactionKey>${process.env.AUTHORIZE_NET_TRANSACTION_KEY}</transactionKey>
+  </merchantAuthentication>
+  <profile>
+    ${merchantCustomerId ? `<merchantCustomerId>${xmlEscape(merchantCustomerId)}</merchantCustomerId>` : ''}
+    ${description ? `<description>${xmlEscape(description)}</description>` : ''}
+    ${email ? `<email>${xmlEscape(email)}</email>` : ''}
+    <paymentProfiles>
+      ${(firstName || lastName || companyName || zip) ? `<billTo>
+        ${firstName ? `<firstName>${xmlEscape(firstName)}</firstName>` : ''}
+        ${lastName ? `<lastName>${xmlEscape(lastName)}</lastName>` : ''}
+        ${companyName ? `<company>${xmlEscape(companyName)}</company>` : ''}
+        ${zip ? `<zip>${xmlEscape(zip)}</zip>` : ''}
+      </billTo>` : ''}
+      <payment>
+        <creditCard>
+          <cardNumber>${xmlEscape(cardNumber)}</cardNumber>
+          <expirationDate>${xmlEscape(normalizedExpiration)}</expirationDate>
+          <cardCode>${xmlEscape(cvv)}</cardCode>
+        </creditCard>
+      </payment>
+    </paymentProfiles>
+  </profile>
+  <validationMode>none</validationMode>
+</createCustomerProfileRequest>`;
+
+  try {
+    const response = await axios.post(AUTHORIZE_NET_ENDPOINT, xmlBody, {
+      headers: { 'Content-Type': 'text/xml' }
+    });
+    const result = await parseStringPromise(response.data);
+    const root = result.createCustomerProfileResponse;
+    const messages = root?.messages?.[0];
+    const resultCode = messages?.resultCode?.[0];
+
+    if (resultCode === 'Ok') {
+      const customerProfileId = root?.customerProfileId?.[0] || null;
+      const customerPaymentProfileId = root?.customerPaymentProfileIdList?.[0]?.numericString?.[0] || null;
+      return {
+        success: true,
+        customerProfileId: customerProfileId || undefined,
+        customerPaymentProfileId: customerPaymentProfileId || undefined
+      };
+    }
+
+    const errorCode = messages?.message?.[0]?.code?.[0] || '';
+    const errorText = messages?.message?.[0]?.text?.[0] || 'Failed to create customer profile with payment method';
+
+    if (isDuplicateProfileError(errorCode, errorText)) {
+      const existingCustomerProfileId = extractCustomerProfileIdFromDuplicateText(errorText);
+      if (existingCustomerProfileId) {
+        const paymentProfileResult = await createCustomerPaymentProfileOnExistingCustomer({
+          customerProfileId: existingCustomerProfileId,
+          firstName,
+          lastName,
+          companyName,
+          cardNumber,
+          expirationDate,
+          cvv,
+          zip
+        });
+        if (paymentProfileResult.success) {
+          return {
+            success: true,
+            customerProfileId: existingCustomerProfileId,
+            customerPaymentProfileId: paymentProfileResult.customerPaymentProfileId
+          };
+        }
+        return paymentProfileResult;
+      }
+    }
+
+    return { success: false, error: errorText };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message
+    };
+  }
+};
+
 /**
  * Create an Authorize.Net CIM customer + payment profile from an existing transaction.
  * This avoids handling raw card/bank data again by reusing the approved transaction.
@@ -689,6 +1063,10 @@ export const createCustomerProfileFromTransaction = async (options) => {
       const numericStrings = root?.customerPaymentProfileIdList?.[0]?.numericString || [];
       const paymentProfileId = Array.isArray(numericStrings) ? numericStrings[0] : numericStrings || null;
 
+      console.info(
+        `[CIM_SAVE][PROFILE_CREATED] customerProfileId=${customerProfileId || 'n/a'} customerPaymentProfileId=${paymentProfileId || 'n/a'} transactionId=${transactionId}`
+      );
+
       return {
         success: true,
         customerProfileId: customerProfileId || undefined,
@@ -696,7 +1074,35 @@ export const createCustomerProfileFromTransaction = async (options) => {
       };
     }
 
+    const errorCode = messages?.message?.[0]?.code?.[0] || '';
     const errorText = messages?.message?.[0]?.text?.[0] || 'Failed to create customer profile from transaction';
+
+    // Common case: customer profile already exists. In that case, create only a payment profile
+    // using the same successful transaction so "Save for future use" still works.
+    if (isDuplicateProfileError(errorCode, errorText)) {
+      const existingCustomerProfileId = extractCustomerProfileIdFromDuplicateText(errorText);
+      if (existingCustomerProfileId) {
+        console.info(
+          `[CIM_SAVE][DUPLICATE_PROFILE] existingCustomerProfileId=${existingCustomerProfileId} transactionId=${transactionId} creating payment profile`
+        );
+        const paymentProfileResult = await createCustomerPaymentProfileFromTransaction({
+          transactionId,
+          customerProfileId: existingCustomerProfileId
+        });
+
+        if (paymentProfileResult.success && paymentProfileResult.customerPaymentProfileId) {
+          console.info(
+            `[CIM_SAVE][DUPLICATE_PROFILE_SUCCESS] customerProfileId=${existingCustomerProfileId} customerPaymentProfileId=${paymentProfileResult.customerPaymentProfileId} transactionId=${transactionId}`
+          );
+          return {
+            success: true,
+            customerProfileId: existingCustomerProfileId,
+            customerPaymentProfileId: paymentProfileResult.customerPaymentProfileId
+          };
+        }
+      }
+    }
+
     return {
       success: false,
       error: errorText
@@ -706,6 +1112,49 @@ export const createCustomerProfileFromTransaction = async (options) => {
     if (error.response?.data) {
       console.error('Response data:', error.response.data);
     }
+    if (error.response?.data) {
+      try {
+        const result = await parseStringPromise(error.response.data);
+        const root = result.createCustomerProfileFromTransactionResponse;
+        const messages = root?.messages?.[0];
+        const errorCode = messages?.message?.[0]?.code?.[0] || '';
+        const errorText = messages?.message?.[0]?.text?.[0] || '';
+
+        if (isDuplicateProfileError(errorCode, errorText)) {
+          const existingCustomerProfileId = extractCustomerProfileIdFromDuplicateText(errorText);
+          if (existingCustomerProfileId) {
+            console.info(
+              `[CIM_SAVE][DUPLICATE_PROFILE_CATCH] existingCustomerProfileId=${existingCustomerProfileId} transactionId=${transactionId} creating payment profile`
+            );
+            const paymentProfileResult = await createCustomerPaymentProfileFromTransaction({
+              transactionId,
+              customerProfileId: existingCustomerProfileId
+            });
+
+            if (paymentProfileResult.success && paymentProfileResult.customerPaymentProfileId) {
+              console.info(
+                `[CIM_SAVE][DUPLICATE_PROFILE_CATCH_SUCCESS] customerProfileId=${existingCustomerProfileId} customerPaymentProfileId=${paymentProfileResult.customerPaymentProfileId} transactionId=${transactionId}`
+              );
+              return {
+                success: true,
+                customerProfileId: existingCustomerProfileId,
+                customerPaymentProfileId: paymentProfileResult.customerPaymentProfileId
+              };
+            }
+          }
+        }
+
+        if (errorText) {
+          return {
+            success: false,
+            error: errorText
+          };
+        }
+      } catch (_parseErr) {
+        // Fall through to generic error.
+      }
+    }
+
     return {
       success: false,
       error: error.response?.data?.message || error.message

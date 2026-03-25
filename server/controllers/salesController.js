@@ -1,8 +1,8 @@
 import { Op } from 'sequelize';
 import { Sale, SaleItem, Item, Customer, InvoicePayment, User } from '../models/index.js';
 import { sequelize } from '../config/db.js';
-import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction } from '../services/authorizeNetService.js';
-import { createSalesReceipt, emailSalesReceipt, emailInvoice, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice } from '../services/zohoService.js';
+import { processPayment, processAchPayment, processOpaqueDataPayment, calculateCreditCardFee, chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, createCustomerProfileFromTransaction, createOrUpdateCustomerProfileWithCard } from '../services/authorizeNetService.js';
+import { createSalesReceipt, emailSalesReceipt, emailInvoice, getCustomerById as getZohoCustomerById, getZohoTaxIdForPercentage, voidSalesReceipt, createCustomerPayment, createProcessingFeeJournal, createInvoice, updateZohoCustomerCardMetadata } from '../services/zohoService.js';
 import { printReceipt } from '../services/printerService.js';
 import { sendSuccess, sendError, sendNotFound, sendValidationError } from '../utils/responseHelper.js';
 import { invalidatePaymentProfilesCacheServer } from './customerController.js';
@@ -637,9 +637,11 @@ export const createSale = async (req, res) => {
       };
     }
 
-    // Optionally save payment method in Authorize.Net CIM when a customer is present and
-    // we processed the payment directly through Authorize.Net (not Valor/terminal/standalone).
-    const shouldSavePaymentMethod =
+    // Optionally save payment method in Authorize.Net CIM.
+    // Supported modes:
+    // 1) Normal Authorize.Net payment -> create profile from transaction
+    // 2) Standalone card reader mode with manual card details -> create/update profile directly
+    const shouldSaveFromTransaction =
       !!customer &&
       !!transactionId &&
       (paymentType === 'card' || paymentType === 'ach') &&
@@ -648,16 +650,70 @@ export const createSale = async (req, res) => {
       !isStandaloneMode &&
       (savePaymentMethod === true || paymentDetails?.savePaymentMethod === true);
 
-    if (shouldSavePaymentMethod) {
-      try {
-        const profileResult = await createCustomerProfileFromTransaction({
-          transactionId,
-          email: customer.email || null,
-          description: customer.contactName || null,
-          merchantCustomerId: customer.zohoId || String(customer.id)
-        });
+    const requestedSavePaymentMethod = savePaymentMethod === true || paymentDetails?.savePaymentMethod === true;
+    const shouldSaveStandaloneManualCard =
+      !!customer &&
+      paymentType === 'card' &&
+      isStandaloneMode &&
+      requestedSavePaymentMethod &&
+      !!paymentDetails?.cardNumber &&
+      !!paymentDetails?.expirationDate &&
+      !!paymentDetails?.cvv;
 
-        if (profileResult.success && profileResult.customerProfileId && profileResult.customerPaymentProfileId) {
+    if (requestedSavePaymentMethod && !shouldSaveFromTransaction && !shouldSaveStandaloneManualCard) {
+      console.warn(
+        `[CIM_SAVE][SKIPPED] customerId=${customer?.id || 'n/a'} paymentType=${paymentType} ` +
+        `reason=conditions_not_met hasCustomer=${!!customer} hasTransactionId=${!!transactionId} ` +
+        `useValorApi=${!!useValorApi} useStoredPayment=${!!useStoredPayment} isStandaloneMode=${!!isStandaloneMode} ` +
+        `hasCardDetails=${!!paymentDetails?.cardNumber && !!paymentDetails?.expirationDate && !!paymentDetails?.cvv}`
+      );
+    }
+
+    if (shouldSaveFromTransaction || shouldSaveStandaloneManualCard) {
+      try {
+        const cimDescription =
+          customer.contactName?.trim() ||
+          customer.companyName?.trim() ||
+          customer.email?.trim() ||
+          null;
+        const cimNameSource = customer.contactName?.trim() || customer.companyName?.trim() || '';
+        const cimNameParts = cimNameSource.split(/\s+/).filter(Boolean);
+        const cimFirstName = cimNameParts[0] || null;
+        const cimLastName = cimNameParts.length > 1 ? cimNameParts.slice(1).join(' ') : null;
+        console.info(
+          `[CIM_SAVE][START] customerId=${customer.id} paymentType=${paymentType} transactionId=${transactionId}`
+        );
+
+        let profileResult;
+
+        if (shouldSaveStandaloneManualCard) {
+          profileResult = await createOrUpdateCustomerProfileWithCard({
+            email: customer.email || null,
+            description: cimDescription,
+            merchantCustomerId: customer.zohoId || String(customer.id),
+            firstName: cimFirstName,
+            lastName: cimLastName,
+            companyName: customer.companyName || null,
+            cardNumber: paymentDetails.cardNumber,
+            expirationDate: paymentDetails.expirationDate,
+            cvv: paymentDetails.cvv,
+            zip: paymentDetails.zip || null
+          });
+        } else {
+          profileResult = await createCustomerProfileFromTransaction({
+            transactionId,
+            email: customer.email || null,
+            description: cimDescription,
+            merchantCustomerId: customer.zohoId || String(customer.id)
+          });
+        }
+
+        if (profileResult.success && profileResult.customerProfileId) {
+          const resolvedPaymentProfileId =
+            profileResult.customerPaymentProfileId ||
+            customer.customerPaymentProfileId ||
+            null;
+
           // Update customer record with CIM identifiers and masked account info (last4 only).
           const masked = paymentResult?.accountNumber || '';
           const digits = typeof masked === 'string' ? masked.replace(/\D/g, '') : '';
@@ -665,10 +721,13 @@ export const createSale = async (req, res) => {
 
           const updates = {
             customerProfileId: profileResult.customerProfileId.toString(),
-            customerPaymentProfileId: profileResult.customerPaymentProfileId.toString(),
             hasPaymentMethod: true,
             paymentMethodType: paymentType
           };
+
+          if (resolvedPaymentProfileId) {
+            updates.customerPaymentProfileId = resolvedPaymentProfileId.toString();
+          }
 
           if (paymentType === 'card') {
             if (last4) {
@@ -681,6 +740,35 @@ export const createSale = async (req, res) => {
           }
 
           await customer.update(updates);
+          if (customer.zohoId) {
+            const syncResult = await updateZohoCustomerCardMetadata({
+              customerId: customer.zohoId,
+              last4: updates.last_four_digits || customer.last_four_digits || null,
+              cardBrand: paymentResult?.accountType || paymentResult?.cardType || null,
+              paymentMethodId: resolvedPaymentProfileId || null,
+              customerProfileId: profileResult.customerProfileId || null
+            });
+            if (!syncResult.success && !syncResult.skipped) {
+              console.warn(
+                `[ZOHO_CARD_SYNC][FAILED] customerId=${customer.id} zohoId=${customer.zohoId} reason=${syncResult.error || 'unknown'}`
+              );
+            } else if (syncResult.skipped) {
+              console.info(
+                `[ZOHO_CARD_SYNC][SKIPPED] customerId=${customer.id} zohoId=${customer.zohoId} reason=${syncResult.reason}`
+              );
+            } else {
+              console.info(
+                `[ZOHO_CARD_SYNC][SUCCESS] customerId=${customer.id} zohoId=${customer.zohoId} updatedFieldCount=${syncResult.updatedFieldCount || 0}`
+              );
+            }
+          }
+          console.info(
+            `[CIM_SAVE][SUCCESS] customerId=${customer.id} customerProfileId=${profileResult.customerProfileId} customerPaymentProfileId=${resolvedPaymentProfileId || 'n/a'} paymentType=${paymentType}`
+          );
+        } else {
+          console.warn(
+            `[CIM_SAVE][FAILED] customerId=${customer.id} paymentType=${paymentType} reason=${profileResult.error || 'missing profile identifiers from gateway response'}`
+          );
         }
       } catch (saveErr) {
         // Never fail the sale if saving to CIM fails.
