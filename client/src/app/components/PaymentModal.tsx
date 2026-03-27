@@ -84,7 +84,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
   const [zohoBankLast4, setZohoBankLast4] = useState<string | null>(null);
   const [savePaymentMethod, setSavePaymentMethod] = useState(false);
   const [emailReceiptToCustomer, setEmailReceiptToCustomer] = useState(true);
-  const [isCreatingZohoCardLink, setIsCreatingZohoCardLink] = useState(false);
 
   // Load Accept.js on mount
   useEffect(() => {
@@ -178,33 +177,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
     }
   };
 
-  const handleCreateZohoCardLink = async () => {
-    if (!customerId) return;
-    try {
-      setIsCreatingZohoCardLink(true);
-      const response = await customersAPI.createZohoCardLink(customerId);
-      if (!response.success) {
-        throw new Error(response.error || response.message || 'Failed to create Zoho card link');
-      }
-      const targetUrl = response.data?.hostedPageUrl || response.data?.manualLinkUrl || null;
-      if (!targetUrl) {
-        throw new Error(response.message || 'No Zoho URL returned');
-      }
-      window.open(targetUrl, '_blank', 'noopener,noreferrer');
-      if (response.data?.fallback) {
-        showToast('Hosted link unavailable. Opened Zoho customer page to add card manually.', 'info', 5000);
-      } else {
-        showToast('Opened Zoho secure card link in a new tab.', 'success', 4000);
-      }
-    } catch (err: any) {
-      const msg = err?.message || 'Failed to create Zoho card link.';
-      setError(msg);
-      showToast(msg, 'error', 5000);
-    } finally {
-      setIsCreatingZohoCardLink(false);
-    }
-  };
-
   // Terminal discovery removed - Valor Connect only needs Terminal number (configured in Settings)
 
   // Calculate price with UM conversion rate (same logic as ShoppingCart)
@@ -244,32 +216,13 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
 
     // Standalone mode: Skip payment processing, just record the sale
     if (cardReaderMode === 'standalone' && selectedMethod === 'card') {
-      if (savePaymentMethod && cardPaymentMethod !== 'manual') {
-        setError('To save a card in standalone mode, switch to Manual Entry and enter card details.');
-        setIsProcessing(false);
-        return;
-      }
-
-      if (savePaymentMethod && cardPaymentMethod === 'manual' && (!cardNumber || !cardExpiry || !cardCvv)) {
-        setError('Card number, expiry, and CVV are required to save card in standalone mode.');
-        setIsProcessing(false);
-        return;
-      }
-
       const paymentDetails: PaymentDetails = {
         method: selectedMethod,
         amount: finalTotal,
         useStandaloneMode: true, // Flag to indicate standalone mode
-        savePaymentMethod: savePaymentMethod && !!customerId,
+        savePaymentMethod: false,
         ...((context === 'sale' || context === 'zohoDocuments') && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
       };
-
-      if (savePaymentMethod && cardPaymentMethod === 'manual') {
-        paymentDetails.cardNumber = cardNumber;
-        paymentDetails.expirationDate = cardExpiry;
-        paymentDetails.cvv = cardCvv;
-        paymentDetails.zip = cardZip;
-      }
       
       try {
         await onConfirmPayment(paymentDetails);
@@ -345,7 +298,7 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
     const paymentDetails: PaymentDetails = {
       method: paymentMethod,
       amount: finalTotal,
-      savePaymentMethod: savePaymentMethod && !!customerId,
+      savePaymentMethod: selectedMethod === 'ach' ? (savePaymentMethod && !!customerId) : false,
       ...((context === 'sale' || context === 'zohoDocuments') && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
     };
 
@@ -939,33 +892,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
                   </div>
                 )}
 
-                {/* Save payment method option when customer is selected and user is entering card manually (sale or invoice/SO) */}
-                {customerId && cardPaymentMethod === 'manual' && (
-                  <div className="mt-2 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="save-payment-method"
-                        type="checkbox"
-                        checked={savePaymentMethod}
-                        onChange={(e) => setSavePaymentMethod(e.target.checked)}
-                        className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                      />
-                      <label
-                        htmlFor="save-payment-method"
-                        className="text-xs text-gray-700 dark:text-gray-300"
-                      >
-                        Save this payment method to customer for future use
-                      </label>
-                    </div>
-                    <button
-                      onClick={handleCreateZohoCardLink}
-                      disabled={isCreatingZohoCardLink}
-                      className="inline-flex items-center justify-center px-3 py-2 rounded-lg border border-blue-500 text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-medium transition-colors"
-                    >
-                      {isCreatingZohoCardLink ? 'Creating Zoho link...' : 'Link card in Zoho'}
-                    </button>
-                  </div>
-                )}
               </div>
             )}
 
@@ -979,18 +905,6 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
                   </div>
                   <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Stored Payment Method</h3>
                 </div>
-                {customerId && (
-                  <div className="mb-2">
-                    <button
-                      onClick={handleCreateZohoCardLink}
-                      disabled={isCreatingZohoCardLink}
-                      className="inline-flex items-center justify-center px-3 py-2 rounded-lg border border-blue-500 text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-medium transition-colors"
-                    >
-                      {isCreatingZohoCardLink ? 'Creating Zoho link...' : 'Link card in Zoho'}
-                    </button>
-                  </div>
-                )}
-
                 {loadingPaymentProfiles ? (
                   <div className="text-center py-8">
                     <Loader className="w-8 h-8 text-green-600 dark:text-green-400 mx-auto animate-spin mb-2" />
