@@ -32,6 +32,17 @@ export const validateSale = (req, res, next) => {
   // Normalize payment type: merge credit_card/debit_card to card
   const normalizedPaymentType = (paymentType === 'credit_card' || paymentType === 'debit_card') ? 'card' : paymentType;
 
+  const useStoredPaymentRoot = req.body.useStoredPayment === true;
+  const paymentProfileIdRoot = req.body.paymentProfileId;
+  if (useStoredPaymentRoot) {
+    if (!paymentProfileIdRoot || String(paymentProfileIdRoot).trim() === '') {
+      errors.push('paymentProfileId is required when useStoredPayment is true');
+    }
+    if (normalizedPaymentType === 'cash' || normalizedPaymentType === 'zelle') {
+      errors.push('Stored payment requires payment type card or ACH, not cash or Zelle');
+    }
+  }
+
   // Validate payment details based on payment type
   if (normalizedPaymentType === 'card') {
     // Support useStandaloneMode from root level OR from paymentDetails (for backward compatibility)

@@ -187,6 +187,29 @@ const resolveTaxPercentage = (user) => {
   return 7.5;
 };
 
+// Strict payment type normalizer for invoice payment recording.
+// Returns canonical values or null for invalid input (never defaults to cash).
+const normalizeInvoicePaymentType = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === 'cash' || raw === 'card' || raw === 'ach' || raw === 'zelle') return raw;
+  if (
+    raw === 'credit_card' ||
+    raw === 'debit_card' ||
+    raw === 'credit' ||
+    raw === 'debit' ||
+    raw === 'cc' ||
+    raw === 'creditcard' ||
+    raw === 'debitcard'
+  ) {
+    return 'card';
+  }
+  return null;
+};
+
+// Authorize.Net / UI may send payment profile IDs as strings or numbers — compare loosely.
+const samePaymentProfileId = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
+
 export const createSale = async (req, res) => {
   try {
     const { 
@@ -376,7 +399,7 @@ export const createSale = async (req, res) => {
         });
         if (profileResult.success && profileResult.profile) {
           const paymentProfiles = extractPaymentProfiles(profileResult.profile);
-          const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+          const selectedProfile = paymentProfiles.find(p => samePaymentProfileId(p.paymentProfileId, paymentProfileId));
           if (selectedProfile) {
             actualPaymentType = selectedProfile.type === 'ach' ? 'ach' : 'card'; // debit_card merged to card
           }
@@ -461,7 +484,7 @@ export const createSale = async (req, res) => {
         }
 
         // Verify that the requested payment profile exists
-        const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+        const requestedProfile = paymentProfiles.find(p => samePaymentProfileId(p.paymentProfileId, paymentProfileId));
         
         if (!requestedProfile) {
           return sendError(
@@ -478,7 +501,7 @@ export const createSale = async (req, res) => {
         });
       } else {
         // Verify that the stored payment profile ID matches the requested one
-        if (customer.customerPaymentProfileId !== paymentProfileId) {
+        if (!samePaymentProfileId(customer.customerPaymentProfileId, paymentProfileId)) {
           // Re-verify by fetching profile
           const profileResult = await getCustomerProfileDetails({
             customerProfileId: customerProfileId
@@ -486,7 +509,7 @@ export const createSale = async (req, res) => {
           
           if (profileResult.success && profileResult.profile) {
             const paymentProfiles = extractPaymentProfiles(profileResult.profile);
-            const requestedProfile = paymentProfiles.find(p => p.paymentProfileId === paymentProfileId);
+            const requestedProfile = paymentProfiles.find(p => samePaymentProfileId(p.paymentProfileId, paymentProfileId));
             
             if (!requestedProfile) {
               return sendError(
@@ -512,8 +535,8 @@ export const createSale = async (req, res) => {
       }
 
       transactionId = paymentResult.transactionId;
-      // Update paymentType to actual type determined from profile
-      paymentType = actualPaymentType;
+      // Stored CIM charges are always card or ACH — never persist cash/zelle from a mismatched request.
+      paymentType = actualPaymentType === 'ach' ? 'ach' : 'card';
     } else if (paymentType === 'card') {
       // IMPORTANT: Double-check standalone mode - if enabled, skip all card processing
       if (isStandaloneMode) {
@@ -1698,16 +1721,20 @@ export const recordInvoicePayment = async (req, res) => {
       return sendValidationError(res, 'At least one invoice is required');
     }
 
-    const paymentType = (requestPaymentType || 'cash').toString().toLowerCase();
+    const paymentType = normalizeInvoicePaymentType(requestPaymentType);
+    if (!paymentType) {
+      return sendValidationError(
+        res,
+        'Payment type is required and must be one of: cash, card, ach, zelle'
+      );
+    }
     const paymentModeMap = {
       cash: 'cash',
       card: 'creditcard',
-      credit_card: 'creditcard',
-      debit_card: 'creditcard',
       zelle: 'banktransfer',
       ach: 'banktransfer'
     };
-    const zohoPaymentMode = paymentModeMap[paymentType] || 'cash';
+    const zohoPaymentMode = paymentModeMap[paymentType];
     const useStandaloneMode =
       req.body.useStandaloneMode === true || paymentDetails?.useStandaloneMode === true;
     const originalAmount = parseFloat(amount) || invoiceItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
@@ -1716,7 +1743,7 @@ export const recordInvoicePayment = async (req, res) => {
     let totalAmount = originalAmount;
 
     // For card: either standalone mode (no gateway charge) or charge via Authorize.Net first
-    if (paymentType === 'card' || paymentType === 'credit_card' || paymentType === 'debit_card') {
+    if (paymentType === 'card') {
       if (useStandaloneMode) {
         // Standalone mode - skip payment processing, just record as card payment
         // Ensure we have a non-generic transactionId for audit trail

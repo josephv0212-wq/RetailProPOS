@@ -1036,6 +1036,10 @@ function AppContent() {
 
     if (paymentDetails.method === 'cash') {
       apiPaymentDetails.cashReceived = paymentDetails.cashReceived || total;
+    } else if (paymentDetails.useStoredPayment && paymentDetails.paymentProfileId) {
+      // Stored payment (CIM) — must run before generic "card" branch so we do not send empty manual card fields.
+      const isAch = paymentDetails.method === 'ach';
+      paymentType = isAch ? 'ach' : 'card';
     } else if (paymentDetails.method === 'card' || paymentDetails.method === 'credit_card' || paymentDetails.method === 'debit_card') {
       if (paymentDetails.useStandaloneMode) {
         // Standalone mode - no payment processing, just record the sale
@@ -1070,13 +1074,6 @@ function AppContent() {
         apiPaymentDetails.cvv = paymentDetails.cvv;
         apiPaymentDetails.zip = paymentDetails.zip;
       }
-    } else if (paymentDetails.useStoredPayment && paymentDetails.paymentProfileId) {
-      // Stored payment method via CIM
-      // Note: useStoredPayment and paymentProfileId will be added at root level below
-      // Determine payment type from stored profile (will be determined on backend)
-      // For now, set paymentType based on method
-      const isAch = paymentDetails.method === 'ach';
-      paymentType = isAch ? 'ach' : 'card';
     } else if (paymentDetails.method === 'zelle') {
       apiPaymentDetails.zelleConfirmation = paymentDetails.zelleConfirmation;
     } else if (paymentDetails.method === 'ach') {
