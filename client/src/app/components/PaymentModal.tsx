@@ -216,9 +216,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
     return basePrice;
   };
 
-  // Calculate convenience fee for card payments and stored card profiles
-  const isCreditCardPayment = selectedMethod === 'card' || 
-    (selectedMethod === 'stored_payment' && selectedPaymentProfileId && 
+  // Calculate convenience fee for card payments and stored card profiles (including Zoho "card on file" without CIM).
+  const isZohoOnFileNoCimCard =
+    selectedMethod === 'stored_payment' &&
+    paymentProfiles.length === 0 &&
+    !!getZohoOnFileCardSummary();
+  const isCreditCardPayment = selectedMethod === 'card' ||
+    isZohoOnFileNoCimCard ||
+    (selectedMethod === 'stored_payment' && selectedPaymentProfileId &&
      paymentProfiles.find((p: any) => p.paymentProfileId === selectedPaymentProfileId)?.type === 'card');
   // Apply 3% surcharge for credit card on both normal POS sales and invoice/sales-order POS payments.
   const convenienceFee = (context === 'sale' || context === 'zohoDocuments') && isCreditCardPayment ? total * 0.03 : 0;
@@ -283,15 +288,20 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
         return;
       }
     } else if (selectedMethod === 'stored_payment') {
+      // Special case: Zoho has a card on file but no Authorize.Net CIM profile. Allow "record-only" card flow.
       if (paymentProfiles.length === 0) {
-        setError('No stored payment methods available for this customer');
-        setIsProcessing(false);
-        return;
-      }
-      if (!selectedPaymentProfileId) {
-        setError('Please select a stored payment method');
-        setIsProcessing(false);
-        return;
+        const summary = getZohoOnFileCardSummary();
+        if (!summary) {
+          setError('No stored payment methods available for this customer');
+          setIsProcessing(false);
+          return;
+        }
+      } else {
+        if (!selectedPaymentProfileId) {
+          setError('Please select a stored payment method');
+          setIsProcessing(false);
+          return;
+        }
       }
     } else if (selectedMethod === 'ach' && (!achName || !achRouting || !achAccount || !achBankName)) {
       setAchEntryMode('details');
@@ -303,12 +313,16 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
     // Simulate payment processing
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // For stored_payment, determine type from selected profile
+    // For stored_payment, determine type from selected profile (or Zoho on-file fallback)
     let paymentMethod = selectedMethod;
     if (selectedMethod === 'stored_payment') {
-      // Determine payment type from selected profile
-      const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === selectedPaymentProfileId);
-      paymentMethod = selectedProfile?.type === 'ach' ? 'ach' : 'card';
+      if (paymentProfiles.length === 0) {
+        paymentMethod = 'card';
+      } else {
+        // Determine payment type from selected profile
+        const selectedProfile = paymentProfiles.find(p => p.paymentProfileId === selectedPaymentProfileId);
+        paymentMethod = selectedProfile?.type === 'ach' ? 'ach' : 'card';
+      }
     }
     
     const paymentDetails: PaymentDetails = {
@@ -492,9 +506,16 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
         }
       }
     } else if (selectedMethod === 'stored_payment') {
-      // Use stored payment method via CIM
-      paymentDetails.useStoredPayment = true;
-      paymentDetails.paymentProfileId = selectedPaymentProfileId;
+      if (paymentProfiles.length === 0) {
+        // Zoho card on file (no CIM): record-only card payment (no gateway), but still apply 3% fee.
+        paymentDetails.useStandaloneMode = true;
+        (paymentDetails as any).recordZohoOnFileAsCard = true;
+        (paymentDetails as any).zohoOnFileCardSummary = getZohoOnFileCardSummary();
+      } else {
+        // Use stored payment method via CIM
+        paymentDetails.useStoredPayment = true;
+        paymentDetails.paymentProfileId = selectedPaymentProfileId;
+      }
     } else if (selectedMethod === 'ach') {
       paymentDetails.achDetails = {
         name: achName,

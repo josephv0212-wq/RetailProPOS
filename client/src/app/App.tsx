@@ -559,7 +559,7 @@ function AppContent() {
         price: Number(it.amount) || 0,
       } as any,
       quantity: 1,
-      selectedUM: null,
+      selectedUM: undefined,
       availableUnits: [],
     }));
 
@@ -570,12 +570,21 @@ function AppContent() {
 
   const handleConfirmZohoDocsPayment = async (paymentDetails: PaymentDetails): Promise<any> => {
     const count = pendingChargeItems.length;
-    const amountCharged = Number(paymentDetails.amount) ?? (pendingChargeItems || []).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
+    const baseSubtotal = (pendingChargeItems || []).reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
+    const amountCharged = Number(paymentDetails.amount) ?? baseSubtotal;
     const items = pendingChargeItems || [];
 
     const invoiceItems = items.filter((it: any) => it.type === 'invoice');
     if (invoiceItems.length > 0 && selectedCustomer?.id) {
       try {
+        // Server-side invoice payment processing mirrors stored-payment logic:
+        // - For card (non-standalone): backend charges subtotal + 3% and records fee in Zoho.
+        // - Therefore we send the base subtotal for card payments (not fee-included total).
+        // Always send base subtotal for card invoice payments; backend applies + records the 3% fee.
+        const serverAmount =
+          paymentDetails.method === 'card'
+            ? baseSubtotal
+            : amountCharged;
         const recordPayload: Parameters<typeof salesAPI.recordInvoicePayment>[0] = {
           customerId: selectedCustomer.id,
           items: invoiceItems.map((it: any) => ({
@@ -585,7 +594,7 @@ function AppContent() {
             amount: Number(it.amount) || 0,
           })),
           paymentType: paymentDetails.method || 'cash',
-          amount: amountCharged,
+          amount: serverAmount,
           transactionId: paymentDetails.valorTransactionId || undefined,
           emailReceiptToCustomer: !!paymentDetails.emailReceiptToCustomer,
         };
@@ -1046,7 +1055,7 @@ function AppContent() {
       // Stored payment (CIM) — must run before generic "card" branch so we do not send empty manual card fields.
       const isAch = paymentDetails.method === 'ach';
       paymentType = isAch ? 'ach' : 'card';
-    } else if (paymentDetails.method === 'card' || paymentDetails.method === 'credit_card' || paymentDetails.method === 'debit_card') {
+    } else if (paymentDetails.method === 'card') {
       if (paymentDetails.useStandaloneMode) {
         // Standalone mode - no payment processing, just record the sale
         apiPaymentDetails.useStandaloneMode = true;
@@ -1336,7 +1345,6 @@ function AppContent() {
           storeAddress={constants.STORE_ADDRESS}
           storePhone={constants.STORE_PHONE}
           userName={constants.USER_NAME}
-          userRole={user?.role || 'cashier'}
         />
       </PageWrapper>
     );
@@ -1510,8 +1518,8 @@ function AppContent() {
               preFetchedCheckoutRef.current = null;
             }
           }}
-          salesOrders={openSalesOrders}
-          invoices={invoices}
+          salesOrders={openSalesOrders as any}
+          invoices={invoices as any}
           onSelectItems={handleSelectOrdersInvoices}
           customerName={selectedCustomer.name || selectedCustomer.contactName}
         />

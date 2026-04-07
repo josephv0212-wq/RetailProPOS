@@ -421,18 +421,13 @@ export const createSale = async (req, res) => {
     }
     
     // 3% convenience fee for card only (not for ACH, including stored ACH).
-    // Zoho-on-file record-only card: same as cash (no fee, no gateway) — see recordZohoOnFileAsCard + standalone.
     if (useStoredPayment && (paymentType === 'ach' || actualPaymentType === 'ach')) {
       cardProcessingFee = 0;
     } else {
-      const zohoRecordCardNoGateway =
-        recordZohoOnFileAsCard && paymentType === 'card' && isStandaloneMode;
       cardProcessingFee =
-        zohoRecordCardNoGateway
-          ? 0
-          : actualPaymentType === 'card'
-            ? calculateCreditCardFee(subtotal, taxAmount)
-            : 0;
+        actualPaymentType === 'card'
+          ? calculateCreditCardFee(subtotal, taxAmount)
+          : 0;
     }
 
     const total = baseTotal + cardProcessingFee;
@@ -1766,10 +1761,19 @@ export const recordInvoicePayment = async (req, res) => {
     const zohoPaymentMode = paymentModeMap[paymentType];
     const useStandaloneMode =
       req.body.useStandaloneMode === true || paymentDetails?.useStandaloneMode === true;
-    const originalAmount = parseFloat(amount) || invoiceItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+    const resolvedInvoiceTotal = invoiceItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+    const originalAmount = parseFloat(amount) || resolvedInvoiceTotal;
 
     let transactionId = requestTransactionId || `POS-${Date.now()}`;
     let totalAmount = originalAmount;
+
+    // Keep invoice manual card payments consistent with stored-payment invoice charges:
+    // - Card: charge invoice total + 3% fee via gateway (unless standalone/no-gateway)
+    // - Zoho: record invoice payment for invoice total and record the fee as fee invoice (preferred) or journal (fallback)
+    // Always apply 3% for card invoice payments (even in standalone "Zoho on file / no CIM" mode).
+    const addCardFee = paymentType === 'card';
+    const totalCharge = addCardFee ? Math.round(originalAmount * 1.03 * 100) / 100 : originalAmount;
+    const totalFee = addCardFee ? Math.round((totalCharge - originalAmount) * 100) / 100 : 0;
 
     // For card: either standalone mode (no gateway charge) or charge via Authorize.Net first
     if (paymentType === 'card') {
@@ -1785,9 +1789,9 @@ export const recordInvoicePayment = async (req, res) => {
         const opaquePayload = bluetoothPayload;
 
         if (usingOpaqueData && opaquePayload?.descriptor && opaquePayload?.value) {
-          // Accept.js encrypted (opaqueData) flow - amount from frontend already includes 3% fee
+          // Accept.js encrypted (opaqueData) flow
           const paymentResult = await processOpaqueDataPayment({
-            amount: originalAmount,
+            amount: totalCharge,
             opaqueData: { descriptor: opaquePayload.descriptor, value: opaquePayload.value },
             deviceSessionId: opaquePayload.sessionId,
             invoiceNumber: `INV-${Date.now()}`,
@@ -1799,11 +1803,11 @@ export const recordInvoicePayment = async (req, res) => {
           transactionId = paymentResult.transactionId;
           totalAmount = originalAmount;
         } else if (paymentDetails?.cardNumber) {
-          // Manual card entry (plain) - amount from frontend already includes 3% fee
+          // Manual card entry (plain)
           const expirationDate = (paymentDetails.expirationDate || '').replace(/\D/g, '');
           const cardNumber = (paymentDetails.cardNumber || '').replace(/\D/g, '');
           const paymentResult = await processPayment({
-            amount: originalAmount,
+            amount: totalCharge,
             cardNumber,
             expirationDate: expirationDate || paymentDetails.expirationDate,
             cvv: paymentDetails.cvv,
@@ -1844,14 +1848,31 @@ export const recordInvoicePayment = async (req, res) => {
       transactionId = paymentResult.transactionId;
     }
 
-    const invoicesForZoho = invoiceItems.map(it => ({
+    let invoicesForZoho = invoiceItems.map(it => ({
       invoice_id: String(it.id).trim(),
       amount_applied: parseFloat(it.amount) || 0
     }));
 
+    // For card (non-standalone): record the 3% fee in Zoho in the same way as stored-payment charges.
+    let useFeeInvoice = false;
+    if (totalFee > 0 && customer.zohoId) {
+      const feeInvoiceResult = await createInvoice({
+        customerId: String(customer.zohoId).trim(),
+        feeAmount: totalFee,
+        referenceNumber: transactionId || `INV-${Date.now()}`,
+        date: new Date().toISOString().split('T')[0]
+      });
+      if (feeInvoiceResult.success && feeInvoiceResult.invoiceId) {
+        invoicesForZoho.push({ invoice_id: feeInvoiceResult.invoiceId, amount_applied: totalFee });
+        useFeeInvoice = true;
+      } else {
+        console.warn(`Zoho: fee invoice failed, falling back to journal: ${feeInvoiceResult.error || 'unknown'}`);
+      }
+    }
+
     const zohoResult = await createCustomerPayment({
       customerId: customer.zohoId,
-      amount: totalAmount,
+      amount: totalFee > 0 ? Math.round((totalAmount + totalFee) * 100) / 100 : totalAmount,
       invoices: invoicesForZoho,
       paymentMode: zohoPaymentMode,
       referenceNumber: transactionId,
@@ -1862,6 +1883,59 @@ export const recordInvoicePayment = async (req, res) => {
 
     if (!zohoResult.success) {
       return sendError(res, `Failed to record payment in Zoho: ${zohoResult.error}`, 400);
+    }
+
+    if (totalFee > 0 && !useFeeInvoice) {
+      await createProcessingFeeJournal({
+        feeAmount: totalFee,
+        referenceNumber: transactionId ? `Txn ${transactionId}` : `INV-${Date.now()}`,
+        date: new Date().toISOString().split('T')[0]
+      }).catch(() => {});
+    }
+
+    // Persist invoice payment records (keeps reports consistent with stored-payment flow)
+    try {
+      const userId = req.user?.id ?? null;
+      const locationId = req.user?.locationId ?? null;
+
+      let chargedSum = 0;
+      let feeSum = 0;
+      const perItemCharged = invoiceItems.map((it, idx) => {
+        const original = parseFloat(it.amount) || 0;
+        const isLast = idx === invoiceItems.length - 1;
+        if (isLast) {
+          const charge = Math.round((totalCharge - chargedSum) * 100) / 100;
+          const fee = Math.round((totalFee - feeSum) * 100) / 100;
+          return { amountCharged: charge, ccFee: fee };
+        }
+        const ratio = originalAmount > 0 ? original / originalAmount : 0;
+        const charge = Math.round(totalCharge * ratio * 100) / 100;
+        const fee = Math.round(totalFee * ratio * 100) / 100;
+        chargedSum += charge;
+        feeSum += fee;
+        return { amountCharged: charge, ccFee: fee };
+      });
+
+      for (let i = 0; i < invoiceItems.length; i++) {
+        const it = invoiceItems[i];
+        const { amountCharged, ccFee } = perItemCharged[i];
+        await InvoicePayment.create({
+          customerId: customer.id,
+          type: 'invoice',
+          documentNumber: String(it.number).trim(),
+          documentId: String(it.id).trim(),
+          amount: parseFloat(it.amount) || 0,
+          amountCharged,
+          ccFee,
+          paymentType,
+          transactionId,
+          zohoPaymentRecorded: true,
+          locationId,
+          userId
+        });
+      }
+    } catch (saveErr) {
+      console.warn('Could not save invoice payment record(s):', saveErr.message);
     }
 
     if (emailReceiptToCustomer === true && customer.email) {
