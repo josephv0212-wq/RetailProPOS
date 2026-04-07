@@ -272,6 +272,13 @@ export function ReceiptScreen({
                     <p className="text-[11px] font-bold text-gray-900 dark:text-white">
                       {sale.payment ? formatPaymentMethod(sale.payment.method) : 'N/A'}
                     </p>
+                    {sale.payment?.recordZohoOnFileAsCard && (
+                      <p className="text-[9px] text-gray-600 dark:text-gray-400 mt-1 max-w-[220px] leading-snug">
+                        {sale.payment.zohoOnFileCardSummary
+                          ? `Recorded as card (no POS charge). Zoho on file: ${sale.payment.zohoOnFileCardSummary}`
+                          : 'Recorded as card (no POS charge). Card on file in Zoho Books.'}
+                      </p>
+                    )}
                   </div>
 
                   {/* Transaction ID (if exists) */}

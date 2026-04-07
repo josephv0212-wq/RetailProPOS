@@ -464,6 +464,8 @@ export const salesAPI = {
     paymentDetails: any;
     notes?: string;
     customerTaxPreference?: 'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE';
+    recordZohoOnFileAsCard?: boolean;
+    zohoOnFileCardSummary?: string;
   }) => {
     return apiRequest<{
       sale: any;

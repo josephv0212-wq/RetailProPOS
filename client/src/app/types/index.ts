@@ -127,6 +127,10 @@ export interface PaymentDetails {
   savePaymentMethod?: boolean;
   // When true, Zoho Books will email the sales receipt to the customer.
   emailReceiptToCustomer?: boolean;
+  /** Record sale as card with no gateway charge (Zoho shows card; no Authorize.Net CIM). */
+  recordZohoOnFileAsCard?: boolean;
+  /** e.g. "Visa ending 5653" for receipt / sale notes */
+  zohoOnFileCardSummary?: string;
 }
 
 export interface SaleItem {

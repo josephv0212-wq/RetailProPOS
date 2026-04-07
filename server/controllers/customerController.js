@@ -1,12 +1,14 @@
 import { Customer, AutoInvoiceCustomer } from '../models/index.js';
 import { Op } from 'sequelize';
 import { syncCustomersFromZoho, getCustomerById as getZohoCustomerById, getCustomerCards, createZohoHostedCardUpdateLink } from '../services/zohoService.js';
-import { getCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, extractBankAccountInfo, searchAllCustomerProfilesByEmail } from '../services/authorizeNetService.js';
+import { getCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, extractBankAccountInfo, searchAllCustomerProfilesByEmail, resolveExistingCustomerProfileId } from '../services/authorizeNetService.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
 import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
 
 // Server-side payment profiles cache (5 min TTL) - speeds up repeat loads
 const PAYMENT_PROFILES_CACHE_MS = 5 * 60 * 1000;
+/** Bump when profile resolution logic changes so stale empty caches are not reused */
+const PAYMENT_PROFILES_CACHE_VERSION = 4;
 const paymentProfilesCache = new Map();
 export const invalidatePaymentProfilesCacheServer = (customerId) => {
   if (customerId) paymentProfilesCache.delete(Number(customerId));
@@ -534,7 +536,11 @@ export const getCustomerPaymentProfiles = async (req, res) => {
 
     // Return cached result when fresh (speeds up repeat loads)
     const cached = paymentProfilesCache.get(customerId);
-    if (cached && (Date.now() - cached.timestamp) < PAYMENT_PROFILES_CACHE_MS) {
+    if (
+      cached &&
+      cached.version === PAYMENT_PROFILES_CACHE_VERSION &&
+      (Date.now() - cached.timestamp) < PAYMENT_PROFILES_CACHE_MS
+    ) {
       return sendSuccess(res, cached.data);
     }
 
@@ -644,12 +650,44 @@ export const getCustomerPaymentProfiles = async (req, res) => {
         }
       };
 
+      const tryLoadByZohoMerchantId = async () => {
+        const zohoId = customer.zohoId ? String(customer.zohoId).trim() : '';
+        if (!zohoId || allPaymentProfiles.length > 0) return;
+        const resolved = await resolveExistingCustomerProfileId({
+          merchantCustomerId: zohoId,
+          email: customer.email || ''
+        });
+        if (!resolved.success || !resolved.customerProfileId) return;
+        const profileResult = await getCustomerProfile(resolved.customerProfileId);
+        if (!profileResult.success || !profileResult.profile) return;
+        const p = profileResult.profile;
+        const profileMerchantId =
+          (Array.isArray(p.merchantCustomerId) ? p.merchantCustomerId[0] : p.merchantCustomerId) || '';
+        if (profileMerchantId && String(profileMerchantId).trim() !== zohoId) return;
+        const profileName = (Array.isArray(p.description) ? p.description[0] : p.description) || null;
+        const extracted = extractPaymentProfiles(p);
+        if (extracted.length === 0) return;
+        firstCustomerProfileId = resolved.customerProfileId;
+        allPaymentProfiles = extracted.map((pp) => ({
+          ...pp,
+          customerProfileId: resolved.customerProfileId,
+          profileName: profileName || undefined
+        }));
+        try {
+          await customer.update({ customerProfileId: resolved.customerProfileId.toString() });
+        } catch (_) {
+          /* non-fatal */
+        }
+      };
+
       const fromStored = await tryStoredProfile();
       if (fromStored) {
         // Skip searchByEmail when stored profile works - saves N+1 Auth.net API calls
         // (Customer typically has one profile; full merge can be slow with many CIM profiles)
       } else {
         await trySearchByEmail(false);
+        // POS stores merchantCustomerId = Zoho contact id; customers without email never hit trySearchByEmail
+        await tryLoadByZohoMerchantId();
       }
     };
 
@@ -727,7 +765,11 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       bank_account_last4: zohoBankLast4,
       message: allPaymentProfiles.length === 0 ? 'Customer does not have a payment profile in Authorize.net' : null
     };
-    paymentProfilesCache.set(customerId, { data: responseData, timestamp: Date.now() });
+    paymentProfilesCache.set(customerId, {
+      data: responseData,
+      timestamp: Date.now(),
+      version: PAYMENT_PROFILES_CACHE_VERSION
+    });
     return sendSuccess(res, responseData);
   } catch (err) {
     logError('Get customer payment profiles error', err);

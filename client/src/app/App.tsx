@@ -674,6 +674,10 @@ function AppContent() {
         method: paymentDetails.method || 'cash',
         amount: amountCharged,
         confirmationNumber: undefined,
+        ...(paymentDetails.recordZohoOnFileAsCard ? { recordZohoOnFileAsCard: true } : {}),
+        ...(paymentDetails.zohoOnFileCardSummary
+          ? { zohoOnFileCardSummary: paymentDetails.zohoOnFileCardSummary }
+          : {}),
       },
       timestamp: new Date(),
       tax: 0,
@@ -797,6 +801,8 @@ function AppContent() {
           const subtotal = results.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
           const totalCharged = results.reduce((sum: number, r: any) => sum + ((Number(r.amountCharged) ?? Number(r.amount)) || 0), 0);
           const ccFeeTotal = results.reduce((sum: number, r: any) => sum + (Number(r.ccFee) || 0), 0);
+          // Batch CIM charge: every result row repeats the same gateway transactionId — dedupe for receipt/toast parity
+          const uniqueTxnIds = [...new Set(results.map((r: any) => r.transactionId).filter(Boolean))];
           const receiptSale: Sale = {
             id: 0,
             subtotal,
@@ -809,7 +815,7 @@ function AppContent() {
             locationName: constants.STORE_NAME,
             customerId: selectedCustomer.id,
             userId: user?.id ?? 0,
-            transactionId: results[0]?.transactionId || `INV-${Date.now()}`,
+            transactionId: uniqueTxnIds[0] || results[0]?.transactionId || `INV-${Date.now()}`,
             syncedToZoho: (zohoFailed?.length ?? 0) === 0,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -828,7 +834,7 @@ function AppContent() {
             payment: {
               method: paymentType as PaymentDetails['method'],
               amount: totalCharged,
-              confirmationNumber: results.map((r: any) => r.transactionId).filter(Boolean).join(', '),
+              confirmationNumber: uniqueTxnIds.join(', '),
             },
             timestamp: new Date(),
             tax: 0,
@@ -1141,6 +1147,13 @@ function AppContent() {
       if (paymentDetails.savePaymentMethod === true) {
         requestBody.savePaymentMethod = true;
         apiPaymentDetails.savePaymentMethod = true;
+      }
+
+      if (paymentDetails.recordZohoOnFileAsCard === true) {
+        requestBody.recordZohoOnFileAsCard = true;
+        if (paymentDetails.zohoOnFileCardSummary) {
+          requestBody.zohoOnFileCardSummary = paymentDetails.zohoOnFileCardSummary;
+        }
       }
 
       const response = await salesAPI.create(requestBody);

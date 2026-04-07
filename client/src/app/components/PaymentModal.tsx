@@ -153,6 +153,20 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
     }
   }, [isOpen, context, customerEmail]);
 
+  const getZohoOnFileCardSummary = (): string | null => {
+    if (zohoLastFour) {
+      const brand = zohoCardType || 'Card';
+      return `${brand} ending ${zohoLastFour}`;
+    }
+    for (const c of zohoCards) {
+      const last = c.last_four_digits || c.last4;
+      if (last) return `${c.card_type || 'Card'} ending ${last}`;
+    }
+    return null;
+  };
+
+  const hasZohoCardOnFileHint = !!(zohoLastFour || zohoCards.some((c) => !!(c.last_four_digits || c.last4)));
+
   const loadPaymentProfiles = async () => {
     if (!customerId) return;
     setLoadingPaymentProfiles(true);
@@ -168,6 +182,8 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
         const defaultProfile = profiles.find((p: any) => p.isDefault || p.isStored) || profiles[0];
         if (defaultProfile) {
           setSelectedPaymentProfileId(defaultProfile.paymentProfileId);
+        } else {
+          setSelectedPaymentProfileId(null);
         }
       }
     } catch (err) {
@@ -267,13 +283,13 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
         return;
       }
     } else if (selectedMethod === 'stored_payment') {
-      if (!selectedPaymentProfileId) {
-        setError('Please select a stored payment method');
+      if (paymentProfiles.length === 0) {
+        setError('No stored payment methods available for this customer');
         setIsProcessing(false);
         return;
       }
-      if (paymentProfiles.length === 0) {
-        setError('No stored payment methods available for this customer');
+      if (!selectedPaymentProfileId) {
+        setError('Please select a stored payment method');
         setIsProcessing(false);
         return;
       }
@@ -940,8 +956,15 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
                           </div>
                         </div>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
-                          To use stored payment, add this card by completing a sale with &quot;Save payment method&quot; checked.
+                          No Authorize.Net saved card for one-click charge. Press <span className="font-semibold">Confirm Payment</span> below to{' '}
+                          <span className="font-medium text-gray-800 dark:text-gray-200">record the sale as card</span> the same way as cash (no POS gateway charge).{' '}
+                          Zoho receipt will show card; run the actual charge on your terminal or gateway outside the POS if needed.
                         </p>
+                        {zohoBankLast4 && !hasZohoCardOnFileHint && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Bank on file in Zoho only: use the ACH tab to record a bank payment, or add a card in Zoho / save a card on a prior sale.
+                          </p>
+                        )}
                       </>
                     ) : (
                       <>

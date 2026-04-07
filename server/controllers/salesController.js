@@ -25,6 +25,16 @@ const normalizeAuthorizeNetInvoiceNumber = ({ type, number, id }) => {
   return out.length > maxLen ? out.slice(0, maxLen) : out;
 };
 
+/** Safe short line for sale notes (Zoho on-file card summary; no PAN). */
+const sanitizeZohoCardSummaryLine = (raw) => {
+  if (raw == null || typeof raw !== 'string') return '';
+  return raw
+    .replace(/[^a-zA-Z0-9\s.,()\-:]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
+};
+
 // Best-effort loader for legacy "transactions" SQLite tables.
 // This keeps the Reports > Transactions tab working when older installs stored history
 // in a separate SQLite schema/table rather than the current Sequelize `Sale` table.
@@ -233,7 +243,8 @@ export const createSale = async (req, res) => {
       // an Authorize.Net CIM profile for the customer using the successful transaction.
       savePaymentMethod,
       // When true, Zoho Books will email the sales receipt to the customer.
-      emailReceiptToCustomer
+      emailReceiptToCustomer,
+      recordZohoOnFileAsCard: recordZohoOnFileAsCardBody
     } = req.body;
     let paymentType = requestPaymentType;
     // Merge debit_card into card: store and process as single "card" type
@@ -243,6 +254,8 @@ export const createSale = async (req, res) => {
 
     // Support useStandaloneMode from root level OR from paymentDetails (for backward compatibility)
     const isStandaloneMode = useStandaloneMode === true || paymentDetails?.useStandaloneMode === true;
+    const recordZohoOnFileAsCard =
+      recordZohoOnFileAsCardBody === true || paymentDetails?.recordZohoOnFileAsCard === true;
     const userId = req.user.id;
     const locationId = req.user.locationId;
     const locationName = req.user.locationName;
@@ -407,13 +420,19 @@ export const createSale = async (req, res) => {
       }
     }
     
-    // 3% convenience fee for card only (not for ACH, including stored ACH)
+    // 3% convenience fee for card only (not for ACH, including stored ACH).
+    // Zoho-on-file record-only card: same as cash (no fee, no gateway) — see recordZohoOnFileAsCard + standalone.
     if (useStoredPayment && (paymentType === 'ach' || actualPaymentType === 'ach')) {
       cardProcessingFee = 0;
     } else {
-      cardProcessingFee = actualPaymentType === 'card'
-        ? calculateCreditCardFee(subtotal, taxAmount)
-        : 0;
+      const zohoRecordCardNoGateway =
+        recordZohoOnFileAsCard && paymentType === 'card' && isStandaloneMode;
+      cardProcessingFee =
+        zohoRecordCardNoGateway
+          ? 0
+          : actualPaymentType === 'card'
+            ? calculateCreditCardFee(subtotal, taxAmount)
+            : 0;
     }
 
     const total = baseTotal + cardProcessingFee;
@@ -835,11 +854,21 @@ export const createSale = async (req, res) => {
       console.warn(`⚠️ Customer "${customer.contactName}" has no Zoho ID. Invoice will not be created in Zoho Books.`);
     }
 
-    // Add note for standalone mode (manual card reader payment)
+    // Add note for standalone card (no gateway) — external reader vs Zoho-on-file record-only
     let saleNotes = notes || '';
     if (isStandaloneMode && paymentType === 'card') {
-      const manualPaymentNote = 'Manual card reader payment';
-      saleNotes = saleNotes ? `${saleNotes}\n${manualPaymentNote}` : manualPaymentNote;
+      if (recordZohoOnFileAsCard) {
+        const summary = sanitizeZohoCardSummaryLine(
+          req.body.zohoOnFileCardSummary ?? paymentDetails?.zohoOnFileCardSummary
+        );
+        const line = summary
+          ? `Card payment (recorded like cash, no POS gateway charge). Zoho on file: ${summary}`
+          : 'Card payment (recorded like cash, no POS gateway charge). Customer card on file in Zoho Books.';
+        saleNotes = saleNotes ? `${saleNotes}\n${line}` : line;
+      } else {
+        const manualPaymentNote = 'Manual card reader payment';
+        saleNotes = saleNotes ? `${saleNotes}\n${manualPaymentNote}` : manualPaymentNote;
+      }
     }
 
     const sale = await Sale.create({

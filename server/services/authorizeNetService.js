@@ -683,7 +683,7 @@ const extractMerchantCustomerId = (profile) => {
   return String(raw || '').trim();
 };
 
-const resolveExistingCustomerProfileId = async ({ merchantCustomerId, email }) => {
+export const resolveExistingCustomerProfileId = async ({ merchantCustomerId, email }) => {
   const merchantId = String(merchantCustomerId || '').trim();
   const emailValue = String(email || '').trim().toLowerCase();
 
