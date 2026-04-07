@@ -1439,3 +1439,63 @@ export const extractPaymentProfiles = (profile) => {
     return [];
   }
 };
+
+const normalizeCardLast4 = (v) => {
+  if (v == null || v === '') return '';
+  const d = String(v).replace(/\D/g, '');
+  return d.length >= 4 ? d.slice(-4) : '';
+};
+
+/**
+ * Find CIM customer profiles that contain at least one saved card matching any of the given last-4 values
+ * (e.g. last four digits from Zoho). Scans all customer profile IDs — same scale as searchAllCustomerProfilesByEmail.
+ * @param {string[]} last4Candidates - Raw last4 strings from Zoho / DB (normalized internally)
+ * @returns {Promise<{ success: boolean, profiles: Array<{ profile: object, customerProfileId: string }>, error?: string | null }>}
+ */
+export const searchCustomerProfilesByCardLast4 = async (last4Candidates) => {
+  const inputs = Array.isArray(last4Candidates) ? last4Candidates : [];
+  const targetSet = new Set(inputs.map((x) => normalizeCardLast4(x)).filter(Boolean));
+  if (targetSet.size === 0) {
+    return { success: false, profiles: [], error: 'No card last4 provided' };
+  }
+
+  try {
+    const idsResult = await getCustomerProfileIds();
+    if (!idsResult.success || !idsResult.profileIds || idsResult.profileIds.length === 0) {
+      return { success: false, profiles: [], error: idsResult.error || 'No customer profiles found' };
+    }
+
+    const profileIds = idsResult.profileIds;
+    const matches = [];
+
+    for (let i = 0; i < profileIds.length; i += BATCH_SIZE) {
+      const batch = profileIds.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map((profileId) => getCustomerProfile(profileId).catch(() => ({ success: false })))
+      );
+      for (let j = 0; j < results.length; j++) {
+        const profileResult = results[j];
+        if (!profileResult.success || !profileResult.profile) continue;
+        const profile = profileResult.profile;
+        const extracted = extractPaymentProfiles(profile);
+        const cardMatch = extracted.some(
+          (pp) =>
+            pp.type === 'card' &&
+            targetSet.has(normalizeCardLast4(pp.last4 || pp.cardNumber))
+        );
+        if (cardMatch) {
+          matches.push({ profile, customerProfileId: batch[j] });
+        }
+      }
+    }
+
+    return {
+      success: matches.length > 0,
+      profiles: matches,
+      error: matches.length === 0 ? 'No CIM customer profile matched the card last4' : null
+    };
+  } catch (error) {
+    console.error('Search profiles by card last4 error:', error.message);
+    return { success: false, profiles: [], error: error.message };
+  }
+};
