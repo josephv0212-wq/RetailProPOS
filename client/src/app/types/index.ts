@@ -90,6 +90,7 @@ export interface PaymentDetails {
   method: PaymentMethod['type'];
   amount: number;
   cashReceived?: number;
+  depositTo?: string;
   confirmationNumber?: string;
   zelleConfirmation?: string;
   achDetails?: {

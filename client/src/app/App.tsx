@@ -1051,11 +1051,14 @@ function AppContent() {
 
     if (paymentDetails.method === 'cash') {
       apiPaymentDetails.cashReceived = paymentDetails.cashReceived || total;
+      apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Petty Cash';
     } else if (paymentDetails.useStoredPayment && paymentDetails.paymentProfileId) {
       // Stored payment (CIM) — must run before generic "card" branch so we do not send empty manual card fields.
       const isAch = paymentDetails.method === 'ach';
       paymentType = isAch ? 'ach' : 'card';
+      apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Chase Checking 9500';
     } else if (paymentDetails.method === 'card') {
+      apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Chase Checking 9500';
       if (paymentDetails.useStandaloneMode) {
         // Standalone mode - no payment processing, just record the sale
         apiPaymentDetails.useStandaloneMode = true;
@@ -1091,12 +1094,14 @@ function AppContent() {
       }
     } else if (paymentDetails.method === 'zelle') {
       apiPaymentDetails.zelleConfirmation = paymentDetails.zelleConfirmation;
+      apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Chase Checking 9500';
     } else if (paymentDetails.method === 'ach') {
       apiPaymentDetails.routingNumber = paymentDetails.achDetails?.routingNumber;
       apiPaymentDetails.accountNumber = paymentDetails.achDetails?.accountNumber;
       apiPaymentDetails.accountType = paymentDetails.achDetails?.accountType;
       apiPaymentDetails.nameOnAccount = paymentDetails.achDetails?.name;
       apiPaymentDetails.bankName = paymentDetails.achDetails?.bankName;
+      apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Chase Checking 9500';
     }
 
     try {

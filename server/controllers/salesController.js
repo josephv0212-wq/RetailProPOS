@@ -851,6 +851,13 @@ export const createSale = async (req, res) => {
 
     // Add note for standalone card (no gateway) — external reader vs Zoho-on-file record-only
     let saleNotes = notes || '';
+    if (paymentType === 'cash') {
+      const cashDepositNote = 'Deposit to: Petty Cash';
+      saleNotes = saleNotes ? `${saleNotes}\n${cashDepositNote}` : cashDepositNote;
+    } else if (paymentType === 'card' || paymentType === 'ach' || paymentType === 'zelle') {
+      const bankDepositNote = 'Deposit to: Chase Checking 9500';
+      saleNotes = saleNotes ? `${saleNotes}\n${bankDepositNote}` : bankDepositNote;
+    }
     if (isStandaloneMode && paymentType === 'card') {
       if (recordZohoOnFileAsCard) {
         const summary = sanitizeZohoCardSummaryLine(
@@ -1875,6 +1882,7 @@ export const recordInvoicePayment = async (req, res) => {
       amount: totalFee > 0 ? Math.round((totalAmount + totalFee) * 100) / 100 : totalAmount,
       invoices: invoicesForZoho,
       paymentMode: zohoPaymentMode,
+      paymentType,
       referenceNumber: transactionId,
       description: invoiceItems.length === 1
         ? `Invoice ${invoiceItems[0].number} - POS payment`

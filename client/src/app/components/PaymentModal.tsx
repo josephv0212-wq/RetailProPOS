@@ -328,6 +328,10 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
     const paymentDetails: PaymentDetails = {
       method: paymentMethod,
       amount: finalTotal,
+      ...(paymentMethod === 'cash' && { depositTo: 'Petty Cash' }),
+      ...((paymentMethod === 'card' || paymentMethod === 'ach' || paymentMethod === 'zelle') && {
+        depositTo: 'Chase Checking 9500',
+      }),
       savePaymentMethod: selectedMethod === 'ach' ? (savePaymentMethod && !!customerId) : false,
       ...((context === 'sale' || context === 'zohoDocuments') && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),
     };
@@ -849,7 +853,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
 
           {/* Payment Details */}
           <div>
-            {selectedMethod === 'cash' && null}
+            {selectedMethod === 'cash' && (
+              <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 px-4 py-3">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Deposit To</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">Petty Cash</p>
+                </div>
+              </div>
+            )}
 
             {selectedMethod === 'card' && (
               <div className="border-0 bg-transparent rounded-none p-0 m-0 space-y-3">

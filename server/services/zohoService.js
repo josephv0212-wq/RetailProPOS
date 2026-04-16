@@ -188,6 +188,84 @@ const fetchAllPages = async (endpoint, params = {}, dataKey) => {
   return allData;
 };
 
+const normalizePaymentTypeForDeposit = (paymentTypeOrMode) =>
+  String(paymentTypeOrMode || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+
+const resolveDepositAccountNameFromType = (paymentTypeOrMode) => {
+  const normalized = normalizePaymentTypeForDeposit(paymentTypeOrMode);
+  // Business rule from POS:
+  // - cash -> Petty Cash
+  // - card/ach/zelle/bank transfer -> Chase Checking 9500
+  if (normalized === 'cash') return 'Petty Cash';
+  if (
+    normalized === 'card' ||
+    normalized === 'creditcard' ||
+    normalized === 'debitcard' ||
+    normalized === 'ach' ||
+    normalized === 'zelle' ||
+    normalized === 'banktransfer'
+  ) {
+    return 'Chase Checking 9500';
+  }
+  return null;
+};
+
+const resolveDepositAccountId = async ({ explicitAccountId, paymentType, paymentMode }) => {
+  if (explicitAccountId && String(explicitAccountId).trim() !== '') {
+    return String(explicitAccountId).trim();
+  }
+
+  const normalizedType = normalizePaymentTypeForDeposit(paymentType);
+  const normalizedMode = normalizePaymentTypeForDeposit(paymentMode);
+
+  // Env overrides (preferred in production)
+  if (normalizedType === 'cash' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CASH) {
+    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CASH).trim();
+  }
+  if (
+    ['card', 'ach', 'zelle'].includes(normalizedType) &&
+    process.env.ZOHO_DEPOSIT_ACCOUNT_ID_BANK
+  ) {
+    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_BANK).trim();
+  }
+  if (normalizedType === 'card' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CARD) {
+    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CARD).trim();
+  }
+  if (normalizedType === 'ach' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_ACH) {
+    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_ACH).trim();
+  }
+  if (normalizedType === 'zelle' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_ZELLE) {
+    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_ZELLE).trim();
+  }
+
+  const targetName =
+    resolveDepositAccountNameFromType(normalizedType) ||
+    resolveDepositAccountNameFromType(normalizedMode);
+  if (!targetName) return null;
+
+  try {
+    const accounts = await fetchAllPages('/chartofaccounts', {}, 'chartofaccounts');
+    const normalizedTarget = targetName.toLowerCase();
+    const match = (accounts || []).find((acct) => {
+      const name = String(acct?.account_name || acct?.name || '').trim().toLowerCase();
+      const type = String(acct?.account_type || '').trim().toLowerCase();
+      const isBankOrCash = type.includes('bank') || type.includes('cash');
+      return isBankOrCash && name === normalizedTarget;
+    });
+    if (match?.account_id) {
+      return String(match.account_id).trim();
+    }
+    console.warn(`⚠️ Zoho deposit account not found in chart of accounts: "${targetName}"`);
+    return null;
+  } catch (err) {
+    console.warn(`⚠️ Failed to resolve Zoho deposit account "${targetName}": ${err.message}`);
+    return null;
+  }
+};
+
 export const syncCustomersFromZoho = async (options = {}) => {
   try {
     const params = {
@@ -333,7 +411,15 @@ export const createSalesReceipt = async (saleData) => {
 
   const resolvedDate = date || receipt_date || null;
   const resolvedLocationId = location_id || locationId || null;
-  const resolvedDepositToAccountId = deposit_to_account_id || depositToAccountId || null;
+  const resolvedDepositToAccountId = await resolveDepositAccountId({
+    explicitAccountId: deposit_to_account_id || depositToAccountId || null,
+    paymentType,
+    paymentMode
+  });
+  console.log(
+    `💰 Zoho Sales Receipt deposit account resolved: ` +
+    `paymentType=${paymentType || 'n/a'}, paymentMode=${paymentMode || 'n/a'}, account_id=${resolvedDepositToAccountId || 'not_set'}`
+  );
 
   // Use the actual sale price from line items (SaleItem.price) which reflects price levels/pricebooks.
   // Fall back to Item.price from DB only when the line item has no valid price.
@@ -516,7 +602,10 @@ export const createSalesReceipt = async (saleData) => {
 
   // Zoho Books: deposit account for the received payment (optional)
   if (resolvedDepositToAccountId && String(resolvedDepositToAccountId).trim() !== '') {
-    salesReceiptData.deposit_to_account_id = String(resolvedDepositToAccountId).trim();
+    const resolved = String(resolvedDepositToAccountId).trim();
+    // Send both keys for compatibility across Zoho Books receipt variants/tenants.
+    salesReceiptData.account_id = resolved;
+    salesReceiptData.deposit_to_account_id = resolved;
   }
 
   if (terms && String(terms).trim() !== '') {
@@ -879,10 +968,13 @@ export const createCustomerPayment = async (params) => {
     amountApplied,
     invoices: invoicesParam,
     paymentMode,
+    paymentType,
     date,
     referenceNumber,
     description,
-    locationId
+    locationId,
+    accountId,
+    depositToAccountId
   } = params;
 
   if (!customerId || amount == null || amount <= 0) {
@@ -918,6 +1010,16 @@ export const createCustomerPayment = async (params) => {
   if (referenceNumber) payload.reference_number = String(referenceNumber);
   if (description) payload.description = String(description);
   if (locationId && String(locationId).trim() !== '') payload.location_id = String(locationId).trim();
+  const resolvedAccountId = await resolveDepositAccountId({
+    explicitAccountId: accountId || depositToAccountId || null,
+    paymentType,
+    paymentMode: paymentMode || 'creditcard'
+  });
+  console.log(
+    `💰 Zoho Customer Payment deposit account resolved: ` +
+    `paymentType=${paymentType || 'n/a'}, paymentMode=${paymentMode || 'n/a'}, account_id=${resolvedAccountId || 'not_set'}`
+  );
+  if (resolvedAccountId) payload.account_id = resolvedAccountId;
 
   try {
     const invoiceLabel = invoicesPayload.length === 1 ? `invoice ${invoicesPayload[0].invoice_id}` : `${invoicesPayload.length} invoices`;
