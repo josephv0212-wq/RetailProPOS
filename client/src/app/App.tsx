@@ -1056,7 +1056,7 @@ function AppContent() {
       // Stored payment (CIM) — must run before generic "card" branch so we do not send empty manual card fields.
       const isAch = paymentDetails.method === 'ach';
       paymentType = isAch ? 'ach' : 'card';
-      apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Chase Checking 9500';
+      apiPaymentDetails.depositTo = paymentDetails.depositTo || (isAch ? 'Authorize ACH Payments Clearing' : 'Chase Checking 9500');
     } else if (paymentDetails.method === 'card') {
       apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Chase Checking 9500';
       if (paymentDetails.useStandaloneMode) {
@@ -1101,7 +1101,7 @@ function AppContent() {
       apiPaymentDetails.accountType = paymentDetails.achDetails?.accountType;
       apiPaymentDetails.nameOnAccount = paymentDetails.achDetails?.name;
       apiPaymentDetails.bankName = paymentDetails.achDetails?.bankName;
-      apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Chase Checking 9500';
+      apiPaymentDetails.depositTo = paymentDetails.depositTo || 'Authorize ACH Payments Clearing';
     }
 
     try {

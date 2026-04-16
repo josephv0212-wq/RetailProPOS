@@ -854,9 +854,15 @@ export const createSale = async (req, res) => {
     if (paymentType === 'cash') {
       const cashDepositNote = 'Deposit to: Petty Cash';
       saleNotes = saleNotes ? `${saleNotes}\n${cashDepositNote}` : cashDepositNote;
-    } else if (paymentType === 'card' || paymentType === 'ach' || paymentType === 'zelle') {
-      const bankDepositNote = 'Deposit to: Chase Checking 9500';
-      saleNotes = saleNotes ? `${saleNotes}\n${bankDepositNote}` : bankDepositNote;
+    } else if (paymentType === 'card') {
+      const cardDepositNote = 'Deposit to: Chase Checking 9500';
+      saleNotes = saleNotes ? `${saleNotes}\n${cardDepositNote}` : cardDepositNote;
+    } else if (paymentType === 'zelle') {
+      const zelleDepositNote = 'Deposit to: Chase Checking 9500';
+      saleNotes = saleNotes ? `${saleNotes}\n${zelleDepositNote}` : zelleDepositNote;
+    } else if (paymentType === 'ach') {
+      const achDepositNote = 'Deposit to: Authorize ACH Payments Clearing';
+      saleNotes = saleNotes ? `${saleNotes}\n${achDepositNote}` : achDepositNote;
     }
     if (isStandaloneMode && paymentType === 'card') {
       if (recordZohoOnFileAsCard) {

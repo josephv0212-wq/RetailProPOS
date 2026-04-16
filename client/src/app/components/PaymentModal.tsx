@@ -329,8 +329,14 @@ export function PaymentModal({ isOpen, onClose, total, subtotal, tax, taxRate, i
       method: paymentMethod,
       amount: finalTotal,
       ...(paymentMethod === 'cash' && { depositTo: 'Petty Cash' }),
-      ...((paymentMethod === 'card' || paymentMethod === 'ach' || paymentMethod === 'zelle') && {
+      ...(paymentMethod === 'card' && {
         depositTo: 'Chase Checking 9500',
+      }),
+      ...(paymentMethod === 'zelle' && {
+        depositTo: 'Chase Checking 9500',
+      }),
+      ...(paymentMethod === 'ach' && {
+        depositTo: 'Authorize ACH Payments Clearing',
       }),
       savePaymentMethod: selectedMethod === 'ach' ? (savePaymentMethod && !!customerId) : false,
       ...((context === 'sale' || context === 'zohoDocuments') && customerEmail && { emailReceiptToCustomer: emailReceiptToCustomer }),

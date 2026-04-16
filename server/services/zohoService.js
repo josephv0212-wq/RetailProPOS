@@ -198,17 +198,19 @@ const resolveDepositAccountNameFromType = (paymentTypeOrMode) => {
   const normalized = normalizePaymentTypeForDeposit(paymentTypeOrMode);
   // Business rule from POS:
   // - cash -> Petty Cash
-  // - card/ach/zelle/bank transfer -> Chase Checking 9500
+  // - card/zelle -> Chase Checking 9500
+  // - ach/bank transfer -> Authorize ACH Payments Clearing
   if (normalized === 'cash') return 'Petty Cash';
   if (
     normalized === 'card' ||
     normalized === 'creditcard' ||
     normalized === 'debitcard' ||
-    normalized === 'ach' ||
-    normalized === 'zelle' ||
-    normalized === 'banktransfer'
+    normalized === 'zelle'
   ) {
     return 'Chase Checking 9500';
+  }
+  if (normalized === 'ach' || normalized === 'banktransfer') {
+    return 'Authorize ACH Payments Clearing';
   }
   return null;
 };
@@ -225,20 +227,17 @@ const resolveDepositAccountId = async ({ explicitAccountId, paymentType, payment
   if (normalizedType === 'cash' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CASH) {
     return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CASH).trim();
   }
-  if (
-    ['card', 'ach', 'zelle'].includes(normalizedType) &&
-    process.env.ZOHO_DEPOSIT_ACCOUNT_ID_BANK
-  ) {
-    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_BANK).trim();
-  }
-  if (normalizedType === 'card' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CARD) {
-    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CARD).trim();
-  }
   if (normalizedType === 'ach' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_ACH) {
     return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_ACH).trim();
   }
   if (normalizedType === 'zelle' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_ZELLE) {
     return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_ZELLE).trim();
+  }
+  if (normalizedType === 'card' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CARD) {
+    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_CARD).trim();
+  }
+  if (normalizedType === 'card' && process.env.ZOHO_DEPOSIT_ACCOUNT_ID_BANK) {
+    return String(process.env.ZOHO_DEPOSIT_ACCOUNT_ID_BANK).trim();
   }
 
   const targetName =
