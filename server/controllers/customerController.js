@@ -1,6 +1,6 @@
 import { Customer, AutoInvoiceCustomer } from '../models/index.js';
 import { Op } from 'sequelize';
-import { syncCustomersFromZoho, getCustomerById as getZohoCustomerById, getCustomerCards, createZohoHostedCardUpdateLink } from '../services/zohoService.js';
+import { syncCustomersFromZoho, getCustomerById as getZohoCustomerById, getCustomerCards, createZohoHostedCardUpdateLink, fetchZohoBooksBankaccountsForCustomer } from '../services/zohoService.js';
 import { getCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, extractBankAccountInfo, searchAllCustomerProfilesByEmail, searchCustomerProfilesByCardLast4, resolveExistingCustomerProfileId } from '../services/authorizeNetService.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/responseHelper.js';
 import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
@@ -8,7 +8,7 @@ import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
 // Server-side payment profiles cache (5 min TTL) - speeds up repeat loads
 const PAYMENT_PROFILES_CACHE_MS = 5 * 60 * 1000;
 /** Bump when profile resolution logic changes so stale empty caches are not reused */
-const PAYMENT_PROFILES_CACHE_VERSION = 5;
+const PAYMENT_PROFILES_CACHE_VERSION = 11;
 const paymentProfilesCache = new Map();
 export const invalidatePaymentProfilesCacheServer = (customerId) => {
   if (customerId) paymentProfilesCache.delete(Number(customerId));
@@ -548,26 +548,25 @@ export const getCustomerPaymentProfiles = async (req, res) => {
     let zohoCards = [];
     let zohoLastFour = null;
     let zohoCardType = null;
-    let zohoBankLast4 = customer.bankAccountLast4 || null;
-    const useZohoCache = customer.zohoId && customer.zohoProfileSyncedAt &&
-      (Date.now() - new Date(customer.zohoProfileSyncedAt).getTime()) < PAYMENT_PROFILES_CACHE_MS;
-    const hasDbZoho = customer.last_four_digits || customer.zohoCards;
+    /** Last4 of bank / ACH on file in Zoho (custom field, contact payment_methods, or GET /bankaccounts). */
+    const zohoBankLast4Set = new Set();
+    let zohoBankLast4 = null;
 
     const loadZohoData = async () => {
-      if (!customer.zohoId) return;
-      try {
-        // Use DB cache when: (a) zohoProfileSyncedAt recent, or (b) we have last_four_digits/zohoCards (avoids Zoho API)
-        if ((useZohoCache || hasDbZoho) && (customer.zohoCards || customer.last_four_digits)) {
-          try {
-            zohoCards = customer.zohoCards ? JSON.parse(customer.zohoCards) : [];
-          } catch (_) {
-            zohoCards = [];
-          }
-          zohoLastFour = customer.last_four_digits ?? (zohoCards[0]?.last_four_digits ?? zohoCards[0]?.last4) ?? null;
-          zohoCardType = customer.cardBrand ?? (zohoCards[0]?.card_type ?? zohoCards[0]?.brand) ?? null;
-          zohoBankLast4 = customer.bankAccountLast4 ?? zohoBankLast4;
-          return;
+      const normBank = (v) => (v && String(v).replace(/\D/g, '').slice(-4)) || '';
+      /** Same bank last4 the Shopping Cart uses (price list → customer.bankAccountLast4). */
+      const mergeCartAlignedBankLast4 = () => {
+        if (customer.bankAccountLast4) {
+          const n = normBank(customer.bankAccountLast4);
+          if (n) zohoBankLast4Set.add(n);
         }
+      };
+      if (!customer.zohoId) {
+        mergeCartAlignedBankLast4();
+        zohoBankLast4 = zohoBankLast4Set.size > 0 ? [...zohoBankLast4Set].sort()[0] : null;
+        return;
+      }
+      try {
         const zohoContact = await getZohoCustomerById(customer.zohoId).catch(() => null);
         zohoCards = zohoContact ? await getCustomerCards(customer.zohoId, zohoContact) : [];
         const firstCard = zohoCards.length > 0 ? zohoCards[0] : null;
@@ -581,50 +580,38 @@ export const getCustomerPaymentProfiles = async (req, res) => {
             return label.includes('bank_account') || label.includes('bank_last') || label.includes('ach_last') || label.includes('bank_last4');
           });
           if (bankField?.value) {
-            zohoBankLast4 = String(bankField.value).replace(/\D/g, '').slice(-4) || bankField.value;
+            const n = normBank(bankField.value);
+            if (n) zohoBankLast4Set.add(n);
           }
         }
-        if (!zohoBankLast4 && zohoContact?.payment_methods && Array.isArray(zohoContact.payment_methods)) {
+        if (zohoContact?.payment_methods && Array.isArray(zohoContact.payment_methods)) {
           const achMethod = zohoContact.payment_methods.find(pm => (pm.type || '').toLowerCase() === 'ach' || (pm.payment_type || '').toLowerCase() === 'ach');
-          zohoBankLast4 = achMethod?.last_four_digits || achMethod?.last4 || achMethod?.account_last4 || zohoBankLast4;
+          const achL4 = achMethod?.last_four_digits || achMethod?.last4 || achMethod?.account_last4;
+          if (achL4) {
+            const n = normBank(achL4);
+            if (n) zohoBankLast4Set.add(n);
+          }
+        }
+        const booksBanks = await fetchZohoBooksBankaccountsForCustomer(customer.zohoId);
+        for (const a of booksBanks.accounts || []) {
+          if (a.last4) {
+            const n = normBank(a.last4);
+            if (n) zohoBankLast4Set.add(n);
+          }
         }
       } catch (_) {
-        if (hasDbZoho) {
-          zohoLastFour = customer.last_four_digits ?? zohoLastFour;
-          zohoCardType = customer.cardBrand ?? zohoCardType;
-          zohoBankLast4 = customer.bankAccountLast4 ?? zohoBankLast4;
-        }
+        /* live Zoho / Books may fail; cart-aligned bank still merged in finally */
+      } finally {
+        mergeCartAlignedBankLast4();
+        zohoBankLast4 = zohoBankLast4Set.size > 0 ? [...zohoBankLast4Set].sort()[0] : null;
       }
     };
 
-    // Collect payment profiles from Authorize.net - can have multiple profiles per email
-    // FAST: try stored profile first (1 API call) instead of searchAll (N+1 calls over all profiles)
+    // Collect payment profiles from Authorize.net (last4 → Zoho merchant id → email fallback)
     let allPaymentProfiles = [];
     let firstCustomerProfileId = null;
 
     const loadAuthNetData = async () => {
-      const tryStoredProfile = async () => {
-        if (!customer.customerProfileId) return false;
-        const profileResult = await getCustomerProfile(customer.customerProfileId);
-        if (!profileResult.success || !profileResult.profile) return false;
-        const p = profileResult.profile;
-        const profileMerchantId = (Array.isArray(p.merchantCustomerId) ? p.merchantCustomerId[0] : p.merchantCustomerId) || '';
-        const zohoId = customer.zohoId ? String(customer.zohoId).trim() : '';
-        if (zohoId && profileMerchantId && String(profileMerchantId).trim() !== zohoId) {
-          await customer.update({ customerProfileId: null, customerPaymentProfileId: null });
-          return false;
-        }
-        const profileName = (Array.isArray(p.description) ? p.description[0] : p.description) || null;
-        const extracted = extractPaymentProfiles(p);
-        firstCustomerProfileId = customer.customerProfileId;
-        allPaymentProfiles = extracted.map(pp => ({
-          ...pp,
-          customerProfileId: customer.customerProfileId,
-          profileName: profileName || undefined
-        }));
-        return true;
-      };
-
       const mergeCimProfilesIntoAll = async (cimProfiles, persistSingleCustomerProfileId = false) => {
         if (!cimProfiles || cimProfiles.length === 0) return;
         const seenPaymentIds = new Set(allPaymentProfiles.map((p) => p.paymentProfileId));
@@ -652,7 +639,7 @@ export const getCustomerPaymentProfiles = async (req, res) => {
         }
       };
 
-      /** Second path after stored customerProfileId: CIM scan using Zoho / DB card last4. */
+      /** CIM scan using live Zoho card last4. */
       const trySearchByCardLast4FromZoho = async () => {
         const normalizeL4 = (v) => (v && String(v).replace(/\D/g, '').slice(-4)) || '';
         const candidates = [];
@@ -661,7 +648,7 @@ export const getCustomerPaymentProfiles = async (req, res) => {
           const n = c.last_four_digits || c.last4;
           if (n) candidates.push(n);
         });
-        if (customer.last_four_digits) candidates.push(customer.last_four_digits);
+        zohoBankLast4Set.forEach((n) => candidates.push(n));
         const uniq = [...new Set(candidates.map((x) => normalizeL4(x)).filter(Boolean))];
         if (uniq.length === 0) return;
 
@@ -707,15 +694,14 @@ export const getCustomerPaymentProfiles = async (req, res) => {
         }
       };
 
-      const fromStored = await tryStoredProfile();
-      if (fromStored) {
-        // Skip broad CIM scans when stored profile works - saves N+1 Auth.net API calls
-        // (Customer typically has one profile; full merge can be slow with many CIM profiles)
-      } else {
-        await trySearchByCardLast4FromZoho();
-        await trySearchByEmail();
-        // POS stores merchantCustomerId = Zoho contact id; customers without email never hit trySearchByEmail
+      await trySearchByCardLast4FromZoho();
+      // When Zoho has no card last4, email search merges every CIM profile for that email (often unrelated
+      // wallets). Prefer the Authorize.Net customer profile whose merchantCustomerId matches Zoho contact id.
+      if (allPaymentProfiles.length === 0 && customer.zohoId) {
         await tryLoadByZohoMerchantId();
+      }
+      if (allPaymentProfiles.length === 0 && customer.email) {
+        await trySearchByEmail();
       }
     };
 
@@ -727,7 +713,7 @@ export const getCustomerPaymentProfiles = async (req, res) => {
     const cards = allPaymentProfiles.filter(p => p.type === 'card');
     const banks = allPaymentProfiles.filter(p => p.type === 'ach');
     const normalizeLast4 = (v) => (v && String(v).replace(/\D/g, '').slice(-4)) || '';
-    const storedPaymentProfileId = customer.customerPaymentProfileId;
+    const storedPaymentProfileId = null;
     const dedupeByLast4 = (items, getLast4) => {
       const byLast4 = new Map();
       for (const item of items) {
@@ -749,14 +735,13 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       if (n) zohoCardLast4Set.add(n);
     });
     if (zohoLastFour) zohoCardLast4Set.add(normalizeLast4(zohoLastFour));
-    const zohoBankLast4Norm = normalizeLast4(zohoBankLast4);
-    // Show only Auth.net profiles that match Zoho (by last4). When Zoho has no data, show all.
+    // Only show Authorize.Net methods that match Zoho (same last4). No Zoho card/bank on file → show none.
     const matchedCards = zohoCardLast4Set.size > 0
       ? uniqueCards.filter(c => zohoCardLast4Set.has(normalizeLast4(c.last4 || c.cardNumber)))
-      : uniqueCards;
-    const matchedBanks = zohoBankLast4Norm
-      ? uniqueBanks.filter(b => normalizeLast4(b.last4 || b.accountNumber) === zohoBankLast4Norm)
-      : uniqueBanks;
+      : [];
+    const matchedBanks = zohoBankLast4Set.size > 0
+      ? uniqueBanks.filter(b => zohoBankLast4Set.has(normalizeLast4(b.last4 || b.accountNumber)))
+      : [];
     const sortedCards = [...matchedCards].sort((a, b) => {
       const a4 = normalizeLast4(a.last4 || a.cardNumber);
       const b4 = normalizeLast4(b.last4 || b.cardNumber);
@@ -767,14 +752,26 @@ export const getCustomerPaymentProfiles = async (req, res) => {
     const sortedBanks = [...matchedBanks].sort((a, b) => {
       const a4 = normalizeLast4(a.last4 || a.accountNumber);
       const b4 = normalizeLast4(b.last4 || b.accountNumber);
-      const aMatch = a4 === zohoBankLast4Norm ? 1 : 0;
-      const bMatch = b4 === zohoBankLast4Norm ? 1 : 0;
+      const aMatch = zohoBankLast4Set.has(a4) ? 1 : 0;
+      const bMatch = zohoBankLast4Set.has(b4) ? 1 : 0;
       return bMatch - aMatch;
     });
     allPaymentProfiles = [...sortedCards, ...sortedBanks];
 
-    // Get the stored payment profile ID if available
-    const storedCustomerProfileId = customer.customerProfileId;
+    const zohoBankLast4List = [...zohoBankLast4Set].sort().join(',') || 'none';
+    const authNetAchMatched = allPaymentProfiles
+      .filter((p) => p.type === 'ach')
+      .map((p) => normalizeLast4(p.last4 || p.accountNumber))
+      .filter(Boolean)
+      .join(',') || 'none';
+    logInfo(
+      `[Customer bank] posId=${customerId} zohoId=${customer.zohoId ?? 'n/a'} ` +
+        `name="${(customer.contactName || '').replace(/"/g, "'")}" ` +
+        `zohoBankLast4s=[${zohoBankLast4List}] authNetAchMatchedLast4s=[${authNetAchMatched}]`
+    );
+
+    // Do not infer stored profile defaults from local DB snapshot.
+    const storedCustomerProfileId = null;
 
     // Mark default/stored profile
     const profilesWithDefault = allPaymentProfiles.map(p => ({
@@ -791,7 +788,11 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       last_four_digits: zohoLastFour,
       card_type: zohoCardType,
       bank_account_last4: zohoBankLast4,
-      message: allPaymentProfiles.length === 0 ? 'Customer does not have a payment profile in Authorize.net' : null
+      message: allPaymentProfiles.length === 0
+        ? (zohoCardLast4Set.size > 0 || zohoBankLast4Set.size > 0
+          ? 'No Authorize.net payment method matches the card or bank on file in Zoho.'
+          : 'No payment method on file in Zoho to match with Authorize.net.')
+        : null
     };
     paymentProfilesCache.set(customerId, {
       data: responseData,

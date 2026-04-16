@@ -1130,6 +1130,75 @@ export const getCustomerById = async (customerId) => {
   }
 };
 
+/** Max rows accepted from GET /bankaccounts; above this we assume org-wide list (customer filter ignored). */
+const ZOHO_BANKACCOUNTS_MAX_ROWS = 24;
+
+/**
+ * Zoho Books GET /bankaccounts with customer_id = Zoho Books contact id.
+ * OAuth: ZohoBooks.banking.READ. Response shape: { bankaccounts: [...] } with account_number, optional customer_id.
+ * @param {string} zohoContactId - Books contact_id for the customer
+ * @returns {Promise<{ success: boolean, accounts: Array<{ accountId?: string, accountName?: string, bankName?: string, last4: string }>, error?: string }>}
+ */
+export const fetchZohoBooksBankaccountsForCustomer = async (zohoContactId) => {
+  if (!zohoContactId) {
+    return { success: false, accounts: [], error: 'missing_contact_id' };
+  }
+  const cid = String(zohoContactId).trim();
+  try {
+    const rows = await fetchAllPages('/bankaccounts', {
+      customer_id: cid,
+      contact_id: cid,
+      filter_by: 'Status.Active'
+    }, 'bankaccounts');
+    const list = Array.isArray(rows) ? rows : [];
+    const norm = (v) => (v && String(v).replace(/\D/g, '').slice(-4)) || '';
+    const rowContactId = (ba) => {
+      const c = ba.contact;
+      const nested = c && typeof c === 'object' ? (c.contact_id ?? c.customer_id) : null;
+      return (
+        ba.customer_id ??
+        ba.contact_id ??
+        ba.customerId ??
+        ba.payer_id ??
+        ba.entity_id ??
+        nested ??
+        null
+      );
+    };
+    const mapped = list.map((ba) => {
+      const rawNum = ba.account_number ?? ba.accountNumber ?? '';
+      const last4 = norm(rawNum);
+      const rowCust = rowContactId(ba);
+      return {
+        accountId: ba.account_id ?? ba.accountId,
+        accountName: ba.account_name ?? ba.accountName,
+        bankName: ba.bank_name ?? ba.bankName,
+        last4,
+        customerId: rowCust != null ? String(rowCust) : null
+      };
+    }).filter((x) => x.last4);
+    const withCust = mapped.filter((x) => x.customerId);
+    let filtered;
+    if (withCust.length > 0) {
+      filtered = mapped.filter((x) => x.customerId === cid);
+    } else if (list.length > ZOHO_BANKACCOUNTS_MAX_ROWS) {
+      console.warn(`Zoho /bankaccounts returned ${list.length} rows without per-row customer_id; skipping (likely org-wide list).`);
+      return { success: true, accounts: [], error: 'too_many_rows_no_customer_field' };
+    } else {
+      filtered = mapped;
+    }
+    const accounts = filtered.map(({ last4, accountId, accountName, bankName }) => ({ last4, accountId, accountName, bankName }));
+    return {
+      success: true,
+      accounts
+    };
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || 'unknown';
+    console.warn(`Zoho bankaccounts (customer_id=${cid}): ${msg}`);
+    return { success: false, accounts: [], error: msg };
+  }
+};
+
 export const findZohoCustomerByEmail = async (email) => {
   const normalizedEmail = String(email || '').trim().toLowerCase();
   if (!normalizedEmail) {
