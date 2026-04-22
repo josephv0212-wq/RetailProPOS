@@ -8,7 +8,7 @@ import { logSuccess, logWarning, logError, logInfo } from '../utils/logger.js';
 // Server-side payment profiles cache (5 min TTL) - speeds up repeat loads
 const PAYMENT_PROFILES_CACHE_MS = 5 * 60 * 1000;
 /** Bump when profile resolution logic changes so stale empty caches are not reused */
-const PAYMENT_PROFILES_CACHE_VERSION = 11;
+const PAYMENT_PROFILES_CACHE_VERSION = 12;
 const paymentProfilesCache = new Map();
 export const invalidatePaymentProfilesCacheServer = (customerId) => {
   if (customerId) paymentProfilesCache.delete(Number(customerId));
@@ -548,6 +548,7 @@ export const getCustomerPaymentProfiles = async (req, res) => {
     let zohoCards = [];
     let zohoLastFour = null;
     let zohoCardType = null;
+    let zohoEmail = (customer.email && String(customer.email).trim().toLowerCase()) || '';
     /** Last4 of bank / ACH on file in Zoho (custom field, contact payment_methods, or GET /bankaccounts). */
     const zohoBankLast4Set = new Set();
     let zohoBankLast4 = null;
@@ -569,6 +570,8 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       try {
         const zohoContact = await getZohoCustomerById(customer.zohoId).catch(() => null);
         zohoCards = zohoContact ? await getCustomerCards(customer.zohoId, zohoContact) : [];
+        const contactEmail = zohoContact?.email ? String(zohoContact.email).trim().toLowerCase() : '';
+        if (contactEmail) zohoEmail = contactEmail;
         const firstCard = zohoCards.length > 0 ? zohoCards[0] : null;
         zohoLastFour = firstCard?.last_four_digits ?? firstCard?.last4 ?? null;
         zohoCardType = firstCard?.card_type
@@ -617,6 +620,9 @@ export const getCustomerPaymentProfiles = async (req, res) => {
         const seenPaymentIds = new Set(allPaymentProfiles.map((p) => p.paymentProfileId));
         for (const { profile: p, customerProfileId: cpid } of cimProfiles) {
           const profileName = (Array.isArray(p.description) ? p.description[0] : p.description) || null;
+          const profileEmail =
+            ((Array.isArray(p.email) ? p.email[0] : p.email) && String(Array.isArray(p.email) ? p.email[0] : p.email).trim().toLowerCase()) ||
+            '';
           const extracted = extractPaymentProfiles(p);
           if (!firstCustomerProfileId && cpid) firstCustomerProfileId = cpid;
           for (const pp of extracted) {
@@ -625,7 +631,8 @@ export const getCustomerPaymentProfiles = async (req, res) => {
               allPaymentProfiles.push({
                 ...pp,
                 customerProfileId: cpid,
-                profileName: profileName || undefined
+                profileName: profileName || undefined,
+                profileEmail: profileEmail || undefined
               });
             }
           }
@@ -679,13 +686,17 @@ export const getCustomerPaymentProfiles = async (req, res) => {
           (Array.isArray(p.merchantCustomerId) ? p.merchantCustomerId[0] : p.merchantCustomerId) || '';
         if (profileMerchantId && String(profileMerchantId).trim() !== zohoId) return;
         const profileName = (Array.isArray(p.description) ? p.description[0] : p.description) || null;
+        const profileEmail =
+          ((Array.isArray(p.email) ? p.email[0] : p.email) && String(Array.isArray(p.email) ? p.email[0] : p.email).trim().toLowerCase()) ||
+          '';
         const extracted = extractPaymentProfiles(p);
         if (extracted.length === 0) return;
         firstCustomerProfileId = resolved.customerProfileId;
         allPaymentProfiles = extracted.map((pp) => ({
           ...pp,
           customerProfileId: resolved.customerProfileId,
-          profileName: profileName || undefined
+          profileName: profileName || undefined,
+          profileEmail: profileEmail || undefined
         }));
         try {
           await customer.update({ customerProfileId: resolved.customerProfileId.toString() });
@@ -713,6 +724,9 @@ export const getCustomerPaymentProfiles = async (req, res) => {
     const cards = allPaymentProfiles.filter(p => p.type === 'card');
     const banks = allPaymentProfiles.filter(p => p.type === 'ach');
     const normalizeLast4 = (v) => (v && String(v).replace(/\D/g, '').slice(-4)) || '';
+    const normalizeEmail = (v) => (v && String(v).trim().toLowerCase()) || '';
+    const targetEmail = normalizeEmail(zohoEmail || customer.email);
+    const emailMatches = (p) => !targetEmail || normalizeEmail(p.profileEmail) === targetEmail;
     const storedPaymentProfileId = null;
     const dedupeByLast4 = (items, getLast4) => {
       const byLast4 = new Map();
@@ -727,8 +741,10 @@ export const getCustomerPaymentProfiles = async (req, res) => {
       }
       return [...byLast4.values()];
     };
-    const uniqueCards = dedupeByLast4(cards, c => c.last4 || c.cardNumber);
-    const uniqueBanks = dedupeByLast4(banks, b => b.last4 || b.accountNumber);
+    const emailMatchedCards = cards.filter(emailMatches);
+    const emailMatchedBanks = banks.filter(emailMatches);
+    const uniqueCards = dedupeByLast4(emailMatchedCards, c => c.last4 || c.cardNumber);
+    const uniqueBanks = dedupeByLast4(emailMatchedBanks, b => b.last4 || b.accountNumber);
     const zohoCardLast4Set = new Set();
     (zohoCards || []).forEach(c => {
       const n = normalizeLast4(c.last_four_digits || c.last4);
