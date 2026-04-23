@@ -1432,6 +1432,7 @@ function AppContent() {
             selectedCustomer={selectedCustomer}
             customerTaxPreference={customerTaxPreference}
             customerCards={customerCards}
+            checkoutPaymentProfiles={checkoutPaymentProfiles && checkoutPaymentProfiles.customerId === selectedCustomer?.id ? checkoutPaymentProfiles.data : null}
             onSelectCustomer={handleSelectCustomer}
             cartItems={cartItems}
             onUpdateQuantity={handleUpdateQuantity}

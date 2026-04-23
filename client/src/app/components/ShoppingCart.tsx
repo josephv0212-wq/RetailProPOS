@@ -12,6 +12,14 @@ interface ShoppingCartProps {
   selectedCustomer: Customer | null;
   customerTaxPreference?: 'STANDARD' | 'SALES TAX EXCEPTION CERTIFICATE' | null;
   customerCards?: any[];
+  checkoutPaymentProfiles?: {
+    paymentProfiles?: Array<{
+      type?: 'card' | 'ach';
+      cardNumber?: string;
+      last4?: string;
+      profileEmail?: string;
+    }>;
+  } | null;
   onSelectCustomer: (customer: Customer | null) => void;
   cartItems: CartItem[];
   onUpdateQuantity: (productId: string, quantity: number) => void;
@@ -28,6 +36,7 @@ export function ShoppingCart({
   selectedCustomer,
   customerTaxPreference,
   customerCards = [],
+  checkoutPaymentProfiles = null,
   onSelectCustomer,
   cartItems,
   onUpdateQuantity,
@@ -38,6 +47,14 @@ export function ShoppingCart({
   onPayNow,
   taxRate,
 }: ShoppingCartProps) {
+  const normalizeLast4 = (v?: string) => (v ? String(v).replace(/\D/g, '').slice(-4) : '');
+  const authNetCardEmailByLast4 = new Map<string, string>();
+  (checkoutPaymentProfiles?.paymentProfiles || []).forEach((p) => {
+    if (p?.type !== 'card' || !p?.profileEmail) return;
+    const n = normalizeLast4(p.last4 || p.cardNumber);
+    if (n && !authNetCardEmailByLast4.has(n)) authNetCardEmailByLast4.set(n, p.profileEmail);
+  });
+
   // Local editing state to preserve input while typing decimals (e.g. "1." or "4.2")
   const [editingQty, setEditingQty] = useState<{ productId: string; value: string } | null>(null);
   const [editingPrice, setEditingPrice] = useState<{ productId: string; value: string } | null>(null);
@@ -116,17 +133,35 @@ export function ShoppingCart({
                 {customerCards.map((card, idx) => (
                   <div key={idx} className="text-xs text-blue-600 dark:text-blue-400">
                     {card.cardBrand && card.last_four_digits ? (
-                      <span>{card.cardBrand}: xxxx xxxx xxxx {card.last_four_digits}</span>
+                      <div>
+                        <div>{card.cardBrand}: xxxx xxxx xxxx {card.last_four_digits}</div>
+                        {authNetCardEmailByLast4.get(normalizeLast4(card.last_four_digits)) && (
+                          <div>Email: {authNetCardEmailByLast4.get(normalizeLast4(card.last_four_digits))}</div>
+                        )}
+                      </div>
                     ) : card.last4 ? (
-                      <span>Card: xxxx xxxx xxxx {card.last4}</span>
+                      <div>
+                        <div>Card: xxxx xxxx xxxx {card.last4}</div>
+                        {authNetCardEmailByLast4.get(normalizeLast4(card.last4)) && (
+                          <div>Email: {authNetCardEmailByLast4.get(normalizeLast4(card.last4))}</div>
+                        )}
+                      </div>
                     ) : (selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand) && (selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4) ? (
-                      <span>{selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4}</span>
+                      <div>
+                        <div>{selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4}</div>
+                        {authNetCardEmailByLast4.get(normalizeLast4(selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4)) && (
+                          <div>Email: {authNetCardEmailByLast4.get(normalizeLast4(selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4))}</div>
+                        )}
+                      </div>
                     ) : null}
                   </div>
                 ))}
                 {customerCards.length === 0 && ((selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand) && (selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4)) && (
                   <div className="text-xs text-blue-600 dark:text-blue-400">
-                    {selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4}
+                    <div>{selectedCustomer.cardBrand || selectedCustomer.paymentInfo?.cardBrand}: xxxx xxxx xxxx {selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4}</div>
+                    {authNetCardEmailByLast4.get(normalizeLast4(selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4)) && (
+                      <div>Email: {authNetCardEmailByLast4.get(normalizeLast4(selectedCustomer.last_four_digits || selectedCustomer.paymentInfo?.last4))}</div>
+                    )}
                   </div>
                 )}
                 {(selectedCustomer.bankAccountLast4 || selectedCustomer.paymentInfo?.bankAccountLast4) && (
