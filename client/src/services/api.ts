@@ -379,6 +379,7 @@ export const customersAPI = {
         isStored?: boolean;
         customerProfileId?: string | null;
         profileName?: string;
+        profileEmail?: string;
       }>;
       message?: string;
       zohoCards?: Array<{ last_four_digits?: string; last4?: string; card_type?: string }>;

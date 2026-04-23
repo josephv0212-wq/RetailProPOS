@@ -14,6 +14,7 @@ interface PaymentProfile {
   isStored?: boolean;
   customerProfileId?: string | null;
   profileName?: string;
+  profileEmail?: string;
 }
 
 interface PaymentMethodSelectorProps {
@@ -271,6 +272,9 @@ export function PaymentMethodSelector({
                           {(profile.type === 'card') ? (
                             <>
                               <div>Card: {formatCardNumber(profile.cardNumber || 'XXXX')}</div>
+                              {profile.profileEmail && (
+                                <div className="text-xs mt-1">Email: {profile.profileEmail}</div>
+                              )}
                               {profile.expirationDate && (
                                 <div className="text-xs mt-1">Exp: {profile.expirationDate}</div>
                               )}
