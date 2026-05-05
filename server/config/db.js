@@ -12,8 +12,12 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config({path:path.join(__dirname, '.env')});
 
-// Get database setting from environment variable (default to 'cloud' for PostgreSQL)
-const DATABASE_SETTING = (process.env.DATABASE_SETTING || 'cloud').toLowerCase();
+// Get database setting from environment variable (default to 'cloud' for PostgreSQL).
+// Support inline comments in .env values, e.g. "local # cloud".
+const DATABASE_SETTING = (process.env.DATABASE_SETTING || 'cloud')
+  .split('#')[0]
+  .trim()
+  .toLowerCase();
 
 let sequelize;
 

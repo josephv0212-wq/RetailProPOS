@@ -775,9 +775,10 @@ function AppContent() {
         }
 
         if (summary.failed > 0) {
-          const errorMessages = errors.map((e: any) =>
-            e.item?.type === 'batch' ? e.error : `${e.item.type} ${e.item.number}: ${e.error}`
-          ).join('\n');
+          const errorMessages = errors.map((e: any) => {
+            const base = e.item?.type === 'batch' ? e.error : `${e.item.type} ${e.item.number}: ${e.error}`;
+            return base;
+          }).join('\n');
           showAlert({
             title: summary.successful > 0 ? 'Some charges failed' : 'Charge declined',
             message: `Failed to charge ${summary.failed} item(s):\n\n${errorMessages}`

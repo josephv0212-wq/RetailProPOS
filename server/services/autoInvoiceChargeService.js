@@ -5,7 +5,7 @@
  */
 
 import { Customer, InvoicePayment } from '../models/index.js';
-import { chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles, searchAllCustomerProfilesByEmail } from './authorizeNetService.js';
+import { chargeCustomerProfile, getCustomerProfileDetails, extractPaymentProfiles } from './authorizeNetService.js';
 import { createCustomerPayment, createProcessingFeeJournal, createInvoice } from './zohoService.js';
 import { invalidatePaymentProfilesCacheServer } from '../controllers/customerController.js';
 
@@ -203,6 +203,16 @@ export const chargeInvoicesWithStoredPayment = async ({
   });
 
   if (!chargeResult.success) {
+    const gatewayDetails = {
+      responseCode: chargeResult.responseCode || null,
+      errorCode: chargeResult.errorCode || null,
+      gatewayCode: chargeResult.gatewayCode || null,
+      gatewayMessage: chargeResult.gatewayMessage || null,
+      gatewayErrorText: chargeResult.gatewayErrorText || null,
+      accountType: chargeResult.accountType || null,
+      avsResultCode: chargeResult.avsResultCode || null,
+      transactionId: chargeResult.transactionId || null
+    };
     return {
       success: false,
       results: [],
@@ -210,7 +220,8 @@ export const chargeInvoicesWithStoredPayment = async ({
         item: { type: 'batch', id: '', number: 'Multi payment' },
         error: chargeResult.error || 'Transaction declined',
         errorCode: chargeResult.errorCode,
-        responseCode: chargeResult.responseCode
+        responseCode: chargeResult.responseCode,
+        gatewayDetails
       }],
       summary: { total: validatedItems.length, successful: 0, failed: validatedItems.length },
       error: chargeResult.error || 'Charge declined'

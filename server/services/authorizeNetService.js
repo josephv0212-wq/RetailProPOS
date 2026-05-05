@@ -1346,11 +1346,18 @@ export const chargeCustomerProfile = async (paymentData) => {
     } else {
       const errorMessage = result?.errors?.[0]?.errorText || result?.messages?.[0]?.description || 'Transaction failed';
       const errorCode = result?.errors?.[0]?.errorCode;
+      const gatewayMessage = raw?.messages?.message?.[0]?.text || null;
+      const gatewayCode = raw?.messages?.message?.[0]?.code || null;
       
       // Provide more detailed error message for common decline reasons
       let detailedError = errorMessage;
       if (errorCode === '2') {
         detailedError = `Transaction declined by card issuer. ${errorMessage}${result?.avsResultCode ? ` AVS: ${result.avsResultCode}` : ''}${result?.accountType ? ` Card type: ${result.accountType}` : ''}`;
+      }
+      // eCheck generic code 128 often maps to an institution/bank-policy block.
+      // Use a clearer user-facing message consistent with Zoho while preserving gateway details.
+      if (errorCode === '128' && String(result?.accountType || '').toLowerCase() === 'echeck') {
+        detailedError = 'The financial institution does not currently allow transactions for this account.';
       }
       
       return {
@@ -1359,7 +1366,11 @@ export const chargeCustomerProfile = async (paymentData) => {
         errorCode: errorCode,
         responseCode: result?.responseCode,
         avsResultCode: result?.avsResultCode,
-        accountType: result?.accountType
+        accountType: result?.accountType,
+        transactionId: result?.transId || null,
+        gatewayMessage,
+        gatewayCode,
+        gatewayErrorText: result?.errors?.[0]?.errorText || null
       };
     }
   } catch (error) {
